@@ -40,7 +40,8 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import {IWETH9} from "./interfaces/IWETH9.sol";
-import {IJBRouterTerminal, PoolInfo} from "./interfaces/IJBRouterTerminal.sol";
+import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {PoolInfo} from "./structs/PoolInfo.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 
 /// @notice The `JBRouterTerminal` accepts any token and dynamically discovers what token each destination project

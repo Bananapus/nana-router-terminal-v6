@@ -2,14 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-
-/// @notice Describes a pool on either Uniswap V3 or V4.
-struct PoolInfo {
-    bool isV4;
-    IUniswapV3Pool v3Pool;
-    PoolKey v4Key;
-}
+import {PoolInfo} from "../structs/PoolInfo.sol";
 
 /// @notice A terminal that routes payments by discovering what token a project accepts and converting automatically.
 interface IJBRouterTerminal {
