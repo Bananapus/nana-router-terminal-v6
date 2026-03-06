@@ -6,12 +6,9 @@ import {Vm} from "forge-std/Vm.sol";
 
 import {SphinxConstants, NetworkInfo} from "@sphinx-labs/contracts/SphinxConstants.sol";
 
-import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
-import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalRegistry.sol";
-
 struct RouterTerminalDeployment {
-    IJBRouterTerminal terminal;
-    IJBRouterTerminalRegistry registry;
+    address terminal;
+    address registry;
 }
 
 library RouterTerminalDeploymentLib {
@@ -45,13 +42,11 @@ library RouterTerminalDeploymentLib {
         view
         returns (RouterTerminalDeployment memory deployment)
     {
-        deployment.terminal = IJBRouterTerminal(
-            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminal")
-        );
+        deployment.terminal =
+            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminal");
 
-        deployment.registry = IJBRouterTerminalRegistry(
-            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminalRegistry")
-        );
+        deployment.registry =
+            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminalRegistry");
     }
 
     /// @notice Get the address of a contract that was deployed by the Deploy script.
