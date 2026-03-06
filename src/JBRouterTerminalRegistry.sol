@@ -263,14 +263,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Lock a terminal for a project.
-    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_SWAP_TERMINAL` permission can lock.
+    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.
     /// @param projectId The ID of the project to lock the terminal for.
     function lockTerminalFor(uint256 projectId) external {
         // Enforce permissions.
         _requirePermissionFrom({
             account: PROJECTS.ownerOf(projectId),
             projectId: projectId,
-            permissionId: JBPermissionIds.SET_SWAP_TERMINAL
+            permissionId: JBPermissionIds.SET_ROUTER_TERMINAL
         });
 
         // Require a non-zero terminal before locking.
@@ -356,7 +356,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Set the terminal for a project.
-    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_SWAP_TERMINAL` permission can set.
+    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can set.
     /// @param projectId The ID of the project to set the terminal for.
     /// @param terminal The terminal to set for the project.
     function setTerminalFor(uint256 projectId, IJBTerminal terminal) external {
@@ -369,7 +369,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         _requirePermissionFrom({
             account: PROJECTS.ownerOf(projectId),
             projectId: projectId,
-            permissionId: JBPermissionIds.SET_SWAP_TERMINAL
+            permissionId: JBPermissionIds.SET_ROUTER_TERMINAL
         });
 
         _terminalOf[projectId] = terminal;

@@ -129,7 +129,7 @@ contract RouterTerminalRegistryTest is Test {
                 projectOwner,
                 projectOwner,
                 projectId,
-                JBPermissionIds.SET_SWAP_TERMINAL,
+                JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
             ),
@@ -156,7 +156,7 @@ contract RouterTerminalRegistryTest is Test {
                 projectOwner,
                 projectOwner,
                 projectId,
-                JBPermissionIds.SET_SWAP_TERMINAL,
+                JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
             ),
@@ -185,7 +185,7 @@ contract RouterTerminalRegistryTest is Test {
                 projectOwner,
                 projectOwner,
                 projectId,
-                JBPermissionIds.SET_SWAP_TERMINAL,
+                JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
             ),
@@ -223,7 +223,7 @@ contract RouterTerminalRegistryTest is Test {
                 projectOwner,
                 projectOwner,
                 projectId,
-                JBPermissionIds.SET_SWAP_TERMINAL,
+                JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
             ),
@@ -247,7 +247,7 @@ contract RouterTerminalRegistryTest is Test {
                 projectOwner,
                 projectOwner,
                 projectId,
-                JBPermissionIds.SET_SWAP_TERMINAL,
+                JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
             ),
