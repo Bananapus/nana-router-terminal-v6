@@ -26,7 +26,8 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
-import {IJBRouterTerminal, PoolInfo} from "../src/interfaces/IJBRouterTerminal.sol";
+import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
+import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
 /// @notice A harness that exposes internal functions for testing.
