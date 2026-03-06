@@ -1,0 +1,466 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.26;
+
+import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+
+import {Context} from "@openzeppelin/contracts/utils/Context.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
+import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
+
+import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+
+contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
+    // A library that adds default safety checks to ERC20 functionality.
+    using SafeERC20 for IERC20;
+
+    //*********************************************************************//
+    // --------------------------- custom errors ------------------------- //
+    //*********************************************************************//
+
+    error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
+    error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
+    error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
+    error JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal);
+    error JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId);
+
+    //*********************************************************************//
+    // -------------------- public immutable properties ------------------ //
+    //*********************************************************************//
+
+    /// @notice The project registry.
+    IJBProjects public immutable override PROJECTS;
+
+    /// @notice The permit2 utility.
+    IPermit2 public immutable override PERMIT2;
+
+    //*********************************************************************//
+    // --------------------- public stored properties -------------------- //
+    //*********************************************************************//
+
+    /// @notice The default terminal to use.
+    IJBTerminal public override defaultTerminal;
+
+    /// @notice Whether the terminal for the given project is locked.
+    /// @custom:param projectId The ID of the project to get the locked terminal for.
+    mapping(uint256 projectId => bool) public override hasLockedTerminal;
+
+    /// @notice Whether the given terminal is allowed to be set for projects.
+    /// @custom:param terminal The terminal to check.
+    mapping(IJBTerminal terminal => bool) public override isTerminalAllowed;
+
+    //*********************************************************************//
+    // --------------------- internal stored properties ------------------ //
+    //*********************************************************************//
+
+    /// @notice The terminal explicitly set for the given project.
+    /// @custom:param projectId The ID of the project to get the terminal for.
+    mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
+
+    //*********************************************************************//
+    // ---------------------------- constructor -------------------------- //
+    //*********************************************************************//
+
+    /// @param permissions The permissions contract.
+    /// @param projects The project registry.
+    /// @param permit2 The permit2 utility.
+    /// @param owner The owner of the contract.
+    /// @param trustedForwarder The trusted forwarder for the contract.
+    constructor(
+        IJBPermissions permissions,
+        IJBProjects projects,
+        IPermit2 permit2,
+        address owner,
+        address trustedForwarder
+    )
+        JBPermissioned(permissions)
+        ERC2771Context(trustedForwarder)
+        Ownable(owner)
+    {
+        PROJECTS = projects;
+        PERMIT2 = permit2;
+    }
+
+    //*********************************************************************//
+    // ------------------------- external views -------------------------- //
+    //*********************************************************************//
+
+    /// @notice The terminal for the given project, or the default terminal if none is set.
+    /// @param projectId The ID of the project to get the terminal for.
+    /// @return terminal The terminal for the project.
+    function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
+        terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+    }
+
+    /// @notice Get the accounting context for the specified project ID and token.
+    /// @param projectId The ID of the project to get the accounting context for.
+    /// @param token The address of the token to get the accounting context for.
+    /// @return context A `JBAccountingContext` containing the accounting context for the project ID and token.
+    function accountingContextForTokenOf(
+        uint256 projectId,
+        address token
+    )
+        external
+        view
+        override
+        returns (JBAccountingContext memory context)
+    {
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+
+        // Get the accounting context for the token.
+        return terminal.accountingContextForTokenOf({projectId: projectId, token: token});
+    }
+
+    /// @notice Return all the accounting contexts for a specified project ID.
+    /// @param projectId The ID of the project to get the accounting contexts for.
+    /// @return contexts An array of `JBAccountingContext` containing the accounting contexts for the project ID.
+    function accountingContextsOf(uint256 projectId)
+        external
+        view
+        override
+        returns (JBAccountingContext[] memory contexts)
+    {
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+
+        // Get the accounting contexts.
+        return terminal.accountingContextsOf(projectId);
+    }
+
+    /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
+    function currentSurplusOf(
+        uint256 projectId,
+        JBAccountingContext[] memory accountingContexts,
+        uint256 decimals,
+        uint256 currency
+    )
+        external
+        view
+        override
+        returns (uint256)
+    {}
+
+    //*********************************************************************//
+    // -------------------------- public views --------------------------- //
+    //*********************************************************************//
+
+    function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
+        return interfaceId == type(IJBRouterTerminalRegistry).interfaceId
+            || interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    //*********************************************************************//
+    // -------------------------- internal views ------------------------- //
+    //*********************************************************************//
+
+    /// @dev `ERC-2771` specifies the context as being a single address (20 bytes).
+    function _contextSuffixLength() internal view override(ERC2771Context, Context) returns (uint256) {
+        return super._contextSuffixLength();
+    }
+
+    /// @notice The calldata. Preferred to use over `msg.data`.
+    /// @return calldata The `msg.data` of this call.
+    function _msgData() internal view override(ERC2771Context, Context) returns (bytes calldata) {
+        return ERC2771Context._msgData();
+    }
+
+    /// @notice The message's sender. Preferred to use over `msg.sender`.
+    /// @return sender The address which sent this call.
+    function _msgSender() internal view override(ERC2771Context, Context) returns (address sender) {
+        return ERC2771Context._msgSender();
+    }
+
+    //*********************************************************************//
+    // ---------------------- external transactions ---------------------- //
+    //*********************************************************************//
+
+    /// @notice Empty implementation to satisfy the interface.
+    function addAccountingContextsFor(
+        uint256 projectId,
+        JBAccountingContext[] calldata accountingContexts
+    )
+        external
+        override
+    {}
+
+    /// @notice Accepts funds for a given project and adds them to the project's balance in the resolved terminal.
+    /// @param projectId The ID of the project for which funds are being accepted.
+    /// @param token The address of the token being paid in.
+    /// @param amount The amount of tokens being paid in.
+    /// @param shouldReturnHeldFees A boolean to indicate whether held fees should be returned.
+    /// @param memo A memo to pass along to the emitted event.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    function addToBalanceOf(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        bool shouldReturnHeldFees,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        payable
+        override
+    {
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+
+        // Accept the funds for the token.
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+
+        // Trigger any pre-transfer logic.
+        uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
+
+        // Forward to the resolved terminal.
+        terminal.addToBalanceOf{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            shouldReturnHeldFees: shouldReturnHeldFees,
+            memo: memo,
+            metadata: metadata
+        });
+    }
+
+    /// @notice Allow a terminal.
+    /// @dev Only the owner can allow a terminal.
+    /// @param terminal The terminal to allow.
+    function allowTerminal(IJBTerminal terminal) external onlyOwner {
+        isTerminalAllowed[terminal] = true;
+
+        emit JBRouterTerminalRegistry_AllowTerminal(terminal);
+    }
+
+    /// @notice Disallow a terminal.
+    /// @dev Only the owner can disallow a terminal.
+    /// @param terminal The terminal to disallow.
+    function disallowTerminal(IJBTerminal terminal) external onlyOwner {
+        isTerminalAllowed[terminal] = false;
+
+        // Clear default terminal if it matches the terminal being disallowed.
+        if (defaultTerminal == terminal) defaultTerminal = IJBTerminal(address(0));
+
+        emit JBRouterTerminalRegistry_DisallowTerminal(terminal);
+    }
+
+    /// @notice Lock a terminal for a project.
+    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_SWAP_TERMINAL` permission can lock.
+    /// @param projectId The ID of the project to lock the terminal for.
+    function lockTerminalFor(uint256 projectId) external {
+        // Enforce permissions.
+        _requirePermissionFrom({
+            account: PROJECTS.ownerOf(projectId),
+            projectId: projectId,
+            permissionId: JBPermissionIds.SET_SWAP_TERMINAL
+        });
+
+        // Require a non-zero terminal before locking.
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) {
+            terminal = defaultTerminal;
+            if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
+            _terminalOf[projectId] = terminal;
+        }
+
+        hasLockedTerminal[projectId] = true;
+
+        emit JBRouterTerminalRegistry_LockTerminal(projectId);
+    }
+
+    /// @notice Empty implementation to satisfy the interface.
+    function migrateBalanceOf(
+        uint256 projectId,
+        address token,
+        IJBTerminal to
+    )
+        external
+        override
+        returns (uint256 balance)
+    {}
+
+    /// @notice Pay a project by forwarding the payment to the resolved terminal.
+    /// @param projectId The ID of the project being paid.
+    /// @param token The address of the token being paid in.
+    /// @param amount The amount of tokens being paid in.
+    /// @param beneficiary The beneficiary address to pass along.
+    /// @param minReturnedTokens The minimum number of project tokens expected in return.
+    /// @param memo A memo to pass along to the emitted event.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    /// @return The number of tokens received.
+    function pay(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary,
+        uint256 minReturnedTokens,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        payable
+        virtual
+        override
+        returns (uint256)
+    {
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+
+        // Accept the funds for the token.
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+
+        // Trigger any pre-transfer logic.
+        uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
+
+        // Forward the payment to the terminal.
+        return terminal.pay{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: minReturnedTokens,
+            memo: memo,
+            metadata: metadata
+        });
+    }
+
+    /// @notice Set the default terminal.
+    /// @dev Only the owner can set the default terminal.
+    /// @param terminal The terminal to set as the default.
+    function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
+        defaultTerminal = terminal;
+
+        // Allow the default terminal.
+        isTerminalAllowed[terminal] = true;
+
+        emit JBRouterTerminalRegistry_SetDefaultTerminal(terminal);
+    }
+
+    /// @notice Set the terminal for a project.
+    /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_SWAP_TERMINAL` permission can set.
+    /// @param projectId The ID of the project to set the terminal for.
+    /// @param terminal The terminal to set for the project.
+    function setTerminalFor(uint256 projectId, IJBTerminal terminal) external {
+        // Make sure the terminal is not locked.
+        if (hasLockedTerminal[projectId]) revert JBRouterTerminalRegistry_TerminalLocked(projectId);
+
+        if (!isTerminalAllowed[terminal]) revert JBRouterTerminalRegistry_TerminalNotAllowed(terminal);
+
+        // Enforce permissions.
+        _requirePermissionFrom({
+            account: PROJECTS.ownerOf(projectId),
+            projectId: projectId,
+            permissionId: JBPermissionIds.SET_SWAP_TERMINAL
+        });
+
+        _terminalOf[projectId] = terminal;
+
+        emit JBRouterTerminalRegistry_SetTerminal(projectId, terminal);
+    }
+
+    //*********************************************************************//
+    // ---------------------- internal transactions ---------------------- //
+    //*********************************************************************//
+
+    /// @notice Accepts a token being paid in.
+    /// @param token The address of the token being paid in.
+    /// @param amount The amount of tokens being paid in.
+    /// @param metadata The metadata in which `permit2` context is provided.
+    /// @return amount The amount of tokens that have been accepted.
+    function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
+        // If native tokens are being paid in, return the `msg.value`.
+        if (token == JBConstants.NATIVE_TOKEN) return msg.value;
+
+        // Otherwise, the `msg.value` should be 0.
+        if (msg.value != 0) revert JBRouterTerminalRegistry_NoMsgValueAllowed(msg.value);
+
+        // Unpack the `JBSingleAllowance` to use given by the frontend.
+        (bool exists, bytes memory parsedMetadata) =
+            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("permit2"), metadata: metadata});
+
+        // If the metadata contained permit data, use it to set the allowance.
+        if (exists) {
+            // Keep a reference to the allowance context parsed from the metadata.
+            (JBSingleAllowance memory allowance) = abi.decode(parsedMetadata, (JBSingleAllowance));
+
+            // Make sure the permit allowance is enough for this payment.
+            if (amount > allowance.amount) {
+                revert JBRouterTerminalRegistry_PermitAllowanceNotEnough(amount, allowance.amount);
+            }
+
+            // Keep a reference to the permit rules.
+            IAllowanceTransfer.PermitSingle memory permitSingle = IAllowanceTransfer.PermitSingle({
+                details: IAllowanceTransfer.PermitDetails({
+                    token: token, amount: allowance.amount, expiration: allowance.expiration, nonce: allowance.nonce
+                }),
+                spender: address(this),
+                sigDeadline: allowance.sigDeadline
+            });
+
+            try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
+                catch {}
+        }
+
+        // Transfer the tokens from the `_msgSender()` to this terminal.
+        _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
+
+        return amount;
+    }
+
+    /// @notice Logic to be triggered before transferring tokens from this terminal.
+    /// @param to The address to transfer tokens to.
+    /// @param token The token being transferred.
+    /// @param amount The amount of tokens to transfer.
+    /// @return payValue The amount that'll be paid as a `msg.value`.
+    function _beforeTransferFor(address to, address token, uint256 amount) internal virtual returns (uint256) {
+        // If the token is the native token, return early.
+        if (token == JBConstants.NATIVE_TOKEN) return amount;
+
+        // Otherwise, set the appropriate allowance for the recipient.
+        IERC20(token).safeIncreaseAllowance(to, amount);
+
+        return 0;
+    }
+
+    /// @notice Transfers tokens.
+    /// @param from The address to transfer tokens from.
+    /// @param to The address to transfer tokens to.
+    /// @param token The address of the token being transferred.
+    /// @param amount The amount of tokens to transfer.
+    function _transferFrom(address from, address payable to, address token, uint256 amount) internal virtual {
+        if (from == address(this)) {
+            // If the token is native token, assume the `sendValue` standard.
+            if (token == JBConstants.NATIVE_TOKEN) return Address.sendValue(to, amount);
+
+            // If the transfer is from this terminal, use `safeTransfer`.
+            return IERC20(token).safeTransfer(to, amount);
+        }
+
+        // If there's sufficient approval, transfer normally.
+        if (IERC20(token).allowance({owner: address(from), spender: address(this)}) >= amount) {
+            return IERC20(token).safeTransferFrom(from, to, amount);
+        }
+
+        // Otherwise, attempt to use the `permit2` method.
+        PERMIT2.transferFrom(from, to, uint160(amount), token);
+    }
+}
