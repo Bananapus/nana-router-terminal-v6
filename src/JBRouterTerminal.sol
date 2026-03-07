@@ -71,6 +71,13 @@ contract JBRouterTerminal is
     /// @notice The default TWAP window used for auto-discovered pools.
     uint256 public constant DEFAULT_TWAP_WINDOW = 10 minutes;
 
+    /// @notice The denominator used for slippage tolerance basis points.
+    uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
+
+    //*********************************************************************//
+    // ---------------------- internal stored properties ----------------- //
+    //*********************************************************************//
+
     /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
     /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
     uint24[4] internal FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
@@ -78,9 +85,6 @@ contract JBRouterTerminal is
     /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
     uint24[4] internal V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
     int24[4] internal V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
-
-    /// @notice The denominator used for slippage tolerance basis points.
-    uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
