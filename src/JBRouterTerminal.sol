@@ -73,11 +73,11 @@ contract JBRouterTerminal is
 
     /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
     /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
-    uint24[4] public FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    uint24[4] internal FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
 
     /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
-    uint24[4] public V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-    int24[4] public V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
+    uint24[4] internal V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    int24[4] internal V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
 
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
@@ -614,39 +614,25 @@ contract JBRouterTerminal is
             if (liquidity > bestLiquidity) bestLiquidity = liquidity;
         }
 
-        // Search V4.
-        uint128 v4Best = _bestV4PoolLiquidity(tokenA, tokenB);
-        if (v4Best > bestLiquidity) bestLiquidity = v4Best;
-    }
-
-    /// @notice Find the highest liquidity across V4 vanilla pools for a token pair.
-    /// @param tokenA One token in the pair.
-    /// @param tokenB The other token in the pair.
-    /// @return bestLiquidity The highest liquidity found across V4 pools.
-    function _bestV4PoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
-        if (address(POOL_MANAGER) == address(0)) return 0;
-
-        // Convert WETH -> address(0) for V4 native ETH representation.
-        address v4A = tokenA == address(WETH) ? address(0) : tokenA;
-        address v4B = tokenB == address(WETH) ? address(0) : tokenB;
-
-        // Sort currencies (currency0 < currency1).
-        (address sorted0, address sorted1) = v4A < v4B ? (v4A, v4B) : (v4B, v4A);
-
-        for (uint256 i; i < 4; i++) {
-            PoolKey memory key = PoolKey({
-                currency0: Currency.wrap(sorted0),
-                currency1: Currency.wrap(sorted1),
-                fee: V4_FEES[i],
-                tickSpacing: V4_TICK_SPACINGS[i],
-                hooks: IHooks(address(0))
-            });
-
-            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-            if (sqrtPriceX96 == 0) continue;
-
-            uint128 liquidity = POOL_MANAGER.getLiquidity(key.toId());
-            if (liquidity > bestLiquidity) bestLiquidity = liquidity;
+        // Search V4 — reuse _discoverV4Pool with current best.
+        PoolInfo memory v4Result = _discoverV4Pool(
+            tokenA,
+            tokenB,
+            bestLiquidity,
+            PoolInfo({
+                isV4: false,
+                v3Pool: IUniswapV3Pool(address(0)),
+                v4Key: PoolKey({
+                    currency0: Currency.wrap(address(0)),
+                    currency1: Currency.wrap(address(0)),
+                    fee: 0,
+                    tickSpacing: 0,
+                    hooks: IHooks(address(0))
+                })
+            })
+        );
+        if (v4Result.isV4) {
+            bestLiquidity = POOL_MANAGER.getLiquidity(v4Result.v4Key.toId());
         }
     }
 
@@ -994,7 +980,17 @@ contract JBRouterTerminal is
 
             if (poolLiquidity > bestLiquidity) {
                 bestLiquidity = poolLiquidity;
-                bestPool = PoolInfo({isV4: false, v3Pool: IUniswapV3Pool(poolAddr), v4Key: _emptyPoolKey()});
+                bestPool = PoolInfo({
+                    isV4: false,
+                    v3Pool: IUniswapV3Pool(poolAddr),
+                    v4Key: PoolKey({
+                        currency0: Currency.wrap(address(0)),
+                        currency1: Currency.wrap(address(0)),
+                        fee: 0,
+                        tickSpacing: 0,
+                        hooks: IHooks(address(0))
+                    })
+                });
             }
         }
 
@@ -1307,17 +1303,6 @@ contract JBRouterTerminal is
 
         // Otherwise, attempt to use the `permit2` method.
         PERMIT2.transferFrom(from, to, uint160(amount), token);
-    }
-
-    /// @notice Returns an empty PoolKey for use in V3-only PoolInfo structs.
-    function _emptyPoolKey() internal pure returns (PoolKey memory) {
-        return PoolKey({
-            currency0: Currency.wrap(address(0)),
-            currency1: Currency.wrap(address(0)),
-            fee: 0,
-            tickSpacing: 0,
-            hooks: IHooks(address(0))
-        });
     }
 
     //*********************************************************************//
