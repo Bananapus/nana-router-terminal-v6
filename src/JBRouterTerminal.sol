@@ -80,11 +80,11 @@ contract JBRouterTerminal is
 
     /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
     /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
-    uint24[4] internal FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    uint24[4] internal _FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
 
     /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
-    uint24[4] internal V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-    int24[4] internal V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
+    uint24[4] internal _V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    int24[4] internal _V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -611,7 +611,7 @@ contract JBRouterTerminal is
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
         // Search V3.
         for (uint256 i; i < 4; i++) {
-            address poolAddr = FACTORY.getPool(tokenA, tokenB, FEE_TIERS[i]);
+            address poolAddr = FACTORY.getPool(tokenA, tokenB, _FEE_TIERS[i]);
             if (poolAddr == address(0)) continue;
 
             uint128 liquidity = IUniswapV3Pool(poolAddr).liquidity();
@@ -976,7 +976,7 @@ contract JBRouterTerminal is
 
         // Search V3.
         for (uint256 i; i < 4; i++) {
-            address poolAddr = FACTORY.getPool(normalizedTokenIn, normalizedTokenOut, FEE_TIERS[i]);
+            address poolAddr = FACTORY.getPool(normalizedTokenIn, normalizedTokenOut, _FEE_TIERS[i]);
 
             if (poolAddr == address(0)) continue;
 
@@ -1030,8 +1030,8 @@ contract JBRouterTerminal is
             PoolKey memory key = PoolKey({
                 currency0: Currency.wrap(sorted0),
                 currency1: Currency.wrap(sorted1),
-                fee: V4_FEES[i],
-                tickSpacing: V4_TICK_SPACINGS[i],
+                fee: _V4_FEES[i],
+                tickSpacing: _V4_TICK_SPACINGS[i],
                 hooks: IHooks(address(0))
             });
 
