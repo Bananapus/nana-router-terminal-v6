@@ -162,8 +162,7 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
-        (address tokenOut, IJBTerminal destTerminal) =
-            routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
+        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
 
         assertEq(tokenOut, tokenIn);
         assertEq(address(destTerminal), mockTerminal);
@@ -220,9 +219,7 @@ contract RouterTerminalTest is Test {
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
         contexts[0] =
             JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
-        vm.mockCall(
-            mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts)
-        );
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mock V3 pool discovery: pool exists at 0.3% fee tier with liquidity.
         vm.mockCall(
@@ -252,8 +249,7 @@ contract RouterTerminalTest is Test {
         // Mock V4 — no pools found (extsload returns 0 for all).
         _mockV4NoPools(tokenIn, acceptedToken);
 
-        (address tokenOut, IJBTerminal destTerminal) =
-            routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
+        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
 
         assertEq(tokenOut, acceptedToken);
         assertEq(address(destTerminal), mockTerminal);
@@ -297,11 +293,7 @@ contract RouterTerminalTest is Test {
         vm.etch(tokenIn, hex"00");
 
         // Not a JB token.
-        vm.mockCall(
-            address(mockTokens),
-            abi.encodeWithSelector(IJBTokens.projectIdOf.selector),
-            abi.encode(uint256(0))
-        );
+        vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
 
         // Project accepts tokenIn directly.
         vm.mockCall(
@@ -311,18 +303,14 @@ contract RouterTerminalTest is Test {
         );
 
         // Mock token transfer from payer.
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount)
-        );
+        vm.mockCall(tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
         vm.mockCall(
             tokenIn, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
         );
 
         // Mock safeIncreaseAllowance: allowance check + approve.
         vm.mockCall(
-            tokenIn,
-            abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)),
-            abi.encode(uint256(0))
+            tokenIn, abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)), abi.encode(uint256(0))
         );
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
 
@@ -414,9 +402,7 @@ contract RouterTerminalTest is Test {
         bytes memory data = abi.encode(uint256(1), tokenIn, tokenOut);
 
         vm.prank(fakePool);
-        vm.expectRevert(
-            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, fakePool)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, fakePool));
         routerTerminal.uniswapV3SwapCallback(int256(-200), int256(100), data);
     }
 
@@ -434,11 +420,7 @@ contract RouterTerminalTest is Test {
         vm.etch(tokenIn, hex"00");
 
         // Not a JB token.
-        vm.mockCall(
-            address(mockTokens),
-            abi.encodeWithSelector(IJBTokens.projectIdOf.selector),
-            abi.encode(uint256(0))
-        );
+        vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
 
         // Project accepts tokenIn.
         vm.mockCall(
@@ -448,18 +430,14 @@ contract RouterTerminalTest is Test {
         );
 
         // Mock token transfer.
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount)
-        );
+        vm.mockCall(tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
         vm.mockCall(
             tokenIn, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
         );
 
         // Mock safeIncreaseAllowance.
         vm.mockCall(
-            tokenIn,
-            abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)),
-            abi.encode(uint256(0))
+            tokenIn, abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)), abi.encode(uint256(0))
         );
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
 
@@ -492,9 +470,7 @@ contract RouterTerminalTest is Test {
 
         // Pool at 0.05% has higher liquidity.
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 500)),
-            abi.encode(pool500)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 500)), abi.encode(pool500)
         );
         vm.mockCall(pool500, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(500e18)));
 
@@ -530,9 +506,7 @@ contract RouterTerminalTest is Test {
         // No V4 pools.
         _mockV4NoPools(tokenA, tokenB);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB));
         routerTerminal.exposed_discoverPool(tokenA, tokenB);
     }
 
@@ -550,10 +524,7 @@ contract RouterTerminalTest is Test {
     //*********************************************************************//
 
     function test_migrateBalanceOf_returnsZero() public {
-        assertEq(
-            routerTerminal.migrateBalanceOf(1, makeAddr("token"), IJBTerminal(makeAddr("terminal"))),
-            0
-        );
+        assertEq(routerTerminal.migrateBalanceOf(1, makeAddr("token"), IJBTerminal(makeAddr("terminal"))), 0);
     }
 
     function test_addAccountingContextsFor_noOp() public {
@@ -573,9 +544,7 @@ contract RouterTerminalTest is Test {
 
         // V3 pool with moderate liquidity.
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)),
-            abi.encode(v3Pool)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)), abi.encode(v3Pool)
         );
         vm.mockCall(v3Pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(100e18)));
 
@@ -609,7 +578,7 @@ contract RouterTerminalTest is Test {
         PoolId v4Id = v4Key.toId();
 
         // Mock getSlot0 via extsload — pool exists (sqrtPriceX96 != 0).
-        _mockV4PoolExists(v4Id, uint160(79228162514264337593543950336), 500e18);
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 500e18);
 
         // Mock other V4 fee tiers as non-existent.
         _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
@@ -631,9 +600,7 @@ contract RouterTerminalTest is Test {
 
         // V3 pool with high liquidity.
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)),
-            abi.encode(v3Pool)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)), abi.encode(v3Pool)
         );
         vm.mockCall(v3Pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1000e18)));
 
@@ -665,7 +632,7 @@ contract RouterTerminalTest is Test {
         });
         PoolId v4Id = v4Key.toId();
 
-        _mockV4PoolExists(v4Id, uint160(79228162514264337593543950336), 50e18);
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 50e18);
 
         _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
@@ -699,7 +666,7 @@ contract RouterTerminalTest is Test {
         // First fee tier (3000/60) doesn't exist.
         _mockV4PoolNotExists(sorted0, sorted1, 3000, int24(60));
         // Second fee tier (500/10) exists.
-        _mockV4PoolExists(v4Id, uint160(79228162514264337593543950336), 200e18);
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 200e18);
         // Other tiers don't exist.
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
         _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
@@ -732,9 +699,7 @@ contract RouterTerminalTest is Test {
 
         // V3 pool exists.
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)),
-            abi.encode(v3Pool)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)), abi.encode(v3Pool)
         );
         vm.mockCall(v3Pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(100e18)));
 
@@ -797,7 +762,7 @@ contract RouterTerminalTest is Test {
             hooks: IHooks(address(0))
         });
         PoolId v4Id = v4Key.toId();
-        _mockV4PoolExists(v4Id, uint160(79228162514264337593543950336), 300e18);
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 300e18);
 
         _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
@@ -821,9 +786,7 @@ contract RouterTerminalTest is Test {
         // Pack slot0: sqrtPriceX96 (160 bits) | tick (24 bits) | protocolFee (24 bits) | lpFee (24 bits)
         bytes32 slot0Data = bytes32(uint256(sqrtPriceX96));
         vm.mockCall(
-            address(mockPoolManager),
-            abi.encodeWithSignature("extsload(bytes32)", stateSlot),
-            abi.encode(slot0Data)
+            address(mockPoolManager), abi.encodeWithSignature("extsload(bytes32)", stateSlot), abi.encode(slot0Data)
         );
 
         // Liquidity is at stateSlot + 3.
@@ -848,9 +811,7 @@ contract RouterTerminalTest is Test {
         bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(id), bytes32(uint256(6))));
 
         vm.mockCall(
-            address(mockPoolManager),
-            abi.encodeWithSignature("extsload(bytes32)", stateSlot),
-            abi.encode(bytes32(0))
+            address(mockPoolManager), abi.encodeWithSignature("extsload(bytes32)", stateSlot), abi.encode(bytes32(0))
         );
     }
 

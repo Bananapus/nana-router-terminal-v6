@@ -45,9 +45,8 @@ library RouterTerminalDeploymentLib {
         view
         returns (RouterTerminalDeployment memory deployment)
     {
-        deployment.terminal = IJBRouterTerminal(
-            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminal")
-        );
+        deployment.terminal =
+            IJBRouterTerminal(_getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminal"));
 
         deployment.registry = IJBRouterTerminalRegistry(
             _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminalRegistry")
