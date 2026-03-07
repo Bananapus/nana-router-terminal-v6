@@ -1,6 +1,6 @@
 {
   "name": "@bananapus/router-terminal-v6",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,15 +16,19 @@
     "deploy:testnets": "source ./.env && npx sphinx propose ./script/Deploy.s.sol --networks testnets",
     "artifacts": "source ./.env && npx sphinx artifacts --org-id 'ea165b21-7cdc-4d7b-be59-ecdd4c26bee4' --project-name 'nana-router-terminal-v6'"
   },
+  "files": [
+    "script/helpers/",
+    "deployments/"
+  ],
   "dependencies": {
     "@bananapus/core-v6": "^0.0.4",
-    "@openzeppelin/contracts": "^5.2.0",
+    "@openzeppelin/contracts": "^5.2.0"
+  },
+  "devDependencies": {
+    "@sphinx-labs/plugins": "^0.33.2",
     "@uniswap/permit2": "github:Uniswap/permit2",
     "@uniswap/v3-core": "github:Uniswap/v3-core#0.8",
     "@uniswap/v3-periphery": "github:Uniswap/v3-periphery#0.8",
     "@uniswap/v4-core": "^1.0.0"
-  },
-  "devDependencies": {
-    "@sphinx-labs/plugins": "^0.33.2"
   }
 }
