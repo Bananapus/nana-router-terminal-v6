@@ -16,7 +16,7 @@ _If you're having trouble understanding this contract, take a look at the [core 
 1. A payer calls `pay(projectId, token, amount, ...)` with any token.
 2. The terminal accepts the token (supports ERC-20 approvals and Permit2).
 3. It discovers the destination project's accepted token by querying the directory.
-4. If the input token differs from the accepted token, it finds the best pool across Uniswap V3 and V4, comparing multiple fee tiers.
+4. If the input token differs from the accepted token, it converts it — by cashing out JB project tokens, swapping through the best Uniswap V3 or V4 pool across multiple fee tiers, or both.
 5. Slippage protection: the caller can pass a minimum output quote in metadata (`quoteForSwap` key), or the terminal calculates one from the pool's TWAP oracle with dynamic slippage tolerance.
 6. The output tokens are forwarded to the project's primary terminal via `terminal.pay(...)` or `terminal.addToBalanceOf(...)`.
 
