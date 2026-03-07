@@ -1,4 +1,4 @@
-# nana-router-terminal-v6
+# Juicebox Router Terminal
 
 A Juicebox terminal that accepts payments in any token, dynamically discovers what token each destination project accepts, and routes the payment there -- via direct forwarding, Uniswap swap, JB token cashout, or a combination. Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
 

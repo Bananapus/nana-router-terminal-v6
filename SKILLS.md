@@ -1,4 +1,4 @@
-# nana-router-terminal-v6
+# Juicebox Router Terminal
 
 ## Purpose
 
