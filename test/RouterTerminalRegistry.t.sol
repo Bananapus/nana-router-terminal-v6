@@ -256,9 +256,7 @@ contract RouterTerminalRegistryTest is Test {
 
         vm.prank(projectOwner);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalNotSet.selector, projectId
-            )
+            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalNotSet.selector, projectId)
         );
         registry.lockTerminalFor(projectId);
     }
@@ -283,11 +281,7 @@ contract RouterTerminalRegistryTest is Test {
         registry.setDefaultTerminal(terminalA);
 
         // Mock the terminal's pay to return 100.
-        vm.mockCall(
-            address(terminalA),
-            abi.encodeWithSelector(IJBTerminal.pay.selector),
-            abi.encode(uint256(100))
-        );
+        vm.mockCall(address(terminalA), abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(100)));
 
         // Send native tokens.
         vm.deal(address(this), 1 ether);
@@ -313,11 +307,7 @@ contract RouterTerminalRegistryTest is Test {
         registry.setDefaultTerminal(terminalA);
 
         // Mock the terminal's addToBalanceOf.
-        vm.mockCall(
-            address(terminalA),
-            abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector),
-            abi.encode()
-        );
+        vm.mockCall(address(terminalA), abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector), abi.encode());
 
         // Send native tokens.
         vm.deal(address(this), 1 ether);

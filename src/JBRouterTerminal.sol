@@ -402,9 +402,7 @@ contract JBRouterTerminal is
         BalanceDelta delta = POOL_MANAGER.swap({
             key: key,
             params: SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: amountSpecified,
-                sqrtPriceLimitX96: sqrtPriceLimitX96
+                zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
             }),
             hookData: ""
         });
@@ -462,10 +460,8 @@ contract JBRouterTerminal is
         // Check for credit source override.
         uint256 sourceProjectIdOverride;
         {
-            (bool creditExists, bytes memory creditData) = JBMetadataResolver.getDataFor({
-                id: JBMetadataResolver.getId("cashOutSource"),
-                metadata: metadata
-            });
+            (bool creditExists, bytes memory creditData) =
+                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
             if (creditExists) {
                 (sourceProjectIdOverride,) = abi.decode(creditData, (uint256, uint256));
             }
@@ -501,11 +497,7 @@ contract JBRouterTerminal is
 
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
         amountOut = _convert({
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            amount: amount,
-            projectId: destProjectId,
-            metadata: metadata
+            tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata
         });
     }
 
@@ -527,10 +519,8 @@ contract JBRouterTerminal is
     {
         // 1. Metadata override — payer specifies tokenOut explicitly.
         {
-            (bool exists, bytes memory routeData) = JBMetadataResolver.getDataFor({
-                id: JBMetadataResolver.getId("routeTokenOut"),
-                metadata: metadata
-            });
+            (bool exists, bytes memory routeData) =
+                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
             if (exists) {
                 (tokenOut) = abi.decode(routeData, (address));
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
@@ -694,13 +684,10 @@ contract JBRouterTerminal is
         }
 
         // Different tokens — swap via Uniswap (V3 or V4).
-        return _handleSwap({
-            projectId: projectId,
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            amount: amount,
-            metadata: metadata
-        });
+        return
+            _handleSwap({
+                projectId: projectId, tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata
+            });
     }
 
     /// @notice Execute a Uniswap swap from tokenIn to tokenOut (V3 or V4).
@@ -822,13 +809,10 @@ contract JBRouterTerminal is
         address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
         bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
 
-        uint160 sqrtPriceLimitX96 = zeroForOne
-            ? TickMath.MIN_SQRT_RATIO + 1
-            : TickMath.MAX_SQRT_RATIO - 1;
+        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
 
-        bytes memory result = POOL_MANAGER.unlock(
-            abi.encode(key, zeroForOne, int256(amount), sqrtPriceLimitX96, minAmountOut)
-        );
+        bytes memory result =
+            POOL_MANAGER.unlock(abi.encode(key, zeroForOne, int256(amount), sqrtPriceLimitX96, minAmountOut));
 
         amountOut = abi.decode(result, (uint256));
     }
@@ -879,10 +863,8 @@ contract JBRouterTerminal is
         pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
 
         // Check for a user-provided quote.
-        (bool exists, bytes memory quote) = JBMetadataResolver.getDataFor({
-            id: JBMetadataResolver.getId("quoteForSwap"),
-            metadata: metadata
-        });
+        (bool exists, bytes memory quote) =
+            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("quoteForSwap"), metadata: metadata});
 
         if (exists) {
             (minAmountOut) = abi.decode(quote, (uint256));
@@ -981,10 +963,7 @@ contract JBRouterTerminal is
 
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
         minAmountOut = OracleLibrary.getQuoteAtTick({
-            tick: tick,
-            baseAmount: uint128(amount),
-            baseToken: normalizedTokenIn,
-            quoteToken: normalizedTokenOut
+            tick: tick, baseAmount: uint128(amount), baseToken: normalizedTokenIn, quoteToken: normalizedTokenOut
         });
 
         minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
@@ -1235,20 +1214,15 @@ contract JBRouterTerminal is
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // Check for credit cash-out metadata.
         {
-            (bool creditExists, bytes memory creditData) = JBMetadataResolver.getDataFor({
-                id: JBMetadataResolver.getId("cashOutSource"),
-                metadata: metadata
-            });
+            (bool creditExists, bytes memory creditData) =
+                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
 
             if (creditExists) {
                 (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
                 // Pull credits from the payer.
                 TOKENS.transferCreditsFrom({
-                    holder: _msgSender(),
-                    projectId: sourceProjectId,
-                    recipient: address(this),
-                    count: creditAmount
+                    holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
                 });
 
                 return creditAmount;
