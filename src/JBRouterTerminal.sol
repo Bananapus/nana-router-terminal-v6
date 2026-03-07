@@ -575,6 +575,7 @@ contract JBRouterTerminal is
         bool hasFallback;
 
         for (uint256 i; i < terminals.length; i++) {
+            // slither-disable-next-line calls-loop
             JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
 
             for (uint256 j; j < contexts.length; j++) {
@@ -611,9 +612,11 @@ contract JBRouterTerminal is
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
         // Search V3.
         for (uint256 i; i < 4; i++) {
+            // slither-disable-next-line calls-loop
             address poolAddr = FACTORY.getPool(tokenA, tokenB, _FEE_TIERS[i]);
             if (poolAddr == address(0)) continue;
 
+            // slither-disable-next-line calls-loop
             uint128 liquidity = IUniswapV3Pool(poolAddr).liquidity();
             if (liquidity > bestLiquidity) bestLiquidity = liquidity;
         }
@@ -811,11 +814,13 @@ contract JBRouterTerminal is
     function _settleV4(Currency currency, uint256 amount) internal {
         if (Currency.unwrap(currency) == address(0)) {
             // Native ETH: contract already holds raw ETH.
+            // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {
             // ERC20: sync then transfer then settle.
             POOL_MANAGER.sync(currency);
             IERC20(Currency.unwrap(currency)).safeTransfer(address(POOL_MANAGER), amount);
+            // slither-disable-next-line unused-return
             POOL_MANAGER.settle();
         }
     }
@@ -935,6 +940,7 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut)
     {
         PoolId id = key.toId();
+        // slither-disable-next-line unused-return
         (, int24 tick,,) = POOL_MANAGER.getSlot0(id);
         uint128 liquidity = POOL_MANAGER.getLiquidity(id);
 
@@ -976,10 +982,12 @@ contract JBRouterTerminal is
 
         // Search V3.
         for (uint256 i; i < 4; i++) {
+            // slither-disable-next-line calls-loop
             address poolAddr = FACTORY.getPool(normalizedTokenIn, normalizedTokenOut, _FEE_TIERS[i]);
 
             if (poolAddr == address(0)) continue;
 
+            // slither-disable-next-line calls-loop
             uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
 
             if (poolLiquidity > bestLiquidity) {
@@ -1035,9 +1043,11 @@ contract JBRouterTerminal is
                 hooks: IHooks(address(0))
             });
 
+            // slither-disable-next-line unused-return,calls-loop
             (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
             if (sqrtPriceX96 == 0) continue;
 
+            // slither-disable-next-line calls-loop
             uint128 poolLiquidity = POOL_MANAGER.getLiquidity(key.toId());
             if (poolLiquidity > currentBestLiquidity) {
                 currentBestLiquidity = poolLiquidity;
@@ -1099,6 +1109,7 @@ contract JBRouterTerminal is
         while (true) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
+                // slither-disable-next-line calls-loop
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
                 if (address(destTerminal) != address(0)) {
                     return (destTerminal, token, amount);
@@ -1106,6 +1117,7 @@ contract JBRouterTerminal is
             }
 
             // Use the override if provided, otherwise look up the project ID from the token.
+            // slither-disable-next-line calls-loop
             uint256 sourceProjectId =
                 sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
 
@@ -1119,6 +1131,7 @@ contract JBRouterTerminal is
                 _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
             // Cash out the source project's tokens.
+            // slither-disable-next-line calls-loop
             amount = cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
@@ -1155,11 +1168,13 @@ contract JBRouterTerminal is
         address baseFallbackToken;
         IJBCashOutTerminal baseFallbackTerminal;
 
+        // slither-disable-next-line calls-loop
         IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(sourceProjectId);
 
         for (uint256 i; i < terminals.length; i++) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
             {
+                // slither-disable-next-line calls-loop
                 try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                     bool supported
                 ) {
@@ -1170,6 +1185,7 @@ contract JBRouterTerminal is
             }
 
             IJBCashOutTerminal terminal = IJBCashOutTerminal(address(terminals[i]));
+            // slither-disable-next-line calls-loop
             JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(sourceProjectId);
 
             for (uint256 j; j < contexts.length; j++) {
@@ -1177,6 +1193,7 @@ contract JBRouterTerminal is
 
                 // Priority 1: Does the destination project directly accept this token?
                 {
+                    // slither-disable-next-line calls-loop
                     IJBTerminal destTerminal =
                         DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
                     if (address(destTerminal) != address(0)) {
@@ -1186,6 +1203,7 @@ contract JBRouterTerminal is
 
                 // Priority 2: Is this a JB project token (so we can recurse)?
                 if (address(fallbackTerminal) == address(0) && contextToken != JBConstants.NATIVE_TOKEN) {
+                    // slither-disable-next-line calls-loop
                     if (TOKENS.projectIdOf(IJBToken(contextToken)) != 0) {
                         fallbackToken = contextToken;
                         fallbackTerminal = terminal;
@@ -1258,6 +1276,7 @@ contract JBRouterTerminal is
                 sigDeadline: allowance.sigDeadline
             });
 
+            // slither-disable-next-line reentrancy-events
             try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 emit Permit2AllowanceFailed(token, _msgSender(), reason);
