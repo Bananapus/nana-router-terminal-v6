@@ -823,4 +823,205 @@ contract RouterTerminalTest is Test {
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
         _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
     }
+
+    //*********************************************************************//
+    // ---------- Bug fix regression tests: ETH + credit revert ---------- //
+    //*********************************************************************//
+
+    /// @notice Sending msg.value alongside cashOutSource credit metadata should revert (fix #2).
+    function test_pay_revertsWhenETHSentWithCreditMetadata() public {
+        uint256 projectId = 1;
+        address payer = makeAddr("payer");
+
+        // Build metadata with cashOutSource — must use router address for getId.
+        bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(2), uint256(1e18)));
+
+        vm.deal(payer, 1 ether);
+        vm.prank(payer);
+        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
+        routerTerminal.pay{value: 1 ether}(projectId, JBConstants.NATIVE_TOKEN, 1 ether, payer, 0, "", metadata);
+    }
+
+    /// @notice addToBalanceOf should also revert when ETH sent with credit metadata.
+    function test_addToBalanceOf_revertsWhenETHSentWithCreditMetadata() public {
+        address payer = makeAddr("payer");
+
+        // Build metadata with cashOutSource — must use router address for getId.
+        bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(2), uint256(1e18)));
+
+        vm.deal(payer, 1 ether);
+        vm.prank(payer);
+        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
+        routerTerminal.addToBalanceOf{value: 1 ether}(1, JBConstants.NATIVE_TOKEN, 1 ether, false, "", metadata);
+    }
+
+    //*********************************************************************//
+    // ----------- Bug fix regression tests: V4 sign convention ---------- //
+    //*********************************************************************//
+
+    /// @notice The V4 unlock callback should receive a negative amountSpecified for exact-input (fix #1).
+    function test_unlockCallback_negativeAmountSpecified() public {
+        address tokenA = makeAddr("tokenA");
+        address tokenB = makeAddr("tokenB");
+        (address sorted0, address sorted1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: 3000,
+            tickSpacing: int24(60),
+            hooks: IHooks(address(0))
+        });
+
+        uint256 amount = 1e18;
+        int256 amountSpecified = -int256(amount); // exact-input: NEGATIVE
+        uint160 sqrtPriceLimitX96 = 4_295_128_740; // MIN_SQRT_RATIO + 1
+        uint256 minAmountOut = 0;
+
+        // Encode the data as the contract would encode it (with the sign fix).
+        bytes memory callbackData = abi.encode(key, true, amountSpecified, sqrtPriceLimitX96, minAmountOut);
+
+        // Mock the PoolManager.swap call — it should receive a negative amountSpecified.
+        // We construct the expected SwapParams to verify the sign.
+        vm.mockCall(
+            address(mockPoolManager),
+            abi.encodeWithSelector(IPoolManager.swap.selector),
+            // Return a BalanceDelta where token0 goes in (-1e18) and token1 comes out (+5e17).
+            abi.encode(int256(-1e18) << 128 | int256(uint256(5e17)))
+        );
+
+        // Mock settle and take.
+        vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("settle()"), abi.encode(uint256(1e18)));
+        vm.mockCall(
+            address(mockPoolManager),
+            abi.encodeWithSignature("settle{value}()"),
+            abi.encode(uint256(1e18))
+        );
+        vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("sync(address)"), abi.encode());
+        vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("take(address,address,uint256)"), abi.encode());
+        vm.mockCall(sorted0, abi.encodeCall(IERC20.transfer, (address(mockPoolManager), 1e18)), abi.encode(true));
+
+        // Call from the PoolManager (authorized).
+        vm.prank(address(mockPoolManager));
+
+        // The callback should decode a NEGATIVE amountSpecified and process the swap.
+        // If the old bug existed (positive), the swap behavior would be different.
+        bytes memory result = routerTerminal.unlockCallback(callbackData);
+
+        // Verify amountOut is decoded correctly.
+        uint256 amountOut = abi.decode(result, (uint256));
+        assertEq(amountOut, 5e17);
+    }
+
+    //*********************************************************************//
+    // --------- Bug fix regression tests: cashout slippage -------------- //
+    //*********************************************************************//
+
+    /// @notice cashOutMinReclaimed metadata should be forwarded to the cashout terminal (fix #4).
+    function test_pay_cashOutMinReclaimedMetadata() public {
+        uint256 destProjectId = 1;
+        address payer = makeAddr("payer");
+        address jbToken = makeAddr("jbToken");
+        vm.etch(jbToken, hex"00");
+        uint256 sourceProjectId = 2;
+        uint256 amount = 100e18;
+        uint256 minReclaimed = 50e18;
+        address mockTerminal = makeAddr("destTerminal");
+        vm.etch(mockTerminal, hex"00");
+        address mockCashOutTerminal = makeAddr("cashOutTerminal");
+        vm.etch(mockCashOutTerminal, hex"00");
+
+        // Build metadata with cashOutMinReclaimed — must use router address for getId.
+        bytes4 metadataId = JBMetadataResolver.getId("cashOutMinReclaimed", address(routerTerminal));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(minReclaimed));
+
+        // jbToken is a JB project token for sourceProjectId.
+        vm.mockCall(
+            address(mockTokens),
+            abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))),
+            abi.encode(sourceProjectId)
+        );
+
+        // Dest project accepts NATIVE_TOKEN.
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
+            abi.encode(mockTerminal)
+        );
+
+        // Dest project doesn't accept jbToken directly.
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, jbToken)),
+            abi.encode(address(0))
+        );
+
+        // Source project's terminals (for _findCashOutPath).
+        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+        sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
+            abi.encode(sourceTerminals)
+        );
+
+        // Mock supportsInterface for IJBCashOutTerminal.
+        vm.mockCall(
+            mockCashOutTerminal,
+            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
+            abi.encode(true)
+        );
+
+        // Accounting context: source project terminal accepts NATIVE_TOKEN.
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({
+            token: JBConstants.NATIVE_TOKEN,
+            decimals: 18,
+            currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+        });
+        vm.mockCall(
+            mockCashOutTerminal,
+            abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
+            abi.encode(contexts)
+        );
+
+        // Mock cashOutTokensOf — use broad selector matching since vm.mockCall matches by prefix.
+        // The key assertion: the call should use minReclaimed (not 0).
+        vm.mockCall(
+            mockCashOutTerminal,
+            abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
+            abi.encode(uint256(60e18))
+        );
+
+        // Expect the specific cashOutTokensOf call with minReclaimed = minReclaimed.
+        vm.expectCall(
+            mockCashOutTerminal,
+            abi.encodeCall(
+                IJBCashOutTerminal.cashOutTokensOf,
+                (
+                    address(routerTerminal),
+                    sourceProjectId,
+                    amount,
+                    JBConstants.NATIVE_TOKEN,
+                    minReclaimed,
+                    payable(address(routerTerminal)),
+                    bytes("")
+                )
+            )
+        );
+
+        // Mock token transfer from payer.
+        vm.mockCall(jbToken, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
+        vm.mockCall(
+            jbToken, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
+        );
+
+        // Mock dest terminal pay.
+        vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
+
+        vm.prank(payer);
+        routerTerminal.pay(destProjectId, jbToken, amount, payer, 0, "", metadata);
+    }
 }

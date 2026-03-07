@@ -483,7 +483,8 @@ contract JBRouterTerminal is
                 destProjectId: destProjectId,
                 token: tokenIn,
                 amount: amount,
-                sourceProjectIdOverride: sourceProjectIdOverride
+                sourceProjectIdOverride: sourceProjectIdOverride,
+                metadata: metadata
             });
 
             // If the cashout loop found a terminal that accepts the reclaimed token, we're done.
@@ -711,6 +712,12 @@ contract JBRouterTerminal is
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
         });
 
+        // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
+        // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
+        if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance != 0) {
+            WETH.deposit{value: address(this).balance}();
+        }
+
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
 
@@ -804,8 +811,9 @@ contract JBRouterTerminal is
 
         uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
 
+        // V4 sign convention: negative = exact input, positive = exact output.
         bytes memory result =
-            POOL_MANAGER.unlock(abi.encode(key, zeroForOne, int256(amount), sqrtPriceLimitX96, minAmountOut));
+            POOL_MANAGER.unlock(abi.encode(key, zeroForOne, -int256(amount), sqrtPriceLimitX96, minAmountOut));
 
         amountOut = abi.decode(result, (uint256));
     }
@@ -1094,6 +1102,7 @@ contract JBRouterTerminal is
     /// @param amount The amount of the current token.
     /// @param sourceProjectIdOverride When non-zero, use this as the source project ID instead of looking up via
     /// `TOKENS.projectIdOf()`. Reset to 0 after first use.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain cashOutMinReclaimed).
     /// @return destTerminal The terminal that accepts the final token (address(0) if no direct acceptance found).
     /// @return finalToken The token after all cashouts.
     /// @return finalAmount The amount of the final token.
@@ -1101,11 +1110,22 @@ contract JBRouterTerminal is
         uint256 destProjectId,
         address token,
         uint256 amount,
-        uint256 sourceProjectIdOverride
+        uint256 sourceProjectIdOverride,
+        bytes calldata metadata
     )
         internal
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
+        // Check for a user-provided minimum cashout reclaim amount (slippage protection).
+        uint256 minTokensReclaimed;
+        {
+            (bool exists, bytes memory minData) = JBMetadataResolver.getDataFor({
+                id: JBMetadataResolver.getId("cashOutMinReclaimed"),
+                metadata: metadata
+            });
+            if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
+        }
+
         while (true) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
@@ -1137,10 +1157,13 @@ contract JBRouterTerminal is
                 projectId: sourceProjectId,
                 cashOutCount: amount,
                 tokenToReclaim: tokenToReclaim,
-                minTokensReclaimed: 0,
+                minTokensReclaimed: minTokensReclaimed,
                 beneficiary: payable(address(this)),
                 metadata: bytes("")
             });
+
+            // Only apply the minimum to the first cashout step.
+            minTokensReclaimed = 0;
 
             // Update for next iteration.
             token = tokenToReclaim;
@@ -1236,9 +1259,12 @@ contract JBRouterTerminal is
                 JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
 
             if (creditExists) {
+                // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
+                if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
+
                 (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-                // Pull credits from the payer.
+                // Pull credits from the payer (requires payer to have granted TRANSFER_CREDITS to this contract).
                 TOKENS.transferCreditsFrom({
                     holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
                 });
