@@ -894,11 +894,7 @@ contract RouterTerminalTest is Test {
 
         // Mock settle and take.
         vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("settle()"), abi.encode(uint256(1e18)));
-        vm.mockCall(
-            address(mockPoolManager),
-            abi.encodeWithSignature("settle{value}()"),
-            abi.encode(uint256(1e18))
-        );
+        vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("settle{value}()"), abi.encode(uint256(1e18)));
         vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("sync(address)"), abi.encode());
         vm.mockCall(address(mockPoolManager), abi.encodeWithSignature("take(address,address,uint256)"), abi.encode());
         vm.mockCall(sorted0, abi.encodeCall(IERC20.transfer, (address(mockPoolManager), 1e18)), abi.encode(true));
@@ -939,9 +935,7 @@ contract RouterTerminalTest is Test {
 
         // jbToken is a JB project token for sourceProjectId.
         vm.mockCall(
-            address(mockTokens),
-            abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))),
-            abi.encode(sourceProjectId)
+            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))), abi.encode(sourceProjectId)
         );
 
         // Dest project accepts NATIVE_TOKEN.
@@ -977,9 +971,7 @@ contract RouterTerminalTest is Test {
         // Accounting context: source project terminal accepts NATIVE_TOKEN.
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
         contexts[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN,
-            decimals: 18,
-            currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
         });
         vm.mockCall(
             mockCashOutTerminal,
