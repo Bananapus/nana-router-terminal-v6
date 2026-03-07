@@ -45,7 +45,8 @@ import {IWETH9} from "../src/interfaces/IWETH9.sol";
 /// @notice Fork tests for JBRouterTerminal against real Uniswap V3 pools on Ethereum mainnet.
 /// @dev Uses a pinned block for determinism. JB core is deployed fresh within the fork so we control project state.
 contract RouterTerminalForkTest is Test {
-    // ───────────────────────── Mainnet addresses ──────────────────────────
+    // ───────────────────────── Mainnet addresses
+    // ──────────────────────────
 
     // Post-V4-deployment block (V4 PoolManager deployed ~21,690,000) with good TWAP history.
     uint256 constant BLOCK_NUMBER = 21_700_000;
@@ -61,7 +62,8 @@ contract RouterTerminalForkTest is Test {
     // WETH/USDC 0.05%: 0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640
     // WETH/DAI  0.3%:  0xC2e9F25Be6257c210d7Adf0D4Cd6E3E881ba25f8
 
-    // ───────────────────────── JB core (deployed fresh) ────────────────────
+    // ───────────────────────── JB core (deployed fresh)
+    // ────────────────────
 
     address multisig = address(0xBEEF);
     address payer = makeAddr("payer");
@@ -88,10 +90,17 @@ contract RouterTerminalForkTest is Test {
     uint256 usdcProjectId; // Accepts USDC.
     uint256 daiProjectId; // Accepts DAI.
 
-    // ───────────────────────── Setup ──────────────────────────────────────
+    // ───────────────────────── Setup
+    // ──────────────────────────────────────
 
     function setUp() public {
-        vm.createSelectFork(vm.rpcUrl("mainnet"), BLOCK_NUMBER);
+        // Skip fork tests in CI when no RPC URL is configured.
+        string memory rpcUrl = vm.envOr("RPC_ETHEREUM_MAINNET", string(""));
+        if (bytes(rpcUrl).length == 0) {
+            vm.skip(true);
+            return;
+        }
+        vm.createSelectFork(rpcUrl, BLOCK_NUMBER);
 
         // Deploy all JB core contracts fresh within the fork.
         _deployJBCore();
@@ -221,8 +230,7 @@ contract RouterTerminalForkTest is Test {
         assertGt(tokenCount, 0, "no tokens minted for direct USDC forward");
 
         // Terminal received the USDC.
-        uint256 terminalBal =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalBal = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalBal, 0, "terminal has no USDC balance");
 
         // Router has no leftover.
@@ -246,8 +254,7 @@ contract RouterTerminalForkTest is Test {
         uint256 amountIn = 1 ether;
 
         vm.deal(payer, amountIn);
-        uint256 terminalBalBefore =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalBalBefore = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
 
         vm.prank(payer);
         routerTerminal.addToBalanceOf{value: amountIn}({
@@ -259,8 +266,7 @@ contract RouterTerminalForkTest is Test {
             metadata: ""
         });
 
-        uint256 terminalBalAfter =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalBalAfter = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
 
         assertGt(terminalBalAfter, terminalBalBefore, "terminal balance did not increase");
         assertEq(address(routerTerminal).balance, 0, "router has leftover ETH");
@@ -294,8 +300,7 @@ contract RouterTerminalForkTest is Test {
         assertGt(tokenCount, 0, "no tokens minted with quote metadata");
 
         // Terminal received USDC.
-        uint256 terminalBal =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalBal = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalBal, 0, "terminal has no USDC balance after quote metadata pay");
 
         // Router clean.
@@ -355,8 +360,7 @@ contract RouterTerminalForkTest is Test {
         assertGt(tokenCount, 0, "no tokens minted");
 
         // 2. Destination terminal received the output tokens (project balance increased).
-        uint256 terminalBal =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), projectId, expectedTokenOut);
+        uint256 terminalBal = jbTerminalStore.balanceOf(address(jbMultiTerminal), projectId, expectedTokenOut);
         assertGt(terminalBal, 0, "terminal has no balance in expected token");
 
         // 3. No leftover tokens stuck in the router.
@@ -397,21 +401,19 @@ contract RouterTerminalForkTest is Test {
         assertGt(tokenCount, 0, "no tokens minted for ERC20 swap");
 
         // Terminal received expected output token.
-        uint256 terminalBal =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), destProjectId, expectedTokenOut);
+        uint256 terminalBal = jbTerminalStore.balanceOf(address(jbMultiTerminal), destProjectId, expectedTokenOut);
         assertGt(terminalBal, 0, "terminal has no balance in expected token");
 
         // Router clean.
         assertEq(IERC20(tokenIn).balanceOf(address(routerTerminal)), 0, "router has leftover tokenIn");
         if (expectedTokenOut != JBConstants.NATIVE_TOKEN) {
-            assertEq(
-                IERC20(expectedTokenOut).balanceOf(address(routerTerminal)), 0, "router has leftover tokenOut"
-            );
+            assertEq(IERC20(expectedTokenOut).balanceOf(address(routerTerminal)), 0, "router has leftover tokenOut");
         }
         assertEq(address(routerTerminal).balance, 0, "router has leftover ETH");
     }
 
-    // ───────────────────────── JB Core Deployment ─────────────────────────
+    // ───────────────────────── JB Core Deployment
+    // ─────────────────────────
 
     function _deployJBCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
@@ -490,15 +492,11 @@ contract RouterTerminalForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = new JBFundAccessLimitGroup[](0);
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
-        tokensToAccept[0] = JBAccountingContext({
-            token: acceptedToken,
-            decimals: decimals,
-            currency: uint32(uint160(acceptedToken))
-        });
+        tokensToAccept[0] =
+            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
-        terminalConfigs[0] =
-            JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
+        terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
 
         projectId = jbController.launchProjectFor({
             owner: multisig,

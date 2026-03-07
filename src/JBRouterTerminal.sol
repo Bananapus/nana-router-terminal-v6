@@ -1119,10 +1119,8 @@ contract JBRouterTerminal is
         // Check for a user-provided minimum cashout reclaim amount (slippage protection).
         uint256 minTokensReclaimed;
         {
-            (bool exists, bytes memory minData) = JBMetadataResolver.getDataFor({
-                id: JBMetadataResolver.getId("cashOutMinReclaimed"),
-                metadata: metadata
-            });
+            (bool exists, bytes memory minData) =
+                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
             if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
         }
 
