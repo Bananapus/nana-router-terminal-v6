@@ -100,11 +100,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice The terminal for the given project, or the default terminal if none is set.
-    /// @dev Returns address(0) if the resolved terminal has been disallowed.
     /// @param projectId The ID of the project to get the terminal for.
     /// @return terminal The terminal for the project.
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
-        terminal = _resolveTerminal(projectId);
+        terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
     }
 
     /// @notice Get the accounting context for the specified project ID and token.
@@ -120,8 +120,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext memory context)
     {
-        // Get the terminal for the project (falls back to default, skips disallowed).
-        IJBTerminal terminal = _resolveTerminal(projectId);
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Get the accounting context for the token.
         return terminal.accountingContextForTokenOf({projectId: projectId, token: token});
@@ -136,8 +137,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext[] memory contexts)
     {
-        // Get the terminal for the project (falls back to default, skips disallowed).
-        IJBTerminal terminal = _resolveTerminal(projectId);
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Get the accounting contexts.
         return terminal.accountingContextsOf(projectId);
@@ -168,22 +170,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // -------------------------- internal views ------------------------- //
     //*********************************************************************//
-
-    /// @notice Resolve the terminal for a project, skipping disallowed terminals.
-    /// @dev If a project has a specific terminal set but it has been disallowed, falls back to the default.
-    /// @param projectId The ID of the project to resolve the terminal for.
-    /// @return terminal The resolved terminal.
-    function _resolveTerminal(uint256 projectId) internal view returns (IJBTerminal terminal) {
-        terminal = _terminalOf[projectId];
-
-        // If a project-specific terminal is set but has been disallowed, fall back to the default.
-        if (terminal != IJBTerminal(address(0)) && !isTerminalAllowed[terminal]) {
-            terminal = IJBTerminal(address(0));
-        }
-
-        // If no valid project-specific terminal, use the default.
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
-    }
 
     /// @dev `ERC-2771` specifies the context as being a single address (20 bytes).
     function _contextSuffixLength() internal view override(ERC2771Context, Context) returns (uint256) {
@@ -234,8 +220,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         override
     {
-        // Get the terminal for the project (falls back to default, skips disallowed).
-        IJBTerminal terminal = _resolveTerminal(projectId);
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -334,8 +321,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256)
     {
-        // Get the terminal for the project (falls back to default, skips disallowed).
-        IJBTerminal terminal = _resolveTerminal(projectId);
+        // Get the terminal for the project (falls back to default).
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
