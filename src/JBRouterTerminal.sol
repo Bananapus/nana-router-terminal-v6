@@ -1096,6 +1096,10 @@ contract JBRouterTerminal is
         return JBSwapLib.getSlippageTolerance(impact, poolFeeBps);
     }
 
+    /// @notice The maximum number of cashout iterations before reverting. Prevents infinite loops from circular
+    /// token dependencies.
+    uint256 internal constant _MAX_CASHOUT_ITERATIONS = 20;
+
     /// @notice Recursively cash out JB project tokens until reaching a token the destination accepts or a base token.
     /// @param destProjectId The ID of the destination project.
     /// @param token The current token being processed.
@@ -1124,7 +1128,7 @@ contract JBRouterTerminal is
             if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
         }
 
-        while (true) {
+        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
@@ -1167,6 +1171,9 @@ contract JBRouterTerminal is
             token = tokenToReclaim;
             sourceProjectIdOverride = 0;
         }
+
+        // If we reach here, the loop exceeded the maximum iteration count.
+        revert JBRouterTerminal_CashOutLoopLimit();
     }
 
     /// @notice Find which terminal to cash out from and which token to reclaim.

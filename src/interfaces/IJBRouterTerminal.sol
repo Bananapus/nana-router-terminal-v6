@@ -18,6 +18,7 @@ interface IJBRouterTerminal {
     error JBRouterTerminal_NoLiquidity();
     error JBRouterTerminal_NoObservationHistory();
     error JBRouterTerminal_AmountOverflow(uint256 amount);
+    error JBRouterTerminal_CashOutLoopLimit();
 
     /// @notice Search the Uniswap V3 factory for a pool between two tokens across common fee tiers.
     /// @param normalizedTokenIn The input token (wrapped if native).
