@@ -813,7 +813,8 @@ contract JBRouterTerminal is
         address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
         bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
 
-        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
+        // Use sqrtPriceLimitFromAmounts for partial-fill protection, consistent with V3 path.
+        uint160 sqrtPriceLimitX96 = JBSwapLib.sqrtPriceLimitFromAmounts(amount, minAmountOut, zeroForOne);
 
         // V4 sign convention: negative = exact input, positive = exact output.
         bytes memory result =
