@@ -703,6 +703,9 @@ contract JBRouterTerminal is
     {
         address normalizedTokenIn = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenIn;
 
+        // Snapshot the input token balance before the swap to compute the leftover delta accurately.
+        uint256 balanceBefore = IERC20(normalizedTokenIn).balanceOf(address(this));
+
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
@@ -721,9 +724,10 @@ contract JBRouterTerminal is
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
 
-        // Return leftover input tokens to payer.
-        uint256 leftover = IERC20(normalizedTokenIn).balanceOf(address(this));
-        if (leftover != 0) {
+        // Return leftover input tokens to payer using balance delta rather than global balance.
+        uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
+        if (balanceAfter > balanceBefore) {
+            uint256 leftover = balanceAfter - balanceBefore;
             if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(leftover);
             _transferFrom({from: address(this), to: payable(_msgSender()), token: tokenIn, amount: leftover});
         }
