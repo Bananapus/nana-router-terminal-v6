@@ -30,6 +30,34 @@ import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
+/// @notice Minimal ERC20 mock that tracks balances so balanceOf delta works with L-33's _acceptFundsFor.
+contract MockERC20 {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        allowance[from][msg.sender] -= amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 /// @notice A harness that exposes internal functions for testing.
 contract RouterTerminalHarness is JBRouterTerminal {
     constructor(
@@ -284,13 +312,13 @@ contract RouterTerminalTest is Test {
 
     function test_pay_directForward() public {
         uint256 projectId = 1;
-        address tokenIn = makeAddr("tokenIn");
+        MockERC20 token = new MockERC20();
+        address tokenIn = address(token);
         uint256 amount = 1000;
         address beneficiary = makeAddr("beneficiary");
         address payer = makeAddr("payer");
         address mockTerminal = makeAddr("destTerminal");
         vm.etch(mockTerminal, hex"00");
-        vm.etch(tokenIn, hex"00");
 
         // Not a JB token.
         vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
@@ -302,16 +330,12 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
-        // Mock token transfer from payer.
-        vm.mockCall(tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
-        );
+        // Mint tokens to payer and approve the router terminal.
+        token.mint(payer, amount);
+        vm.prank(payer);
+        token.approve(address(routerTerminal), amount);
 
-        // Mock safeIncreaseAllowance: allowance check + approve.
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)), abi.encode(uint256(0))
-        );
+        // Mock safeIncreaseAllowance: the router terminal approves the dest terminal.
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
 
         // Mock dest terminal pay.
@@ -412,12 +436,12 @@ contract RouterTerminalTest is Test {
 
     function test_addToBalanceOf_directForward() public {
         uint256 projectId = 1;
-        address tokenIn = makeAddr("tokenIn");
+        MockERC20 token = new MockERC20();
+        address tokenIn = address(token);
         uint256 amount = 500;
         address payer = makeAddr("payer");
         address mockTerminal = makeAddr("destTerminal");
         vm.etch(mockTerminal, hex"00");
-        vm.etch(tokenIn, hex"00");
 
         // Not a JB token.
         vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
@@ -429,16 +453,12 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
-        // Mock token transfer.
-        vm.mockCall(tokenIn, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
-        );
+        // Mint tokens to payer and approve the router terminal.
+        token.mint(payer, amount);
+        vm.prank(payer);
+        token.approve(address(routerTerminal), amount);
 
-        // Mock safeIncreaseAllowance.
-        vm.mockCall(
-            tokenIn, abi.encodeCall(IERC20.allowance, (address(routerTerminal), mockTerminal)), abi.encode(uint256(0))
-        );
+        // Mock safeIncreaseAllowance: the router terminal approves the dest terminal.
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
 
         // Mock dest terminal addToBalanceOf.
@@ -917,49 +937,46 @@ contract RouterTerminalTest is Test {
 
     /// @notice cashOutMinReclaimed metadata should be forwarded to the cashout terminal (fix #4).
     function test_pay_cashOutMinReclaimedMetadata() public {
-        uint256 destProjectId = 1;
+        MockERC20 jbTokenMock = new MockERC20();
+        address jbToken = address(jbTokenMock);
         address payer = makeAddr("payer");
-        address jbToken = makeAddr("jbToken");
-        vm.etch(jbToken, hex"00");
-        uint256 sourceProjectId = 2;
-        uint256 amount = 100e18;
-        uint256 minReclaimed = 50e18;
         address mockTerminal = makeAddr("destTerminal");
-        vm.etch(mockTerminal, hex"00");
         address mockCashOutTerminal = makeAddr("cashOutTerminal");
+        vm.etch(mockTerminal, hex"00");
         vm.etch(mockCashOutTerminal, hex"00");
 
         // Build metadata with cashOutMinReclaimed — must use router address for getId.
-        bytes4 metadataId = JBMetadataResolver.getId("cashOutMinReclaimed", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(minReclaimed));
+        bytes memory metadata;
+        {
+            bytes4 metadataId = JBMetadataResolver.getId("cashOutMinReclaimed", address(routerTerminal));
+            metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(50e18)));
+        }
 
-        // jbToken is a JB project token for sourceProjectId.
+        // jbToken is a JB project token for sourceProjectId (2).
         vm.mockCall(
-            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))), abi.encode(sourceProjectId)
+            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))), abi.encode(uint256(2))
         );
 
-        // Dest project accepts NATIVE_TOKEN.
+        // Dest project (1) accepts NATIVE_TOKEN.
         vm.mockCall(
             address(mockDirectory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, JBConstants.NATIVE_TOKEN)),
             abi.encode(mockTerminal)
         );
 
         // Dest project doesn't accept jbToken directly.
         vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, jbToken)),
-            abi.encode(address(0))
+            address(mockDirectory), abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, jbToken)), abi.encode(address(0))
         );
 
-        // Source project's terminals (for _findCashOutPath).
-        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-        sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
-        vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
-            abi.encode(sourceTerminals)
-        );
+        {
+            // Source project's terminals (for _findCashOutPath).
+            IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            vm.mockCall(
+                address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (2)), abi.encode(sourceTerminals)
+            );
+        }
 
         // Mock supportsInterface for IJBCashOutTerminal.
         vm.mockCall(
@@ -968,52 +985,53 @@ contract RouterTerminalTest is Test {
             abi.encode(true)
         );
 
-        // Accounting context: source project terminal accepts NATIVE_TOKEN.
-        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-        contexts[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-        });
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-            abi.encode(contexts)
-        );
+        {
+            // Accounting context: source project terminal accepts NATIVE_TOKEN.
+            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+            contexts[0] = JBAccountingContext({
+                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            });
+            vm.mockCall(
+                mockCashOutTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (2)), abi.encode(contexts)
+            );
+        }
 
         // Mock cashOutTokensOf — use broad selector matching since vm.mockCall matches by prefix.
-        // The key assertion: the call should use minReclaimed (not 0).
         vm.mockCall(
             mockCashOutTerminal,
             abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
             abi.encode(uint256(60e18))
         );
 
-        // Expect the specific cashOutTokensOf call with minReclaimed = minReclaimed.
+        // Expect the specific cashOutTokensOf call with minReclaimed = 50e18.
         vm.expectCall(
             mockCashOutTerminal,
             abi.encodeCall(
                 IJBCashOutTerminal.cashOutTokensOf,
                 (
                     address(routerTerminal),
-                    sourceProjectId,
-                    amount,
+                    2, // sourceProjectId
+                    100e18, // amount
                     JBConstants.NATIVE_TOKEN,
-                    minReclaimed,
+                    50e18, // minReclaimed
                     payable(address(routerTerminal)),
                     bytes("")
                 )
             )
         );
 
-        // Mock token transfer from payer.
-        vm.mockCall(jbToken, abi.encodeCall(IERC20.allowance, (payer, address(routerTerminal))), abi.encode(amount));
-        vm.mockCall(
-            jbToken, abi.encodeCall(IERC20.transferFrom, (payer, address(routerTerminal), amount)), abi.encode(true)
-        );
+        // Mint jbToken to payer and approve the router terminal (L-33: _acceptFundsFor uses balanceOf delta).
+        jbTokenMock.mint(payer, 100e18);
+        vm.prank(payer);
+        jbTokenMock.approve(address(routerTerminal), 100e18);
+
+        // Fund the router terminal with ETH to cover the cashout reclaim (NATIVE_TOKEN).
+        vm.deal(address(routerTerminal), 60e18);
 
         // Mock dest terminal pay.
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
 
         vm.prank(payer);
-        routerTerminal.pay(destProjectId, jbToken, amount, payer, 0, "", metadata);
+        routerTerminal.pay(1, jbToken, 100e18, payer, 0, "", metadata);
     }
 }
