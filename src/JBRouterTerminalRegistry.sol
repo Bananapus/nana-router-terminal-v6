@@ -1,26 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {Context} from "@openzeppelin/contracts/utils/Context.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
-
-import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
-import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
-import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 
@@ -100,14 +98,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
 
-    /// @notice The terminal for the given project, or the default terminal if none is set.
-    /// @param projectId The ID of the project to get the terminal for.
-    /// @return terminal The terminal for the project.
-    function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
-        terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
-    }
-
     /// @notice Get the accounting context for the specified project ID and token.
     /// @param projectId The ID of the project to get the accounting context for.
     /// @param token The address of the token to get the accounting context for.
@@ -158,6 +148,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256)
     {}
+
+    /// @notice The terminal for the given project, or the default terminal if none is set.
+    /// @param projectId The ID of the project to get the terminal for.
+    /// @return terminal The terminal for the project.
+    function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
+        terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+    }
 
     //*********************************************************************//
     // -------------------------- public views --------------------------- //
