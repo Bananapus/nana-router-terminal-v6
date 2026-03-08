@@ -1307,11 +1307,14 @@ contract JBRouterTerminal is
             }
         }
 
+        // Measure balance before transfer to determine actual tokens received (handles fee-on-transfer tokens).
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
         // Transfer the tokens from the `_msgSender()` to this terminal.
         _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
 
-        // Return the amount transferred.
-        return amount;
+        // Return the actual amount received (balance delta), not the user-supplied amount.
+        return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
     /// @notice Logic to be triggered before transferring tokens from this terminal.
