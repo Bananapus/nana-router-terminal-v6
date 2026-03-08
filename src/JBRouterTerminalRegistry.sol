@@ -35,6 +35,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
+    error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
     error JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal);
     error JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId);
 
@@ -265,7 +266,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Lock a terminal for a project.
     /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.
     /// @param projectId The ID of the project to lock the terminal for.
-    function lockTerminalFor(uint256 projectId) external {
+    /// @param expectedTerminal The terminal the caller expects to lock. Prevents race conditions where the default
+    /// changes between transaction submission and execution.
+    function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) external {
         // Enforce permissions.
         _requirePermissionFrom({
             account: PROJECTS.ownerOf(projectId),
@@ -279,6 +282,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             terminal = defaultTerminal;
             if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
             _terminalOf[projectId] = terminal;
+        }
+
+        // Verify the resolved terminal matches what the caller expects to lock.
+        if (terminal != expectedTerminal) {
+            revert JBRouterTerminalRegistry_TerminalMismatch(terminal, expectedTerminal);
         }
 
         hasLockedTerminal[projectId] = true;
