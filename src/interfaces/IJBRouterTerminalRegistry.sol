@@ -49,7 +49,8 @@ interface IJBRouterTerminalRegistry is IJBTerminal {
 
     /// @notice Lock the terminal for a project, preventing it from being changed.
     /// @param projectId The ID of the project to lock the terminal for.
-    function lockTerminalFor(uint256 projectId) external;
+    /// @param expectedTerminal The terminal the caller expects to lock. Reverts if the current terminal doesn't match.
+    function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) external;
 
     /// @notice Set the default terminal used when a project has not set a specific terminal.
     /// @param terminal The terminal to set as the default.

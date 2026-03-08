@@ -196,7 +196,7 @@ contract RouterTerminalRegistryTest is Test {
         registry.setTerminalFor(projectId, terminalA);
 
         vm.prank(projectOwner);
-        registry.lockTerminalFor(projectId);
+        registry.lockTerminalFor(projectId, terminalA);
 
         // Try to change.
         vm.prank(projectOwner);
@@ -231,7 +231,7 @@ contract RouterTerminalRegistryTest is Test {
         );
 
         vm.prank(projectOwner);
-        registry.lockTerminalFor(projectId);
+        registry.lockTerminalFor(projectId, terminalA);
 
         assertTrue(registry.hasLockedTerminal(projectId));
         // Should have snapshotted the default as the project's terminal.
@@ -258,7 +258,7 @@ contract RouterTerminalRegistryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalNotSet.selector, projectId)
         );
-        registry.lockTerminalFor(projectId);
+        registry.lockTerminalFor(projectId, terminalA);
     }
 
     // ──────────────────────────────────────────────────────────────────────
