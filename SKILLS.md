@@ -36,7 +36,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same resolution and forwarding but for balance additions. |
 | `terminalOf(projectId) -> IJBTerminal` | Returns the terminal for the project, or `defaultTerminal` if none is set. |
 | `setTerminalFor(projectId, terminal)` | Route a project to a specific allowed router terminal. Requires `SET_ROUTER_TERMINAL` permission (ID 28). Reverts if locked or terminal not allowed. |
-| `lockTerminalFor(projectId)` | Lock the terminal choice permanently. If no terminal is explicitly set, the current default is snapshotted. Requires `SET_ROUTER_TERMINAL` permission. |
+| `lockTerminalFor(projectId, expectedTerminal)` | Lock the terminal choice permanently. If no terminal is explicitly set, the current default is snapshotted. Reverts with `TerminalMismatch` if the resolved terminal does not match `expectedTerminal` (prevents race conditions). Requires `SET_ROUTER_TERMINAL` permission. |
 | `allowTerminal(terminal)` | Owner-only: add a terminal to the allowlist. |
 | `disallowTerminal(terminal)` | Owner-only: remove a terminal from the allowlist. Also clears `defaultTerminal` if it matches. |
 | `setDefaultTerminal(terminal)` | Owner-only: set the default terminal and auto-allow it. |
@@ -123,6 +123,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `JBRouterTerminal_NoLiquidity()` | Pool has zero in-range liquidity (TWAP or spot quote would be meaningless) |
 | `JBRouterTerminal_NoObservationHistory()` | V3 pool has no TWAP observation history (`oldestObservation == 0`) |
 | `JBRouterTerminal_AmountOverflow(uint256 amount)` | Amount exceeds `type(uint128).max` (required by `OracleLibrary.getQuoteAtTick`) |
+| `JBRouterTerminal_CashOutLoopLimit()` | Cashout loop exceeded 20 iterations (circular token dependency) |
 
 ### JBRouterTerminalRegistry
 
@@ -131,6 +132,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value)` | `msg.value > 0` when paying with an ERC-20 |
 | `JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount)` | Permit2 allowance is less than the payment amount |
 | `JBRouterTerminalRegistry_TerminalLocked(uint256 projectId)` | Attempting to change terminal after it has been locked |
+| `JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal)` | Resolved terminal does not match the `expectedTerminal` passed to `lockTerminalFor` |
 | `JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal)` | Attempting to set a terminal that is not on the allowlist |
 | `JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId)` | Attempting to lock when no terminal is set and no default exists |
 
@@ -178,11 +180,12 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 - The `JBSwapLib` library contains slippage tolerance math (sigmoid formula), price impact estimation, and V3-compatible `sqrtPriceLimitX96` calculation. It does not contain swap execution logic.
 - **Leftover handling**: After a swap, leftover input tokens (from partial fills where the price limit was hit) are returned to the payer. For native token inputs, any remaining raw ETH is wrapped to WETH first so the leftover check catches it.
 - **Credit cashouts**: When using `cashOutSource` metadata, the payer must have granted `TRANSFER_CREDITS` permission (ID 13) to the router terminal for the source project. The router calls `TOKENS.transferCreditsFrom()` to pull credits.
-- **Cashout loop depth**: The `_cashOutLoop` is a `while(true)` loop that recurses through JB project token chains. There is no explicit depth limit -- gas is the natural bound.
+- **Cashout loop depth**: The `_cashOutLoop` iterates through JB project token chains with a cap of 20 iterations (`_MAX_CASHOUT_ITERATIONS`). Exceeding this limit reverts with `JBRouterTerminal_CashOutLoopLimit()`.
 - **V3 callback verification**: The `uniswapV3SwapCallback` verifies the caller by reading the pool's `fee()` and checking `FACTORY.getPool()`. This is standard V3 security.
 - **V4 amount overflow**: Both `_getV3TwapQuote` and `_getV4SpotQuote` revert if `amount > type(uint128).max` because `OracleLibrary.getQuoteAtTick` requires `uint128`.
 - **Disallowing the default terminal**: `disallowTerminal()` clears `defaultTerminal` if it matches the terminal being disallowed.
-- **Locking snapshots default**: `lockTerminalFor()` snapshots the current `defaultTerminal` into `_terminalOf[projectId]` if no explicit terminal was set, preventing future default changes from affecting locked projects.
+- **Locking snapshots default**: `lockTerminalFor(projectId, expectedTerminal)` snapshots the current `defaultTerminal` into `_terminalOf[projectId]` if no explicit terminal was set, preventing future default changes from affecting locked projects. The `expectedTerminal` parameter prevents race conditions where the default changes between transaction submission and execution.
+- **Cashout loop limit**: `_cashOutLoop` is capped at 20 iterations. Circular JB token dependencies (A -> B -> A) will revert with `CashOutLoopLimit` instead of consuming all gas.
 
 ## Example Integration
 
@@ -242,5 +245,5 @@ routerTerminal.pay{value: 1 ether}(
 
 // --- Registry: project owner sets terminal ---
 registry.setTerminalFor(projectId, preferredTerminal);
-registry.lockTerminalFor(projectId); // permanent
+registry.lockTerminalFor(projectId, preferredTerminal); // permanent, reverts if terminal changed
 ```

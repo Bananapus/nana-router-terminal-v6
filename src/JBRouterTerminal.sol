@@ -1058,6 +1058,7 @@ contract JBRouterTerminal is
 
             // slither-disable-next-line unused-return,calls-loop
             (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
+            // slither-disable-next-line incorrect-equality
             if (sqrtPriceX96 == 0) continue;
 
             // slither-disable-next-line calls-loop
