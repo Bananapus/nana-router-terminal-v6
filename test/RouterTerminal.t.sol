@@ -29,7 +29,7 @@ import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
-/// @notice Minimal ERC20 mock that tracks balances so balanceOf delta works with L-33's _acceptFundsFor.
+/// @notice Minimal ERC20 mock that tracks balances so balanceOf delta works with _acceptFundsFor.
 contract MockERC20 {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
@@ -1019,7 +1019,7 @@ contract RouterTerminalTest is Test {
             )
         );
 
-        // Mint jbToken to payer and approve the router terminal (L-33: _acceptFundsFor uses balanceOf delta).
+        // Mint jbToken to payer and approve the router terminal (_acceptFundsFor uses balanceOf delta).
         jbTokenMock.mint(payer, 100e18);
         vm.prank(payer);
         jbTokenMock.approve(address(routerTerminal), 100e18);

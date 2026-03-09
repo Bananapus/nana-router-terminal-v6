@@ -21,7 +21,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-/// @notice Minimal ERC20 mock for balance-delta accounting in _acceptFundsFor (L-33).
+/// @notice Minimal ERC20 mock for balance-delta accounting in _acceptFundsFor.
 contract MockToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
@@ -49,7 +49,7 @@ contract MockToken {
     }
 }
 
-/// @notice Regression test for L-30: _cashOutLoop should revert with CashOutLoopLimit when circular token
+/// @notice _cashOutLoop should revert with CashOutLoopLimit when circular token
 /// dependencies cause more than 20 iterations, instead of consuming all gas.
 contract L30_CashOutLoopLimitTest is Test {
     JBRouterTerminal routerTerminal;

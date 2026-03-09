@@ -1098,7 +1098,7 @@ contract JBRouterTerminal is
     /// @notice Get a spot-price-based quote with dynamic slippage for a V4 pool.
     /// @dev V4 vanilla pools have no TWAP oracle. Uses spot tick with the same sigmoid slippage formula.
     ///
-    /// SECURITY NOTE (Audit M-3): The spot price read from `POOL_MANAGER.getSlot0(id)` is an instantaneous value
+    /// SECURITY NOTE: The spot price read from `POOL_MANAGER.getSlot0(id)` is an instantaneous value
     /// that can be manipulated within the same block (e.g. via sandwich attacks or flash loans). Unlike V3 pools,
     /// V4 vanilla pools do not expose a built-in TWAP oracle, so there is no manipulation-resistant price source
     /// available on-chain for automatic quoting.
