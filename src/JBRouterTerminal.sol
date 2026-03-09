@@ -623,7 +623,8 @@ contract JBRouterTerminal is
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
-                if (address(destTerminal) != address(0)) {
+                // Skip if the destination terminal is this router itself (would recurse).
+                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
                     return (destTerminal, token, amount);
                 }
             }
