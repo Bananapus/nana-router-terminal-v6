@@ -60,7 +60,8 @@ import {IWETH9} from "../src/interfaces/IWETH9.sol";
 ///   7. Router forwards ETH to project 1's multi terminal.
 ///   8. Assert: project 1's ETH balance increased, router has no leftover.
 contract RouterTerminalFeeCashOutForkTest is Test {
-    // ───────────────────────── Mainnet addresses ──────────────────────────
+    // ───────────────────────── Mainnet addresses
+    // ──────────────────────────
 
     uint256 constant BLOCK_NUMBER = 21_700_000;
 
@@ -69,14 +70,16 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     IPermit2 constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
     IPoolManager constant V4_POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
 
-    // ───────────────────────── Actors ──────────────────────────
+    // ───────────────────────── Actors
+    // ──────────────────────────
 
     address multisig = address(0xBEEF);
     address payer = makeAddr("payer");
     address project3Owner = makeAddr("project3Owner");
     address trustedForwarder = address(0);
 
-    // ───────────────────────── JB core ──────────────────────────
+    // ───────────────────────── JB core
+    // ──────────────────────────
 
     JBPermissions jbPermissions;
     JBProjects jbProjects;
@@ -92,17 +95,20 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     JBMultiTerminal jbMultiTerminal;
     JBRouterTerminal routerTerminal;
 
-    // ───────────────────────── Project IDs ──────────────────────────
+    // ───────────────────────── Project IDs
+    // ──────────────────────────
 
     uint256 feeProjectId; // Project 1.
     uint256 project2Id;
     uint256 project3Id;
 
-    // ───────────────────────── Project 2's ERC-20 ──────────────────────────
+    // ───────────────────────── Project 2's ERC-20
+    // ──────────────────────────
 
     IJBToken project2Token;
 
-    // ───────────────────────── Setup ──────────────────────────
+    // ───────────────────────── Setup
+    // ──────────────────────────
 
     function setUp() public {
         string memory rpcUrl = vm.envOr("RPC_ETHEREUM_MAINNET", string(""));
@@ -295,19 +301,15 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         // Multi terminal: accepts NATIVE_TOKEN.
         JBAccountingContext[] memory ethContext = new JBAccountingContext[](1);
         ethContext[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN,
-            decimals: 18,
-            currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
         });
 
         // Router terminal: accepts any token (empty contexts — it generates them dynamically).
         JBAccountingContext[] memory routerContext = new JBAccountingContext[](0);
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](2);
-        terminalConfigs[0] =
-            JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: ethContext});
-        terminalConfigs[1] =
-            JBTerminalConfig({terminal: routerTerminal, accountingContextsToAccept: routerContext});
+        terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: ethContext});
+        terminalConfigs[1] = JBTerminalConfig({terminal: routerTerminal, accountingContextsToAccept: routerContext});
 
         projectId = jbController.launchProjectFor({
             owner: multisig,
@@ -357,10 +359,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         if (payoutLimitAmount > 0) {
             fundAccessLimitGroups = new JBFundAccessLimitGroup[](1);
             JBCurrencyAmount[] memory payoutLimits = new JBCurrencyAmount[](1);
-            payoutLimits[0] = JBCurrencyAmount({
-                amount: payoutLimitAmount,
-                currency: uint32(uint160(payoutLimitToken))
-            });
+            payoutLimits[0] = JBCurrencyAmount({amount: payoutLimitAmount, currency: uint32(uint160(payoutLimitToken))});
             fundAccessLimitGroups[0] = JBFundAccessLimitGroup({
                 terminal: address(jbMultiTerminal),
                 token: payoutLimitToken,
@@ -382,15 +381,11 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = fundAccessLimitGroups;
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
-        tokensToAccept[0] = JBAccountingContext({
-            token: acceptedToken,
-            decimals: decimals,
-            currency: uint32(uint160(acceptedToken))
-        });
+        tokensToAccept[0] =
+            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
-        terminalConfigs[0] =
-            JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
+        terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
 
         projectId = jbController.launchProjectFor({
             owner: owner,
@@ -401,7 +396,8 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         });
     }
 
-    // ───────────────────────── JB Core Deployment ─────────────────────────
+    // ───────────────────────── JB Core Deployment
+    // ─────────────────────────
 
     function _deployJBCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
