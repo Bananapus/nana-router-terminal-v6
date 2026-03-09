@@ -12,7 +12,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 
-/// @notice Regression test for L-29: lockTerminalFor should revert if current terminal doesn't match expected.
+/// @notice lockTerminalFor should revert if current terminal doesn't match expected.
 contract L29_LockTerminalRaceTest is Test {
     JBRouterTerminalRegistry registry;
 

@@ -28,7 +28,7 @@ contract SwapLibHarness {
     }
 }
 
-/// @notice Regression test for audit finding M-3: V4 swaps use manipulable spot price for slippage calculation.
+/// @notice V4 swaps use manipulable spot price for slippage calculation.
 /// @dev V4 vanilla pools have no TWAP oracle, so `_getV4SpotQuote` reads `getSlot0` — an instantaneous tick
 /// that can be manipulated within the same block. This test suite verifies that the sigmoid slippage formula
 /// enforces a meaningful minimum output floor regardless of the spot price, and that user-provided quotes
