@@ -26,7 +26,6 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
-import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
@@ -301,7 +300,7 @@ contract RouterTerminalTest is Test {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
         routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
     }
@@ -426,7 +425,7 @@ contract RouterTerminalTest is Test {
         bytes memory data = abi.encode(uint256(1), tokenIn, tokenOut);
 
         vm.prank(fakePool);
-        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, fakePool));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, fakePool));
         routerTerminal.uniswapV3SwapCallback(int256(-200), int256(100), data);
     }
 
@@ -526,7 +525,7 @@ contract RouterTerminalTest is Test {
         // No V4 pools.
         _mockV4NoPools(tokenA, tokenB);
 
-        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB));
         routerTerminal.exposed_discoverPool(tokenA, tokenB);
     }
 
@@ -754,7 +753,7 @@ contract RouterTerminalTest is Test {
 
         vm.prank(notPoolManager);
         vm.expectRevert(
-            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_CallerNotPoolManager.selector, notPoolManager)
+            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CallerNotPoolManager.selector, notPoolManager)
         );
         routerTerminal.unlockCallback("");
     }
@@ -859,7 +858,7 @@ contract RouterTerminalTest is Test {
 
         vm.deal(payer, 1 ether);
         vm.prank(payer);
-        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
         routerTerminal.pay{value: 1 ether}(projectId, JBConstants.NATIVE_TOKEN, 1 ether, payer, 0, "", metadata);
     }
 
@@ -873,7 +872,7 @@ contract RouterTerminalTest is Test {
 
         vm.deal(payer, 1 ether);
         vm.prank(payer);
-        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
         routerTerminal.addToBalanceOf{value: 1 ether}(1, JBConstants.NATIVE_TOKEN, 1 ether, false, "", metadata);
     }
 

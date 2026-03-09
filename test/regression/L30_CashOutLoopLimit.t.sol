@@ -19,7 +19,6 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
-import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 /// @notice Minimal ERC20 mock for balance-delta accounting in _acceptFundsFor (L-33).
@@ -171,7 +170,7 @@ contract L30_CashOutLoopLimitTest is Test {
         tokenA.approve(address(routerTerminal), amount);
 
         // Expect the specific CashOutLoopLimit revert.
-        vm.expectRevert(abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_CashOutLoopLimit.selector));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CashOutLoopLimit.selector));
 
         vm.prank(payer);
         routerTerminal.pay(DEST_PROJECT_ID, address(tokenA), amount, payer, 0, "", "");
