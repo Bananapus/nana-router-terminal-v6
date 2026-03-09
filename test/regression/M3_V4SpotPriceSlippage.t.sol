@@ -90,8 +90,16 @@ contract M3_V4SpotPriceSlippageTest is Test {
         uint256 prev = lib.getSlippageTolerance(0, feeBps);
 
         // Test a range of impacts from tiny to large.
-        uint256[8] memory impacts =
-            [uint256(1e12), uint256(1e14), uint256(1e15), uint256(1e16), uint256(5e16), uint256(1e17), uint256(1e18), uint256(1e20)];
+        uint256[8] memory impacts = [
+            uint256(1e12),
+            uint256(1e14),
+            uint256(1e15),
+            uint256(1e16),
+            uint256(5e16),
+            uint256(1e17),
+            uint256(1e18),
+            uint256(1e20)
+        ];
 
         for (uint256 i; i < impacts.length; i++) {
             uint256 current = lib.getSlippageTolerance(impacts[i], feeBps);
@@ -109,7 +117,8 @@ contract M3_V4SpotPriceSlippageTest is Test {
         uint256 feeBps = 30;
 
         // Test with many different impacts.
-        uint256[6] memory impacts = [uint256(0), uint256(1e10), uint256(1e16), uint256(1e18), uint256(1e30), uint256(1e50)];
+        uint256[6] memory impacts =
+            [uint256(0), uint256(1e10), uint256(1e16), uint256(1e18), uint256(1e30), uint256(1e50)];
 
         for (uint256 i; i < impacts.length; i++) {
             uint256 tolerance = lib.getSlippageTolerance(impacts[i], feeBps);
@@ -199,10 +208,7 @@ contract M3_V4SpotPriceSlippageTest is Test {
             uint256 amountSmall = 1000; // Very small swap to ensure negligible impact
 
             uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-                tick: tick,
-                baseAmount: uint128(amountSmall),
-                baseToken: tokenIn,
-                quoteToken: tokenOut
+                tick: tick, baseAmount: uint128(amountSmall), baseToken: tokenIn, quoteToken: tokenOut
             });
 
             uint256 impact = lib.calculateImpact(amountSmall, liquidityDeep, sqrtP, true);
@@ -214,8 +220,9 @@ contract M3_V4SpotPriceSlippageTest is Test {
             // minAmountOut should be 98% of spot quote.
             if (spotQuote > 0) {
                 uint256 minAmountOut = spotQuote - (spotQuote * slippageTolerance) / SLIPPAGE_DENOMINATOR;
-                assertGe(minAmountOut, spotQuote * 98 / 100,
-                    "small swap in deep pool: minAmountOut should be >= 98% of spot");
+                assertGe(
+                    minAmountOut, spotQuote * 98 / 100, "small swap in deep pool: minAmountOut should be >= 98% of spot"
+                );
                 assertLe(minAmountOut, spotQuote, "minAmountOut should not exceed spot quote");
             }
         }
@@ -226,10 +233,7 @@ contract M3_V4SpotPriceSlippageTest is Test {
             uint256 amount = 1 ether;
 
             uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-                tick: tick,
-                baseAmount: uint128(amount),
-                baseToken: tokenIn,
-                quoteToken: tokenOut
+                tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
             });
 
             uint256 impact = lib.calculateImpact(amount, liquidity, sqrtP, true);
@@ -241,8 +245,11 @@ contract M3_V4SpotPriceSlippageTest is Test {
 
             // minAmountOut is always at least (1 - 88%) = 12% of spot.
             uint256 minAmountOut = spotQuote - (spotQuote * slippageTolerance) / SLIPPAGE_DENOMINATOR;
-            assertGe(minAmountOut, spotQuote * (SLIPPAGE_DENOMINATOR - MAX_SLIPPAGE) / SLIPPAGE_DENOMINATOR,
-                "minAmountOut must be >= 12% of spot quote (88% max slippage)");
+            assertGe(
+                minAmountOut,
+                spotQuote * (SLIPPAGE_DENOMINATOR - MAX_SLIPPAGE) / SLIPPAGE_DENOMINATOR,
+                "minAmountOut must be >= 12% of spot quote (88% max slippage)"
+            );
         }
     }
 
@@ -258,10 +265,7 @@ contract M3_V4SpotPriceSlippageTest is Test {
         address tokenOut = address(0x2222);
 
         uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-            tick: tick,
-            baseAmount: uint128(amount),
-            baseToken: tokenIn,
-            quoteToken: tokenOut
+            tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
         });
 
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(tick);
@@ -274,8 +278,11 @@ contract M3_V4SpotPriceSlippageTest is Test {
 
         // minAmountOut still bounded.
         uint256 minAmountOut = spotQuote - (spotQuote * slippageTolerance) / SLIPPAGE_DENOMINATOR;
-        assertGe(minAmountOut, spotQuote * (SLIPPAGE_DENOMINATOR - MAX_SLIPPAGE) / SLIPPAGE_DENOMINATOR,
-            "even worst case, minAmountOut >= 12% of spot");
+        assertGe(
+            minAmountOut,
+            spotQuote * (SLIPPAGE_DENOMINATOR - MAX_SLIPPAGE) / SLIPPAGE_DENOMINATOR,
+            "even worst case, minAmountOut >= 12% of spot"
+        );
     }
 
     //*********************************************************************//
@@ -296,10 +303,7 @@ contract M3_V4SpotPriceSlippageTest is Test {
         address tokenOut = address(0x2222);
 
         uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-            tick: tick,
-            baseAmount: uint128(amount),
-            baseToken: tokenIn,
-            quoteToken: tokenOut
+            tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
         });
 
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(tick);
@@ -314,19 +318,16 @@ contract M3_V4SpotPriceSlippageTest is Test {
 
         // The user quote and automatic calculation are distinct values.
         // The automatic path includes at least 2% slippage, so it's always <= 98% of spot.
-        assertLe(automaticMinOut, spotQuote * 98 / 100,
-            "automatic path must apply at least 2% slippage");
+        assertLe(automaticMinOut, spotQuote * 98 / 100, "automatic path must apply at least 2% slippage");
 
         // A user-provided quote can be tighter (closer to spot) than the automatic path.
         // This is the key benefit: users can get better MEV protection by providing their own quote.
-        assertGt(userQuoteTight, automaticMinOut,
-            "user-provided tight quote should exceed automatic sigmoid minimum");
+        assertGt(userQuoteTight, automaticMinOut, "user-provided tight quote should exceed automatic sigmoid minimum");
 
         // Conversely, a user can also set a lower quote (more permissive) — the contract uses it as-is.
         // This demonstrates that quoteForSwap is a direct override, not a floor.
         uint256 userQuoteLoose = automaticMinOut / 2;
-        assertLt(userQuoteLoose, automaticMinOut,
-            "user can also set a more permissive (lower) quote");
+        assertLt(userQuoteLoose, automaticMinOut, "user can also set a more permissive (lower) quote");
     }
 
     //*********************************************************************//
