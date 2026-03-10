@@ -1,1 +1,3 @@
 forge-std/=lib/forge-std/src/
+@sphinx-labs/contracts/SphinxConstants.sol=node_modules/@sphinx-labs/contracts/contracts/foundry/SphinxConstants.sol
+@sphinx-labs/contracts/contracts/=node_modules/@sphinx-labs/contracts/contracts/
