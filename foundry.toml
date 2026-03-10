@@ -5,10 +5,6 @@ optimizer_runs = 200
 libs = ["node_modules", "lib"]
 fs_permissions = [{ access = "read-write", path = "./"}]
 
-[profile.ci_sizes]
-via_ir = true
-optimizer_runs = 200
-
 [fuzz]
 runs = 4096
 
@@ -21,3 +17,6 @@ fail_on_revert = false
 number_underscore = "thousands"
 multiline_func_header = "all"
 wrap_comments = true
+
+[rpc_endpoints]
+ethereum = "${RPC_ETHEREUM_MAINNET}"
