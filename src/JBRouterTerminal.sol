@@ -223,7 +223,10 @@ contract JBRouterTerminal is
         override
         returns (PoolInfo memory pool)
     {
-        return _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
+            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+        }
     }
 
     /// @notice Public wrapper for V3-only _discoverPool, useful for off-chain queries.
@@ -240,6 +243,9 @@ contract JBRouterTerminal is
         returns (IUniswapV3Pool pool)
     {
         PoolInfo memory info = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        if (!info.isV4 && address(info.v3Pool) == address(0)) {
+            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+        }
         if (!info.isV4) pool = info.v3Pool;
     }
 
@@ -275,6 +281,11 @@ contract JBRouterTerminal is
     /// @return sender The address which sent this call.
     function _msgSender() internal view override(ERC2771Context, Context) returns (address sender) {
         return ERC2771Context._msgSender();
+    }
+
+    /// @notice Normalize a token address by replacing the native token sentinel with WETH.
+    function _normalize(address token) internal view returns (address) {
+        return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
     }
 
     //*********************************************************************//
@@ -392,8 +403,8 @@ contract JBRouterTerminal is
         (, address tokenIn, address tokenOut) = abi.decode(data, (uint256, address, address));
 
         // Normalize tokens (wrap native token if needed).
-        address normalizedTokenIn = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenIn;
-        address normalizedTokenOut = tokenOut == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenOut;
+        address normalizedTokenIn = _normalize(tokenIn);
+        address normalizedTokenOut = _normalize(tokenOut);
 
         // Verify caller is a legitimate pool via the factory.
         uint24 fee = IUniswapV3Pool(msg.sender).fee();
@@ -553,37 +564,9 @@ contract JBRouterTerminal is
     /// @param tokenB The other token in the pair.
     /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
-        // Search V3.
-        for (uint256 i; i < 4; i++) {
-            // slither-disable-next-line calls-loop
-            address poolAddr = FACTORY.getPool(tokenA, tokenB, _FEE_TIERS[i]);
-            if (poolAddr == address(0)) continue;
-
-            // slither-disable-next-line calls-loop
-            uint128 liquidity = IUniswapV3Pool(poolAddr).liquidity();
-            if (liquidity > bestLiquidity) bestLiquidity = liquidity;
-        }
-
-        // Search V4 — reuse _discoverV4Pool with current best.
-        PoolInfo memory v4Result = _discoverV4Pool(
-            tokenA,
-            tokenB,
-            bestLiquidity,
-            PoolInfo({
-                isV4: false,
-                v3Pool: IUniswapV3Pool(address(0)),
-                v4Key: PoolKey({
-                    currency0: Currency.wrap(address(0)),
-                    currency1: Currency.wrap(address(0)),
-                    fee: 0,
-                    tickSpacing: 0,
-                    hooks: IHooks(address(0))
-                })
-            })
-        );
-        if (v4Result.isV4) {
-            bestLiquidity = POOL_MANAGER.getLiquidity(v4Result.v4Key.toId());
-        }
+        PoolInfo memory pool = _discoverPool(tokenA, tokenB);
+        if (pool.isV4) return POOL_MANAGER.getLiquidity(pool.v4Key.toId());
+        if (address(pool.v3Pool) != address(0)) return pool.v3Pool.liquidity();
     }
 
     /// @notice The maximum number of cashout iterations before reverting. Prevents infinite loops from circular
@@ -687,8 +670,8 @@ contract JBRouterTerminal is
         // Exact same token — no conversion needed.
         if (tokenIn == tokenOut) return amount;
 
-        address nIn = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenIn;
-        address nOut = tokenOut == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenOut;
+        address nIn = _normalize(tokenIn);
+        address nOut = _normalize(tokenOut);
 
         if (nIn == nOut) {
             // Same underlying token — just wrap or unwrap.
@@ -721,7 +704,7 @@ contract JBRouterTerminal is
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        address normalizedTokenIn = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenIn;
+        address normalizedTokenIn = _normalize(tokenIn);
         IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(projectId);
 
         uint128 bestLiquidity;
@@ -733,8 +716,7 @@ contract JBRouterTerminal is
 
             for (uint256 j; j < contexts.length; j++) {
                 address candidateToken = contexts[j].token;
-                address normalizedCandidate =
-                    candidateToken == JBConstants.NATIVE_TOKEN ? address(WETH) : candidateToken;
+                address normalizedCandidate = _normalize(candidateToken);
 
                 if (normalizedCandidate == normalizedTokenIn) continue;
 
@@ -801,10 +783,6 @@ contract JBRouterTerminal is
 
         // Search V4.
         bestPool = _discoverV4Pool(normalizedTokenIn, normalizedTokenOut, bestLiquidity, bestPool);
-
-        if (!bestPool.isV4 && address(bestPool.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
-        }
     }
 
     /// @notice Search V4 vanilla pools and update bestPool if a V4 pool has higher liquidity.
@@ -1169,7 +1147,7 @@ contract JBRouterTerminal is
         internal
         returns (uint256 amountOut)
     {
-        address normalizedTokenIn = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenIn;
+        address normalizedTokenIn = _normalize(tokenIn);
 
         // Snapshot the input token balance before the swap to compute the leftover delta accurately.
         uint256 balanceBefore = IERC20(normalizedTokenIn).balanceOf(address(this));
@@ -1177,7 +1155,7 @@ contract JBRouterTerminal is
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
-            normalizedTokenOut: tokenOut == JBConstants.NATIVE_TOKEN ? address(WETH) : tokenOut,
+            normalizedTokenOut: _normalize(tokenOut),
             amount: amount,
             metadata: metadata,
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
@@ -1231,6 +1209,9 @@ contract JBRouterTerminal is
     {
         // Discover the best pool across V3 and V4 fee tiers.
         pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
+            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+        }
 
         // Check for a user-provided quote.
         (bool exists, bytes memory quote) =
