@@ -94,9 +94,12 @@ contract RouterTerminalHarness is JBRouterTerminal {
     )
         external
         view
-        returns (PoolInfo memory)
+        returns (PoolInfo memory pool)
     {
-        return _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
+            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+        }
     }
 }
 

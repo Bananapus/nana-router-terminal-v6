@@ -51,7 +51,7 @@ contract MockToken {
 
 /// @notice _cashOutLoop should revert with CashOutLoopLimit when circular token
 /// dependencies cause more than 20 iterations, instead of consuming all gas.
-contract L30_CashOutLoopLimitTest is Test {
+contract CashOutLoopLimitTest is Test {
     JBRouterTerminal routerTerminal;
 
     IJBDirectory directory = IJBDirectory(makeAddr("directory"));

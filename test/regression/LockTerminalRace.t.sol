@@ -13,7 +13,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 
 /// @notice lockTerminalFor should revert if current terminal doesn't match expected.
-contract L29_LockTerminalRaceTest is Test {
+contract LockTerminalRaceTest is Test {
     JBRouterTerminalRegistry registry;
 
     IJBPermissions permissions = IJBPermissions(makeAddr("permissions"));

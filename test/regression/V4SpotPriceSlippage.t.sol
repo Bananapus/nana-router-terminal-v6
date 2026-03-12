@@ -37,7 +37,7 @@ contract SwapLibHarness {
 /// Because setting up a full V4 PoolManager in unit tests requires significant infrastructure, these tests
 /// exercise the slippage math in isolation via JBSwapLib, which is the same code path used by
 /// `_getV4SpotQuote` and `_getV3TwapQuote`.
-contract M3_V4SpotPriceSlippageTest is Test {
+contract V4SpotPriceSlippageTest is Test {
     SwapLibHarness lib;
 
     /// @notice The same constants from JBSwapLib / JBRouterTerminal.

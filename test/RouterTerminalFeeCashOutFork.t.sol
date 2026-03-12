@@ -111,12 +111,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // ──────────────────────────
 
     function setUp() public {
-        string memory rpcUrl = vm.envOr("RPC_ETHEREUM_MAINNET", string(""));
-        if (bytes(rpcUrl).length == 0) {
-            vm.skip(true);
-            return;
-        }
-        vm.createSelectFork(rpcUrl, BLOCK_NUMBER);
+        vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
         _deployJBCore();
 

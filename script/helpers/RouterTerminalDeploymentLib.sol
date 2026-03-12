@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {stdJson} from "forge-std/Script.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-import {SphinxConstants, NetworkInfo} from "@sphinx-labs/contracts/SphinxConstants.sol";
+import {SphinxConstants, NetworkInfo} from "@sphinx-labs/contracts/contracts/foundry/SphinxConstants.sol";
 
 import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
 import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalRegistry.sol";
