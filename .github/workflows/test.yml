@@ -25,4 +25,4 @@ jobs:
         env:
           RPC_ETHEREUM_MAINNET: ${{ secrets.RPC_ETHEREUM_MAINNET }}
       - name: Check contract sizes
-        run: FOUNDRY_PROFILE=ci_sizes forge build --sizes --skip "*/test/**" --skip "*/script/**" --skip SphinxUtils
+        run: forge build --sizes --skip "*/test/**" --skip "*/script/**" --skip SphinxUtils
