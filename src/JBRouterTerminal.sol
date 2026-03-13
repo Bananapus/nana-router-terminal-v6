@@ -408,7 +408,7 @@ contract JBRouterTerminal is
 
         // Verify caller is a legitimate pool via the factory.
         uint24 fee = IUniswapV3Pool(msg.sender).fee();
-        address expectedPool = FACTORY.getPool(normalizedTokenIn, normalizedTokenOut, fee);
+        address expectedPool = FACTORY.getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: fee});
         if (msg.sender != expectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
@@ -418,7 +418,7 @@ contract JBRouterTerminal is
         if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.deposit{value: amountToSendToPool}();
 
         // Transfer the tokens to the pool.
-        IERC20(normalizedTokenIn).safeTransfer(msg.sender, amountToSendToPool);
+        IERC20(normalizedTokenIn).safeTransfer({to: msg.sender, value: amountToSendToPool});
     }
 
     /// @notice The Uniswap V4 unlock callback. Called by the PoolManager during `unlock()`.
@@ -459,11 +459,11 @@ contract JBRouterTerminal is
 
         // Settle input (pay what we owe to the PoolManager).
         Currency inputCurrency = zeroForOne ? key.currency0 : key.currency1;
-        _settleV4(inputCurrency, amountIn);
+        _settleV4({currency: inputCurrency, amount: amountIn});
 
         // Take output (receive what the PoolManager owes us).
         Currency outputCurrency = zeroForOne ? key.currency1 : key.currency0;
-        _takeV4(outputCurrency, amountOut);
+        _takeV4({currency: outputCurrency, amount: amountOut});
 
         return abi.encode(amountOut);
     }
@@ -554,7 +554,7 @@ contract JBRouterTerminal is
         if (token == JBConstants.NATIVE_TOKEN) return amount;
 
         // Otherwise, set the appropriate allowance for the recipient.
-        IERC20(token).safeIncreaseAllowance(to, amount);
+        IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
 
         return 0;
     }
@@ -758,7 +758,8 @@ contract JBRouterTerminal is
         // Search V3.
         for (uint256 i; i < 4; i++) {
             // slither-disable-next-line calls-loop
-            address poolAddr = FACTORY.getPool(normalizedTokenIn, normalizedTokenOut, _FEE_TIERS[i]);
+            address poolAddr =
+                FACTORY.getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _FEE_TIERS[i]});
 
             if (poolAddr == address(0)) continue;
 
@@ -887,7 +888,9 @@ contract JBRouterTerminal is
             recipient: address(this),
             zeroForOne: zeroForOne,
             amountSpecified: int256(amount),
-            sqrtPriceLimitX96: JBSwapLib.sqrtPriceLimitFromAmounts(amount, minAmountOut, zeroForOne),
+            sqrtPriceLimitX96: JBSwapLib.sqrtPriceLimitFromAmounts({
+                amountIn: amount, minimumAmountOut: minAmountOut, zeroForOne: zeroForOne
+            }),
             data: callbackData
         });
 
@@ -911,7 +914,9 @@ contract JBRouterTerminal is
         bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
 
         // Use sqrtPriceLimitFromAmounts for partial-fill protection, consistent with V3 path.
-        uint160 sqrtPriceLimitX96 = JBSwapLib.sqrtPriceLimitFromAmounts(amount, minAmountOut, zeroForOne);
+        uint160 sqrtPriceLimitX96 = JBSwapLib.sqrtPriceLimitFromAmounts({
+            amountIn: amount, minimumAmountOut: minAmountOut, zeroForOne: zeroForOne
+        });
 
         // V4 sign convention: negative = exact input, positive = exact output.
         bytes memory result =
@@ -1022,8 +1027,9 @@ contract JBRouterTerminal is
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
         if (sqrtP == 0) return SLIPPAGE_DENOMINATOR;
 
-        uint256 impact = JBSwapLib.calculateImpact(amountIn, liquidity, sqrtP, zeroForOne);
-        return JBSwapLib.getSlippageTolerance(impact, poolFeeBps);
+        uint256 impact =
+            JBSwapLib.calculateImpact({amountIn: amountIn, liquidity: liquidity, sqrtP: sqrtP, zeroForOne: zeroForOne});
+        return JBSwapLib.getSlippageTolerance({impact: impact, poolFeeBps: poolFeeBps});
     }
 
     /// @notice Get a TWAP-based quote with dynamic slippage for a V3 pool.
@@ -1357,7 +1363,7 @@ contract JBRouterTerminal is
         } else {
             // ERC20: sync then transfer then settle.
             POOL_MANAGER.sync(currency);
-            IERC20(Currency.unwrap(currency)).safeTransfer(address(POOL_MANAGER), amount);
+            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle();
         }
@@ -1365,7 +1371,7 @@ contract JBRouterTerminal is
 
     /// @notice Take the output side of a V4 swap (receive tokens from PoolManager).
     function _takeV4(Currency currency, uint256 amount) internal {
-        POOL_MANAGER.take(currency, address(this), amount);
+        POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
         if (Currency.unwrap(currency) == address(0)) {
@@ -1381,19 +1387,19 @@ contract JBRouterTerminal is
     function _transferFrom(address from, address payable to, address token, uint256 amount) internal {
         if (from == address(this)) {
             // If the token is native token, assume the `sendValue` standard.
-            if (token == JBConstants.NATIVE_TOKEN) return Address.sendValue(to, amount);
+            if (token == JBConstants.NATIVE_TOKEN) return Address.sendValue({recipient: to, amount: amount});
 
             // If the transfer is from this terminal, use `safeTransfer`.
-            return IERC20(token).safeTransfer(to, amount);
+            return IERC20(token).safeTransfer({to: to, value: amount});
         }
 
         // If there's sufficient approval, transfer normally.
         if (IERC20(token).allowance({owner: address(from), spender: address(this)}) >= amount) {
-            return IERC20(token).safeTransferFrom(from, to, amount);
+            return IERC20(token).safeTransferFrom({from: from, to: to, value: amount});
         }
 
         // Otherwise, attempt to use the `permit2` method.
-        PERMIT2.transferFrom(from, to, uint160(amount), token);
+        PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
 
     //*********************************************************************//
