@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
+import {CoreDeployment, CoreDeploymentLib} from "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
 
 import {Sphinx} from "@sphinx-labs/contracts/contracts/foundry/SphinxPlugin.sol";
 import {Script} from "forge-std/Script.sol";
@@ -18,8 +18,8 @@ contract DeployScript is Script, Sphinx {
     CoreDeployment core;
 
     /// @notice the salts that are used to deploy the contracts.
-    bytes32 ROUTER_TERMINAL = "JBRouterTerminalV6";
-    bytes32 ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
+    bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
+    bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
 
     /// @notice tracks the addresses that are required for the chain we are deploying to.
     address weth;

@@ -98,10 +98,13 @@ contract JBRouterTerminal is
 
     /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
     /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint24[4] internal _FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
 
     /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint24[4] internal _V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    // forge-lint: disable-next-line(mixed-case-variable)
     int24[4] internal _V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
 
     //*********************************************************************//
@@ -186,6 +189,7 @@ contract JBRouterTerminal is
         override
         returns (JBAccountingContext memory context)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
         context = JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -339,7 +343,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no balance to migrate.
-    function migrateBalanceOf(uint256, address, IJBTerminal) external override returns (uint256 balance) {
+    function migrateBalanceOf(uint256, address, IJBTerminal) external pure override returns (uint256 balance) {
         return 0;
     }
 
@@ -412,6 +416,7 @@ contract JBRouterTerminal is
         if (msg.sender != expectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amountToSendToPool = amount0Delta < 0 ? uint256(amount1Delta) : uint256(amount0Delta);
 
         // Wrap native tokens if needed.
@@ -447,10 +452,14 @@ contract JBRouterTerminal is
             int128 delta0 = delta.amount0();
             int128 delta1 = delta.amount1();
             if (zeroForOne) {
+                // forge-lint: disable-next-line(unsafe-typecast)
                 amountIn = uint256(uint128(-delta0));
+                // forge-lint: disable-next-line(unsafe-typecast)
                 amountOut = uint256(uint128(delta1));
             } else {
+                // forge-lint: disable-next-line(unsafe-typecast)
                 amountIn = uint256(uint128(-delta1));
+                // forge-lint: disable-next-line(unsafe-typecast)
                 amountOut = uint256(uint128(delta0));
             }
         }
@@ -852,11 +861,7 @@ contract JBRouterTerminal is
 
         if (pool.isV4) {
             return _executeV4Swap({
-                key: pool.v4Key,
-                normalizedTokenIn: normalizedTokenIn,
-                normalizedTokenOut: normalizedTokenOut,
-                amount: amount,
-                minAmountOut: minAmountOut
+                key: pool.v4Key, normalizedTokenIn: normalizedTokenIn, amount: amount, minAmountOut: minAmountOut
             });
         } else {
             return _executeV3Swap({
@@ -887,6 +892,7 @@ contract JBRouterTerminal is
         (int256 amount0, int256 amount1) = pool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: int256(amount),
             sqrtPriceLimitX96: JBSwapLib.sqrtPriceLimitFromAmounts({
                 amountIn: amount, minimumAmountOut: minAmountOut, zeroForOne: zeroForOne
@@ -902,7 +908,6 @@ contract JBRouterTerminal is
     function _executeV4Swap(
         PoolKey memory key,
         address normalizedTokenIn,
-        address normalizedTokenOut,
         uint256 amount,
         uint256 minAmountOut
     )
@@ -920,7 +925,8 @@ contract JBRouterTerminal is
 
         // V4 sign convention: negative = exact input, positive = exact output.
         bytes memory result =
-            POOL_MANAGER.unlock(abi.encode(key, zeroForOne, -int256(amount), sqrtPriceLimitX96, minAmountOut));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        POOL_MANAGER.unlock(abi.encode(key, zeroForOne, -int256(amount), sqrtPriceLimitX96, minAmountOut));
 
         amountOut = abi.decode(result, (uint256));
     }
@@ -1050,8 +1056,11 @@ contract JBRouterTerminal is
         uint256 twapWindow = DEFAULT_TWAP_WINDOW;
         if (oldestObservation < twapWindow) twapWindow = oldestObservation;
 
-        (int24 arithmeticMeanTick, uint128 liquidity) =
-            OracleLibrary.consult({pool: address(pool), secondsAgo: uint32(twapWindow)});
+        (
+            int24 arithmeticMeanTick,
+            uint128 liquidity
+            // forge-lint: disable-next-line(unsafe-typecast)
+        ) = OracleLibrary.consult({pool: address(pool), secondsAgo: uint32(twapWindow)});
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
@@ -1070,6 +1079,7 @@ contract JBRouterTerminal is
             if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
             minAmountOut = OracleLibrary.getQuoteAtTick({
                 tick: arithmeticMeanTick,
+                // forge-lint: disable-next-line(unsafe-typecast)
                 baseAmount: uint128(amount),
                 baseToken: normalizedTokenIn,
                 quoteToken: normalizedTokenOut
@@ -1130,7 +1140,11 @@ contract JBRouterTerminal is
 
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
         minAmountOut = OracleLibrary.getQuoteAtTick({
-            tick: tick, baseAmount: uint128(amount), baseToken: normalizedTokenIn, quoteToken: normalizedTokenOut
+            tick: tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(amount),
+            baseToken: normalizedTokenIn,
+            quoteToken: normalizedTokenOut
         });
 
         minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
@@ -1399,6 +1413,7 @@ contract JBRouterTerminal is
         }
 
         // Otherwise, attempt to use the `permit2` method.
+        // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
 

@@ -145,6 +145,7 @@ library JBSwapLib {
             if (sqrtResult >= uint256(TickMath.MAX_SQRT_RATIO)) {
                 return TickMath.MAX_SQRT_RATIO - 1;
             }
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint160(sqrtResult);
         } else {
             if (sqrtResult >= uint256(TickMath.MAX_SQRT_RATIO)) {
@@ -153,6 +154,7 @@ library JBSwapLib {
             if (sqrtResult <= uint256(TickMath.MIN_SQRT_RATIO)) {
                 return TickMath.MIN_SQRT_RATIO + 1;
             }
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint160(sqrtResult);
         }
     }
