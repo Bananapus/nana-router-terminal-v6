@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
+import {CoreDeployment, CoreDeploymentLib} from "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
 
 import {Sphinx} from "@sphinx-labs/contracts/contracts/foundry/SphinxPlugin.sol";
 import {Script} from "forge-std/Script.sol";
@@ -18,8 +18,8 @@ contract DeployScript is Script, Sphinx {
     CoreDeployment core;
 
     /// @notice the salts that are used to deploy the contracts.
-    bytes32 ROUTER_TERMINAL = "JBRouterTerminalV6";
-    bytes32 ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
+    bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
+    bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
 
     /// @notice tracks the addresses that are required for the chain we are deploying to.
     address weth;
@@ -38,7 +38,9 @@ contract DeployScript is Script, Sphinx {
         // Get the deployment addresses for the nana CORE for this chain.
         // We want to do this outside of the `sphinx` modifier.
         core = CoreDeploymentLib.getDeployment(
-            vm.envOr("NANA_CORE_DEPLOYMENT_PATH", string("node_modules/@bananapus/core-v6/deployments/"))
+            vm.envOr({
+                name: "NANA_CORE_DEPLOYMENT_PATH", defaultValue: string("node_modules/@bananapus/core-v6/deployments/")
+            })
         );
 
         trustedForwarder = core.permissions.trustedForwarder();
@@ -95,22 +97,26 @@ contract DeployScript is Script, Sphinx {
     }
 
     function deploy() public sphinx {
-        JBRouterTerminalRegistry registry = new JBRouterTerminalRegistry{salt: ROUTER_TERMINAL_REGISTRY}(
-            core.permissions, core.projects, IPermit2(permit2), safeAddress(), trustedForwarder
-        );
+        JBRouterTerminalRegistry registry = new JBRouterTerminalRegistry{salt: ROUTER_TERMINAL_REGISTRY}({
+            permissions: core.permissions,
+            projects: core.projects,
+            permit2: IPermit2(permit2),
+            owner: safeAddress(),
+            trustedForwarder: trustedForwarder
+        });
 
-        JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}(
-            core.directory,
-            core.permissions,
-            core.projects,
-            core.tokens,
-            IPermit2(permit2),
-            safeAddress(),
-            IWETH9(weth),
-            IUniswapV3Factory(factory),
-            IPoolManager(poolManager),
-            trustedForwarder
-        );
+        JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
+            directory: core.directory,
+            permissions: core.permissions,
+            projects: core.projects,
+            tokens: core.tokens,
+            permit2: IPermit2(permit2),
+            owner: safeAddress(),
+            weth: IWETH9(weth),
+            factory: IUniswapV3Factory(factory),
+            poolManager: IPoolManager(poolManager),
+            trustedForwarder: trustedForwarder
+        });
 
         // Set the terminal as the default for the registry.
         registry.setDefaultTerminal(terminal);

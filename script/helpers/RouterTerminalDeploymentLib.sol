@@ -17,6 +17,7 @@ struct RouterTerminalDeployment {
 library RouterTerminalDeploymentLib {
     // Cheat code address, 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D.
     address internal constant VM_ADDRESS = address(uint160(uint256(keccak256("hevm cheat code"))));
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     Vm internal constant vm = Vm(VM_ADDRESS);
 
     function getDeployment(string memory path) internal returns (RouterTerminalDeployment memory deployment) {
@@ -30,7 +31,7 @@ library RouterTerminalDeploymentLib {
 
         for (uint256 _i; _i < networks.length; _i++) {
             if (networks[_i].chainId == chainId) {
-                return getDeployment(path, networks[_i].name);
+                return getDeployment({path: path, networkName: networks[_i].name});
             }
         }
 
@@ -39,17 +40,28 @@ library RouterTerminalDeploymentLib {
 
     function getDeployment(
         string memory path,
-        string memory network_name
+        string memory networkName
     )
         internal
         view
         returns (RouterTerminalDeployment memory deployment)
     {
-        deployment.terminal =
-            IJBRouterTerminal(_getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminal"));
+        deployment.terminal = IJBRouterTerminal(
+            _getDeploymentAddress({
+                path: path,
+                projectName: "nana-router-terminal-v6",
+                networkName: networkName,
+                contractName: "JBRouterTerminal"
+            })
+        );
 
         deployment.registry = IJBRouterTerminalRegistry(
-            _getDeploymentAddress(path, "nana-router-terminal-v6", network_name, "JBRouterTerminalRegistry")
+            _getDeploymentAddress({
+                path: path,
+                projectName: "nana-router-terminal-v6",
+                networkName: networkName,
+                contractName: "JBRouterTerminalRegistry"
+            })
         );
     }
 
@@ -60,8 +72,8 @@ library RouterTerminalDeploymentLib {
     /// @return The address of the contract.
     function _getDeploymentAddress(
         string memory path,
-        string memory project_name,
-        string memory network_name,
+        string memory projectName,
+        string memory networkName,
         string memory contractName
     )
         internal
@@ -69,7 +81,8 @@ library RouterTerminalDeploymentLib {
         returns (address)
     {
         string memory deploymentJson =
-            vm.readFile(string.concat(path, project_name, "/", network_name, "/", contractName, ".json"));
-        return stdJson.readAddress(deploymentJson, ".address");
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        vm.readFile(string.concat(path, projectName, "/", networkName, "/", contractName, ".json"));
+        return stdJson.readAddress({json: deploymentJson, key: ".address"});
     }
 }

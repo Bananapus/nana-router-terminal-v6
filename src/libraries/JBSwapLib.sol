@@ -54,7 +54,7 @@ library JBSwapLib {
 
         // Sigmoid: minSlippage + (maxSlippage - minSlippage) * impact / (impact + K)
         uint256 range = MAX_SLIPPAGE - minSlippage;
-        uint256 tolerance = minSlippage + mulDiv(range, impact, impact + SIGMOID_K);
+        uint256 tolerance = minSlippage + mulDiv({x: range, y: impact, denominator: impact + SIGMOID_K});
 
         return tolerance;
     }
@@ -82,11 +82,11 @@ library JBSwapLib {
     {
         if (liquidity == 0 || sqrtP == 0) return 0;
 
-        uint256 base = mulDiv(amountIn, IMPACT_PRECISION, uint256(liquidity));
+        uint256 base = mulDiv({x: amountIn, y: IMPACT_PRECISION, denominator: uint256(liquidity)});
 
         impact = zeroForOne
-            ? mulDiv(base, uint256(sqrtP), uint256(1) << 96)
-            : mulDiv(base, uint256(1) << 96, uint256(sqrtP));
+            ? mulDiv({x: base, y: uint256(sqrtP), denominator: uint256(1) << 96})
+            : mulDiv({x: base, y: uint256(1) << 96, denominator: uint256(sqrtP)});
     }
 
     //*********************************************************************//
@@ -130,11 +130,11 @@ library JBSwapLib {
             return zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
         } else if (num / den >= (uint256(1) << 64)) {
             // Extended range: use ratioX128 to avoid mulDiv overflow, then shift.
-            uint256 ratioX128 = mulDiv(num, uint256(1) << 128, den);
+            uint256 ratioX128 = mulDiv({x: num, y: uint256(1) << 128, denominator: den});
             sqrtResult = Math.sqrt(ratioX128) * (uint256(1) << 32);
         } else {
             // Normal range: full precision via ratioX192.
-            uint256 ratioX192 = mulDiv(num, uint256(1) << 192, den);
+            uint256 ratioX192 = mulDiv({x: num, y: uint256(1) << 192, denominator: den});
             sqrtResult = Math.sqrt(ratioX192);
         }
 
@@ -145,6 +145,7 @@ library JBSwapLib {
             if (sqrtResult >= uint256(TickMath.MAX_SQRT_RATIO)) {
                 return TickMath.MAX_SQRT_RATIO - 1;
             }
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint160(sqrtResult);
         } else {
             if (sqrtResult >= uint256(TickMath.MAX_SQRT_RATIO)) {
@@ -153,6 +154,7 @@ library JBSwapLib {
             if (sqrtResult <= uint256(TickMath.MIN_SQRT_RATIO)) {
                 return TickMath.MIN_SQRT_RATIO + 1;
             }
+            // forge-lint: disable-next-line(unsafe-typecast)
             return uint160(sqrtResult);
         }
     }

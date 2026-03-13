@@ -442,7 +442,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (token == JBConstants.NATIVE_TOKEN) return amount;
 
         // Otherwise, set the appropriate allowance for the recipient.
-        IERC20(token).safeIncreaseAllowance(to, amount);
+        IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
 
         return 0;
     }
@@ -455,18 +455,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     function _transferFrom(address from, address payable to, address token, uint256 amount) internal virtual {
         if (from == address(this)) {
             // If the token is native token, assume the `sendValue` standard.
-            if (token == JBConstants.NATIVE_TOKEN) return Address.sendValue(to, amount);
+            if (token == JBConstants.NATIVE_TOKEN) return Address.sendValue({recipient: to, amount: amount});
 
             // If the transfer is from this terminal, use `safeTransfer`.
-            return IERC20(token).safeTransfer(to, amount);
+            return IERC20(token).safeTransfer({to: to, value: amount});
         }
 
         // If there's sufficient approval, transfer normally.
         if (IERC20(token).allowance({owner: address(from), spender: address(this)}) >= amount) {
-            return IERC20(token).safeTransferFrom(from, to, amount);
+            return IERC20(token).safeTransferFrom({from: from, to: to, value: amount});
         }
 
         // Otherwise, attempt to use the `permit2` method.
-        PERMIT2.transferFrom(from, to, uint160(amount), token);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
 }
