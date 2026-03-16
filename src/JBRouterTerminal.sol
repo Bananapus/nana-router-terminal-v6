@@ -93,6 +93,14 @@ contract JBRouterTerminal is
     uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
+    // ------------------------ internal constants ----------------------- //
+    //*********************************************************************//
+
+    /// @notice The maximum number of cashout iterations before reverting. Prevents infinite loops from circular
+    /// token dependencies.
+    uint256 internal constant _MAX_CASHOUT_ITERATIONS = 20;
+
+    //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
@@ -580,10 +588,6 @@ contract JBRouterTerminal is
         if (pool.isV4) return POOL_MANAGER.getLiquidity(pool.v4Key.toId());
         if (address(pool.v3Pool) != address(0)) return pool.v3Pool.liquidity();
     }
-
-    /// @notice The maximum number of cashout iterations before reverting. Prevents infinite loops from circular
-    /// token dependencies.
-    uint256 internal constant _MAX_CASHOUT_ITERATIONS = 20;
 
     /// @notice Recursively cash out JB project tokens until reaching a token the destination accepts or a base token.
     /// @param destProjectId The ID of the destination project.
