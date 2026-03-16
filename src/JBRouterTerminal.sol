@@ -543,6 +543,9 @@ contract JBRouterTerminal is
             }
         }
 
+        // Fee-on-transfer tokens are not supported by design. The router uses balance-delta
+        // checks for its own accounting but relies on underlying terminal behavior for FoT tokens. Projects
+        // should avoid configuring FoT tokens.
         // Measure balance before transfer to determine actual tokens received (handles fee-on-transfer tokens).
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
 
@@ -610,6 +613,9 @@ contract JBRouterTerminal is
             if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
         }
 
+        // Intermediate steps have no per-step slippage protection. The final output amount is
+        // checked against the user's minReclaimed parameter, providing end-to-end slippage protection. Per-step
+        // checks would add gas and complexity without improving the overall guarantee.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
@@ -1181,6 +1187,9 @@ contract JBRouterTerminal is
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
         });
 
+        // Any pre-existing ETH in the contract is absorbed into swap leftovers and routed to
+        // the project. This is acceptable because the contract should not hold ETH between transactions. The
+        // receive() function or any direct ETH sends are treated as donations.
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
         // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
         if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance != 0) {
@@ -1413,6 +1422,7 @@ contract JBRouterTerminal is
         }
 
         // Otherwise, attempt to use the `permit2` method.
+        if (amount > type(uint160).max) revert JBRouterTerminal_AmountOverflow(amount);
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }

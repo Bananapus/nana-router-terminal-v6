@@ -30,12 +30,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    error JBRouterTerminalRegistry_AmountOverflow();
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
     error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
     error JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal);
     error JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId);
+    error JBRouterTerminalRegistry_ZeroAddress();
 
     //*********************************************************************//
     // -------------------- public immutable properties ------------------ //
@@ -353,6 +355,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev Only the owner can set the default terminal.
     /// @param terminal The terminal to set as the default.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
+        if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress();
+
         defaultTerminal = terminal;
 
         // Allow the default terminal.
@@ -426,6 +430,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
                 catch {}
         }
 
+        // Fee-on-transfer tokens are not supported by design. The router uses balance-delta
+        // checks for its own accounting but relies on underlying terminal behavior for FoT tokens. Projects
+        // should avoid configuring FoT tokens.
         // Transfer the tokens from the `_msgSender()` to this terminal.
         _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
 
@@ -467,6 +474,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         }
 
         // Otherwise, attempt to use the `permit2` method.
+        if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow();
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
