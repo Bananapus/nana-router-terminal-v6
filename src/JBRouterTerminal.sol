@@ -1,6 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
+import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
+import {IJBPermissioned} from "@bananapus/core-v6/src/interfaces/IJBPermissioned.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
+import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
+import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -24,20 +38,6 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
-import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
-import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissioned} from "@bananapus/core-v6/src/interfaces/IJBPermissioned.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
-import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
-import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
-import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
-import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
-import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
-import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -93,21 +93,6 @@ contract JBRouterTerminal is
     uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
-    // ---------------------- internal stored properties ----------------- //
-    //*********************************************************************//
-
-    /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
-    /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
-    // forge-lint: disable-next-line(mixed-case-variable)
-    uint24[4] internal _FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-
-    /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
-    // forge-lint: disable-next-line(mixed-case-variable)
-    uint24[4] internal _V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-    // forge-lint: disable-next-line(mixed-case-variable)
-    int24[4] internal _V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
-
-    //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
@@ -131,6 +116,21 @@ contract JBRouterTerminal is
 
     /// @notice The ERC-20 wrapper for the native token.
     IWETH9 public immutable WETH;
+
+    //*********************************************************************//
+    // ---------------------- internal stored properties ----------------- //
+    //*********************************************************************//
+
+    /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
+    /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
+    // forge-lint: disable-next-line(mixed-case-variable)
+    uint24[4] internal _FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+
+    /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
+    // forge-lint: disable-next-line(mixed-case-variable)
+    uint24[4] internal _V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
+    // forge-lint: disable-next-line(mixed-case-variable)
+    int24[4] internal _V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
 
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //

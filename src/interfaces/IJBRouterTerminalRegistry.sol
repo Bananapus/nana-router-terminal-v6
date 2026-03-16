@@ -9,24 +9,29 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 interface IJBRouterTerminalRegistry is IJBTerminal {
     /// @notice Emitted when a terminal is allowed for use by projects.
     /// @param terminal The terminal that was allowed.
-    event JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal);
+    /// @param caller The address that called the function.
+    event JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a terminal is disallowed from use by projects.
     /// @param terminal The terminal that was disallowed.
-    event JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal);
+    /// @param caller The address that called the function.
+    event JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a project's terminal is locked and can no longer be changed.
     /// @param projectId The ID of the project whose terminal was locked.
-    event JBRouterTerminalRegistry_LockTerminal(uint256 projectId);
+    /// @param caller The address that called the function.
+    event JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller);
 
     /// @notice Emitted when the default terminal is changed.
     /// @param terminal The new default terminal.
-    event JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal);
+    /// @param caller The address that called the function.
+    event JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a project's terminal is set.
     /// @param projectId The ID of the project whose terminal was set.
     /// @param terminal The terminal that was set.
-    event JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal);
+    /// @param caller The address that called the function.
+    event JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller);
 
     /// @notice The default terminal used when a project has not set a specific terminal.
     /// @return The default terminal.

@@ -148,11 +148,11 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 | Event | When |
 |-------|------|
-| `JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal)` | Terminal added to allowlist |
-| `JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal)` | Terminal removed from allowlist |
-| `JBRouterTerminalRegistry_LockTerminal(uint256 projectId)` | Terminal locked for a project |
-| `JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal)` | Default terminal updated |
-| `JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal)` | Terminal set for a project |
+| `JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal, address caller)` | Terminal added to allowlist |
+| `JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal, address caller)` | Terminal removed from allowlist |
+| `JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller)` | Terminal locked for a project |
+| `JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal, address caller)` | Default terminal updated |
+| `JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller)` | Terminal set for a project |
 
 ## Metadata Keys
 
