@@ -247,7 +247,7 @@ function setTerminalFor(uint256 projectId, IJBTerminal terminal) external
 1. Permission check via `_requirePermissionFrom()`
 2. `isTerminalAllowed[terminal]` check
 3. `_terminalOf[projectId] = terminal`
-4. Emits `JBRouterTerminalRegistry_SetTerminal(projectId, terminal)`
+4. Emits `JBRouterTerminalRegistry_SetTerminal(projectId, terminal, caller)`
 
 ### Edge Cases
 
@@ -289,7 +289,7 @@ function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) extern
 3. If using default, snapshot it: `_terminalOf[projectId] = defaultTerminal`
 4. Verify `terminal == expectedTerminal`
 5. `hasLockedTerminal[projectId] = true`
-6. Emits `JBRouterTerminalRegistry_LockTerminal(projectId)`
+6. Emits `JBRouterTerminalRegistry_LockTerminal(projectId, caller)`
 
 ### Edge Cases
 
@@ -310,7 +310,7 @@ The registry owner manages the allowlist and default terminal.
 function allowTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Sets `isTerminalAllowed[terminal] = true`. Emits `JBRouterTerminalRegistry_AllowTerminal(terminal)`.
+Sets `isTerminalAllowed[terminal] = true`. Emits `JBRouterTerminalRegistry_AllowTerminal(terminal, caller)`.
 
 ### Disallow a Terminal
 
@@ -318,7 +318,7 @@ Sets `isTerminalAllowed[terminal] = true`. Emits `JBRouterTerminalRegistry_Allow
 function disallowTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Sets `isTerminalAllowed[terminal] = false`. If the disallowed terminal is the current `defaultTerminal`, clears the default to `address(0)`. Emits `JBRouterTerminalRegistry_DisallowTerminal(terminal)`.
+Sets `isTerminalAllowed[terminal] = false`. If the disallowed terminal is the current `defaultTerminal`, clears the default to `address(0)`. Emits `JBRouterTerminalRegistry_DisallowTerminal(terminal, caller)`.
 
 **Note:** Disallowing a terminal does NOT remove it from projects that have explicitly set it via `setTerminalFor()`. Those projects continue using the disallowed terminal until they change it (if not locked).
 
@@ -328,7 +328,7 @@ Sets `isTerminalAllowed[terminal] = false`. If the disallowed terminal is the cu
 function setDefaultTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Reverts if `terminal == address(0)`. Sets `defaultTerminal = terminal` and auto-allows it (`isTerminalAllowed[terminal] = true`). Emits `JBRouterTerminalRegistry_SetDefaultTerminal(terminal)`.
+Reverts if `terminal == address(0)`. Sets `defaultTerminal = terminal` and auto-allows it (`isTerminalAllowed[terminal] = true`). Emits `JBRouterTerminalRegistry_SetDefaultTerminal(terminal, caller)`.
 
 **Impact:** All projects without an explicit terminal assignment or lock are silently migrated to the new default. This is the highest-impact admin action.
 

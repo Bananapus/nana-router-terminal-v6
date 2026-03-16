@@ -248,7 +248,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     function allowTerminal(IJBTerminal terminal) external onlyOwner {
         isTerminalAllowed[terminal] = true;
 
-        emit JBRouterTerminalRegistry_AllowTerminal(terminal);
+        emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
     }
 
     /// @notice Disallow a terminal.
@@ -260,7 +260,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Clear default terminal if it matches the terminal being disallowed.
         if (defaultTerminal == terminal) defaultTerminal = IJBTerminal(address(0));
 
-        emit JBRouterTerminalRegistry_DisallowTerminal(terminal);
+        emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
 
     /// @notice Lock a terminal for a project.
@@ -291,7 +291,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         hasLockedTerminal[projectId] = true;
 
-        emit JBRouterTerminalRegistry_LockTerminal(projectId);
+        emit JBRouterTerminalRegistry_LockTerminal(projectId, _msgSender());
     }
 
     /// @notice Empty implementation to satisfy the interface.
@@ -362,7 +362,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Allow the default terminal.
         isTerminalAllowed[terminal] = true;
 
-        emit JBRouterTerminalRegistry_SetDefaultTerminal(terminal);
+        emit JBRouterTerminalRegistry_SetDefaultTerminal(terminal, _msgSender());
     }
 
     /// @notice Set the terminal for a project.
@@ -384,7 +384,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         _terminalOf[projectId] = terminal;
 
-        emit JBRouterTerminalRegistry_SetTerminal(projectId, terminal);
+        emit JBRouterTerminalRegistry_SetTerminal(projectId, terminal, _msgSender());
     }
 
     //*********************************************************************//
