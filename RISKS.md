@@ -10,10 +10,11 @@
 
 ## 2. Economic / Manipulation Risks
 
-- **V4 spot price manipulation.** `_getV4SpotQuote` reads the instantaneous `getSlot0` tick, which is manipulable via sandwich attacks or flash loans. The sigmoid slippage formula provides a floor (min 2%) but does NOT provide full MEV protection. Without user-supplied `quoteForSwap` metadata, V4 swaps are vulnerable to extraction. Front-ends MUST supply `quoteForSwap` metadata for V4 swaps.
+- **V4 spot price manipulation.** `_getV4SpotQuote` reads the instantaneous `getSlot0` tick, which is manipulable via sandwich attacks or flash loans. The sigmoid slippage formula provides a floor (min 2%) but does NOT provide full MEV protection. Without user-supplied `quoteForSwap` metadata, V4 swaps are vulnerable to extraction. Front-ends MUST supply `quoteForSwap` metadata for V4 swaps. Note: `_getV4SpotQuote` normalizes WETH to `address(0)` before calling OracleLibrary, since V4 uses `address(0)` for native ETH -- without this normalization, token sorting would mismatch the pool's currency ordering and produce inverted quotes.
 - **V3 TWAP manipulation.** Short TWAP windows (falls back to `oldestObservation` if < 10 minutes) reduce manipulation resistance. A newly created pool with minimal history can be manipulated within the TWAP window.
 - **Cashout loop value extraction.** `_cashOutLoop` iterates up to 20 times, cashing out JB project tokens recursively. Each cashout incurs bonding curve slippage. `minTokensReclaimed` is only applied to the first step -- subsequent steps have zero slippage protection.
 - **Leftover token absorption.** `_handleSwap` wraps all remaining `address(this).balance` as WETH after swaps. Any ETH sent directly to the contract (via `receive()`) is absorbed into the next swap's leftover calculation and routed to the project -- not returned to the sender.
+- **V4 native ETH settlement.** `_settleV4` unwraps WETH to native ETH when settling a `Currency.wrap(address(0))` debt with PoolManager. This is necessary because the router may hold WETH (from ERC-20 transfers or prior wrapping) but V4 native pools require `msg.value` settlement. If `address(this).balance` is already sufficient, no unwrap occurs.
 - **Pool selection by liquidity.** `_discoverPool` selects the pool with the highest `liquidity()` value. An attacker can deploy a pool with high but concentrated (out-of-range) liquidity to win selection, then manipulate the actual swap execution at worse prices.
 
 ## 3. Access Control
