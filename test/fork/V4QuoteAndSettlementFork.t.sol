@@ -300,8 +300,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         assertGt(tokensMinted, 0, "Should mint project tokens");
 
         // Verify USDC arrived in the terminal.
-        uint256 terminalUsdcBalance =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalUsdcBalance = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalUsdcBalance, 0, "Terminal should hold USDC");
 
         // Sanity: USDC amount should be in the right ballpark for 1 ETH (~2000-4000 USDC at block 21.7M).
@@ -397,8 +396,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         assertGt(tokensMinted, 0, "Should mint project tokens");
 
         // Verify USDC arrived in the terminal.
-        uint256 terminalUsdcBalance =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
+        uint256 terminalUsdcBalance = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalUsdcBalance, 0, "Terminal should hold USDC");
 
         // Sanity check the USDC amount.
@@ -428,20 +426,14 @@ contract V4QuoteAndSettlementForkTest is Test {
         // --- V3 baseline: read the V3 pool's spot tick and compute a quote. ---
         (, int24 v3Tick,,,,,) = WETH_USDC_V3.slot0();
         uint256 v3Quote = OracleLibrary.getQuoteAtTick({
-            tick: v3Tick,
-            baseAmount: uint128(swapAmount),
-            baseToken: address(WETH),
-            quoteToken: address(USDC)
+            tick: v3Tick, baseAmount: uint128(swapAmount), baseToken: address(WETH), quoteToken: address(USDC)
         });
 
         // --- V4 quote: read the V4 pool's spot tick and compute the same way. ---
         // V4 pool uses address(0) for ETH. This is the corrected call path.
         (, int24 v4Tick,,) = V4_POOL_MANAGER.getSlot0(v4EthUsdcKey.toId());
         uint256 v4Quote = OracleLibrary.getQuoteAtTick({
-            tick: v4Tick,
-            baseAmount: uint128(swapAmount),
-            baseToken: address(0),
-            quoteToken: address(USDC)
+            tick: v4Tick, baseAmount: uint128(swapAmount), baseToken: address(0), quoteToken: address(USDC)
         });
 
         console.log("V3 USDC quote for 1 ETH: %s", v3Quote);
