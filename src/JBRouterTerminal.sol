@@ -1137,6 +1137,13 @@ contract JBRouterTerminal is
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
+        // V4 pools use address(0) for native ETH. Map WETH back to address(0) so that token
+        // sorting in _getSlippageTolerance and OracleLibrary matches the V4 pool's currency order.
+        // OracleLibrary sorts tokens by address to determine tick direction; using WETH instead of
+        // address(0) would invert the price for pairs where the counterpart sorts between them.
+        normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+
         uint256 slippageTolerance = _getSlippageTolerance({
             amountIn: amount,
             liquidity: liquidity,
@@ -1149,6 +1156,7 @@ contract JBRouterTerminal is
         if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
 
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
+
         minAmountOut = OracleLibrary.getQuoteAtTick({
             tick: tick,
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -1384,7 +1392,12 @@ contract JBRouterTerminal is
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
     function _settleV4(Currency currency, uint256 amount) internal {
         if (Currency.unwrap(currency) == address(0)) {
-            // Native ETH: contract already holds raw ETH.
+            // Native ETH settlement. If the contract holds WETH (e.g. the caller paid with WETH ERC-20),
+            // unwrap it first so we have raw ETH for the value-based settle call.
+            uint256 wethBalance = IERC20(address(WETH)).balanceOf(address(this));
+            if (address(this).balance < amount && wethBalance >= amount) {
+                WETH.withdraw(amount);
+            }
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {

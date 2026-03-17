@@ -122,6 +122,8 @@ contract DeployScript is Script, Sphinx {
         registry.setDefaultTerminal(terminal);
     }
 
+    // Note: _isDeployed is not used by the Sphinx deployment flow but is retained as a utility for
+    // manual CREATE2 deployments and local testing where Sphinx is not available.
     function _isDeployed(bytes32 salt, bytes memory creationCode, bytes memory arguments) internal view returns (bool) {
         address _deployedTo = vm.computeCreate2Address({
             salt: salt,
