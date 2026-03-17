@@ -70,9 +70,9 @@ State touched: WETH balance changes transiently. Router ends at zero.
 1. `_acceptFundsFor()` -- accepts funds
 2. `_route()` -> `_resolveTokenOut()` -> `_discoverAcceptedToken()` -- finds the accepted token with the best Uniswap pool liquidity
 3. `_convert()` -> `_handleSwap()` -> `_executeSwap()`:
-   - `_pickPoolAndQuote()` discovers the best pool and computes `minAmountOut`
+   - `_pickPoolAndQuote()` discovers the best pool and computes `minAmountOut`. For V4 pools, token addresses are normalized (WETH → `address(0)`) before querying OracleLibrary to match V4's native ETH convention.
    - **V3:** `pool.swap()` with callback `uniswapV3SwapCallback()` to supply input tokens
-   - **V4:** `POOL_MANAGER.unlock()` -> `unlockCallback()` -> `POOL_MANAGER.swap()` + settle/take
+   - **V4:** `POOL_MANAGER.unlock()` -> `unlockCallback()` -> `POOL_MANAGER.swap()` + settle/take. Settlement via `_settleV4` automatically unwraps WETH to native ETH when the pool uses `address(0)` for its native currency.
 4. Leftover input tokens from partial fills returned to payer
 5. If output is native token, unwrap WETH
 6. Forward converted tokens to destination terminal
