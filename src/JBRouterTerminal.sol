@@ -654,7 +654,7 @@ contract JBRouterTerminal is
                 tokenToReclaim: tokenToReclaim,
                 minTokensReclaimed: minTokensReclaimed,
                 beneficiary: payable(address(this)),
-                metadata: bytes("")
+                metadata: ""
             });
 
             // Only apply the minimum to the first cashout step.
@@ -1137,6 +1137,10 @@ contract JBRouterTerminal is
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
+        // V4 uses address(0) for native ETH; map WETH so OracleLibrary token sorting matches the pool.
+        normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+
         uint256 slippageTolerance = _getSlippageTolerance({
             amountIn: amount,
             liquidity: liquidity,
@@ -1149,6 +1153,7 @@ contract JBRouterTerminal is
         if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
 
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
+
         minAmountOut = OracleLibrary.getQuoteAtTick({
             tick: tick,
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -1384,7 +1389,8 @@ contract JBRouterTerminal is
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
     function _settleV4(Currency currency, uint256 amount) internal {
         if (Currency.unwrap(currency) == address(0)) {
-            // Native ETH: contract already holds raw ETH.
+            // Unwrap WETH if needed (caller may have paid with WETH ERC-20).
+            if (address(this).balance < amount) WETH.withdraw(amount);
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {
