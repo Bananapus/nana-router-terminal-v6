@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 // JB core.
 import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
@@ -18,7 +18,6 @@ import {JBFeelessAddresses} from "@bananapus/core-v6/src/JBFeelessAddresses.sol"
 import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBMultiTerminal} from "@bananapus/core-v6/src/JBMultiTerminal.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
-import {JBFees} from "@bananapus/core-v6/src/libraries/JBFees.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
 import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadata.sol";
@@ -27,7 +26,6 @@ import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
 import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
-import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 
 // Uniswap.
@@ -113,7 +111,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     function setUp() public {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
-        _deployJBCore();
+        _deployJbCore();
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
@@ -248,6 +246,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         // The fee in P2 tokens gets cashed out for ETH. Since project 2 has cashOutTaxRate = 0,
         // the cashout returns the proportional surplus (fee_tokens / total_supply * surplus).
         // We just verify the fee project received a non-zero ETH amount.
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 feeProjectETHGain = feeProjectBalanceAfter - feeProjectBalanceBefore;
         assertGt(feeProjectETHGain, 0, "fee project ETH gain should be > 0");
 
@@ -330,6 +329,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: cashOutTaxRate,
+            // forge-lint: disable-next-line(unsafe-typecast)
             baseCurrency: uint32(uint160(acceptedToken)),
             pausePay: false,
             pauseCreditTransfers: false,
@@ -354,6 +354,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         if (payoutLimitAmount > 0) {
             fundAccessLimitGroups = new JBFundAccessLimitGroup[](1);
             JBCurrencyAmount[] memory payoutLimits = new JBCurrencyAmount[](1);
+            // forge-lint: disable-next-line(unsafe-typecast)
             payoutLimits[0] = JBCurrencyAmount({amount: payoutLimitAmount, currency: uint32(uint160(payoutLimitToken))});
             fundAccessLimitGroups[0] = JBFundAccessLimitGroup({
                 terminal: address(jbMultiTerminal),
@@ -377,7 +378,8 @@ contract RouterTerminalFeeCashOutForkTest is Test {
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
         tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
@@ -394,7 +396,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // ───────────────────────── JB Core Deployment
     // ─────────────────────────
 
-    function _deployJBCore() internal {
+    function _deployJbCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
         jbProjects = new JBProjects(multisig, address(0), trustedForwarder);
         jbDirectory = new JBDirectory(jbPermissions, jbProjects, multisig);
