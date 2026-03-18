@@ -300,6 +300,50 @@ contract JBRouterTerminal is
         return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
     }
 
+    /// @notice Get a minimum-amount-out quote at the given tick, applying dynamic slippage.
+    /// @param amount The input amount.
+    /// @param liquidity The pool's in-range liquidity.
+    /// @param tokenIn The input token address (used for token sorting and quoting).
+    /// @param tokenOut The output token address (used for token sorting and quoting).
+    /// @param tick The tick to quote at (TWAP mean tick or spot tick).
+    /// @param poolFeeBps The pool fee in basis points.
+    /// @return minAmountOut The quoted output amount after slippage.
+    function _quoteWithSlippage(
+        uint256 amount,
+        uint128 liquidity,
+        address tokenIn,
+        address tokenOut,
+        int24 tick,
+        uint256 poolFeeBps
+    )
+        internal
+        pure
+        returns (uint256 minAmountOut)
+    {
+        uint256 slippageTolerance = _getSlippageTolerance({
+            amountIn: amount,
+            liquidity: liquidity,
+            tokenOut: tokenOut,
+            tokenIn: tokenIn,
+            arithmeticMeanTick: tick,
+            poolFeeBps: poolFeeBps
+        });
+
+        if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
+
+        if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
+
+        minAmountOut = OracleLibrary.getQuoteAtTick({
+            tick: tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(amount),
+            baseToken: tokenIn,
+            quoteToken: tokenOut
+        });
+
+        minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
+    }
+
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
@@ -1074,29 +1118,14 @@ contract JBRouterTerminal is
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
-        {
-            uint256 slippageTolerance = _getSlippageTolerance({
-                amountIn: amount,
-                liquidity: liquidity,
-                tokenOut: normalizedTokenOut,
-                tokenIn: normalizedTokenIn,
-                arithmeticMeanTick: arithmeticMeanTick,
-                poolFeeBps: feeBps
-            });
-
-            if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
-
-            if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
-            minAmountOut = OracleLibrary.getQuoteAtTick({
-                tick: arithmeticMeanTick,
-                // forge-lint: disable-next-line(unsafe-typecast)
-                baseAmount: uint128(amount),
-                baseToken: normalizedTokenIn,
-                quoteToken: normalizedTokenOut
-            });
-
-            minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
-        }
+        minAmountOut = _quoteWithSlippage({
+            amount: amount,
+            liquidity: liquidity,
+            tokenIn: normalizedTokenIn,
+            tokenOut: normalizedTokenOut,
+            tick: arithmeticMeanTick,
+            poolFeeBps: feeBps
+        });
     }
 
     /// @notice Get a spot-price-based quote with dynamic slippage for a V4 pool.
@@ -1141,28 +1170,14 @@ contract JBRouterTerminal is
         normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
         normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
 
-        uint256 slippageTolerance = _getSlippageTolerance({
-            amountIn: amount,
+        minAmountOut = _quoteWithSlippage({
+            amount: amount,
             liquidity: liquidity,
-            tokenOut: normalizedTokenOut,
             tokenIn: normalizedTokenIn,
-            arithmeticMeanTick: tick,
+            tokenOut: normalizedTokenOut,
+            tick: tick,
             poolFeeBps: uint256(key.fee) / 100
         });
-
-        if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
-
-        if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
-
-        minAmountOut = OracleLibrary.getQuoteAtTick({
-            tick: tick,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            baseAmount: uint128(amount),
-            baseToken: normalizedTokenIn,
-            quoteToken: normalizedTokenOut
-        });
-
-        minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
     }
 
     /// @notice Execute a Uniswap swap from tokenIn to tokenOut (V3 or V4).
