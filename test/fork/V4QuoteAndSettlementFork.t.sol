@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 
 // JB core (deploy fresh within fork — same pattern as RouterTerminalSandwichFork.t.sol).
 import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
@@ -25,14 +25,11 @@ import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadat
 import {JBTerminalConfig} from "@bananapus/core-v6/src/structs/JBTerminalConfig.sol";
 import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
-import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
-import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 
 // Uniswap V3.
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 
 // Uniswap V4.
@@ -40,10 +37,10 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {ModifyLiquidityParams, SwapParams as V4SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath as V4TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
@@ -63,6 +60,7 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 /// @notice Helper that adds liquidity to a V4 pool.
 contract V4LiquidityHelper is IUnlockCallback {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     IPoolManager public immutable poolManager;
 
     struct AddLiqParams {
@@ -85,6 +83,7 @@ contract V4LiquidityHelper is IUnlockCallback {
         external
         payable
     {
+        // forge-lint: disable-next-line(named-struct-fields)
         poolManager.unlock(abi.encode(AddLiqParams(key, tickLower, tickUpper, liquidityDelta)));
     }
 
@@ -113,11 +112,13 @@ contract V4LiquidityHelper is IUnlockCallback {
 
     function _settleIfNegative(Currency currency, int128 delta) internal {
         if (delta >= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amount = uint256(uint128(-delta));
         if (currency.isAddressZero()) {
             poolManager.settle{value: amount}();
         } else {
             poolManager.sync(currency);
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
             poolManager.settle();
         }
@@ -125,6 +126,7 @@ contract V4LiquidityHelper is IUnlockCallback {
 
     function _takeIfPositive(Currency currency, int128 delta) internal {
         if (delta <= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         poolManager.take(currency, address(this), uint256(uint128(delta)));
     }
 
@@ -231,7 +233,7 @@ contract V4QuoteAndSettlementForkTest is Test {
     function setUp() public {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
-        _deployJBCore();
+        _deployJbCore();
 
         v4LiqHelper = new V4LiquidityHelper(V4_POOL_MANAGER);
 
@@ -300,6 +302,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         assertGt(tokensMinted, 0, "Should mint project tokens");
 
         // Verify USDC arrived in the terminal.
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 terminalUsdcBalance = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalUsdcBalance, 0, "Terminal should hold USDC");
 
@@ -344,6 +347,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         assertGt(tokensMinted, 0, "Should mint project tokens");
 
         // Verify DAI arrived in the terminal.
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 terminalDaiBalance = jbTerminalStore.balanceOf(address(jbMultiTerminal), daiProjectId, address(DAI));
         assertGt(terminalDaiBalance, 0, "Terminal should hold DAI");
 
@@ -396,6 +400,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         assertGt(tokensMinted, 0, "Should mint project tokens");
 
         // Verify USDC arrived in the terminal.
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 terminalUsdcBalance = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         assertGt(terminalUsdcBalance, 0, "Terminal should hold USDC");
 
@@ -420,20 +425,28 @@ contract V4QuoteAndSettlementForkTest is Test {
     /// @notice For the same ETH amount, compare V3 and V4 spot quotes. Both pools are initialized
     ///         at the same tick, so their quotes should be in the same ballpark (within 20%).
     ///         An inverted price would be orders of magnitude off (>99% difference).
-    function test_fork_v4VsV3_quoteSanity() public {
+    function test_fork_v4VsV3_quoteSanity() public view {
         uint256 swapAmount = 1 ether;
 
         // --- V3 baseline: read the V3 pool's spot tick and compute a quote. ---
         (, int24 v3Tick,,,,,) = WETH_USDC_V3.slot0();
         uint256 v3Quote = OracleLibrary.getQuoteAtTick({
-            tick: v3Tick, baseAmount: uint128(swapAmount), baseToken: address(WETH), quoteToken: address(USDC)
+            tick: v3Tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(swapAmount),
+            baseToken: address(WETH),
+            quoteToken: address(USDC)
         });
 
         // --- V4 quote: read the V4 pool's spot tick and compute the same way. ---
         // V4 pool uses address(0) for ETH. This is the corrected call path.
         (, int24 v4Tick,,) = V4_POOL_MANAGER.getSlot0(v4EthUsdcKey.toId());
         uint256 v4Quote = OracleLibrary.getQuoteAtTick({
-            tick: v4Tick, baseAmount: uint128(swapAmount), baseToken: address(0), quoteToken: address(USDC)
+            tick: v4Tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(swapAmount),
+            baseToken: address(0),
+            quoteToken: address(USDC)
         });
 
         console.log("V3 USDC quote for 1 ETH: %s", v3Quote);
@@ -583,7 +596,7 @@ contract V4QuoteAndSettlementForkTest is Test {
     // ----------------------- Internal helpers -------------------------- //
     //*********************************************************************//
 
-    function _deployJBCore() internal {
+    function _deployJbCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
         jbProjects = new JBProjects(multisig, address(0), trustedForwarder);
         jbDirectory = new JBDirectory(jbPermissions, jbProjects, multisig);
@@ -629,6 +642,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: 0,
+            // forge-lint: disable-next-line(unsafe-typecast)
             baseCurrency: uint32(uint160(acceptedToken)),
             pausePay: false,
             pauseCreditTransfers: false,
@@ -660,7 +674,8 @@ contract V4QuoteAndSettlementForkTest is Test {
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
         tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
-import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
@@ -13,7 +12,6 @@ import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -134,6 +132,7 @@ contract InvariantMockWETH9 {
 contract MockDestTerminal {
     // Cumulative tracking of all received funds per token.
     mapping(address => uint256) public totalReceived;
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public totalETHReceived;
     uint256 public payCallCount;
     uint256 public addToBalanceCallCount;
@@ -157,6 +156,7 @@ contract MockDestTerminal {
             totalETHReceived += amount;
         } else {
             // Pull the ERC-20 tokens from the router via the allowance it set.
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(token).transferFrom(msg.sender, address(this), amount);
             totalReceived[token] += amount;
         }
@@ -179,6 +179,7 @@ contract MockDestTerminal {
             require(msg.value == amount, "MockTerminal: ETH mismatch");
             totalETHReceived += amount;
         } else {
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(token).transferFrom(msg.sender, address(this), amount);
             totalReceived[token] += amount;
         }
@@ -208,7 +209,7 @@ contract MockCashOutTerminal {
     /// Set by the invariant test's setUp so the mock can burn tokens from the holder.
     InvariantMockERC20 public jbToken;
 
-    function setJBToken(InvariantMockERC20 _jbToken) external {
+    function setJbToken(InvariantMockERC20 _jbToken) external {
         jbToken = _jbToken;
     }
 
@@ -248,7 +249,10 @@ contract MockCashOutTerminal {
     function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
         contexts[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            // forge-lint: disable-next-line(unsafe-typecast)
+            token: JBConstants.NATIVE_TOKEN,
+            decimals: 18,
+            currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
         });
     }
 
@@ -272,10 +276,15 @@ contract RouterTerminalHandler is Test {
     uint256 public constant SOURCE_PROJECT_ID = 2;
 
     // Ghost variables: track total amounts sent to the router.
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public ghost_totalETHPaid;
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public ghost_totalTokenAPaid;
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public ghost_totalTokenBPaid;
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public ghost_totalCashOutETH;
+    // forge-lint: disable-next-line(mixed-case-variable)
     uint256 public ghost_operationCount;
 
     constructor(
@@ -297,7 +306,7 @@ contract RouterTerminalHandler is Test {
     }
 
     /// @notice Pay a project with native ETH.
-    function payWithETH(uint256 amount) external {
+    function payWithEth(uint256 amount) external {
         amount = bound(amount, 1, 10 ether);
 
         vm.deal(address(this), amount);
@@ -359,7 +368,7 @@ contract RouterTerminalHandler is Test {
     }
 
     /// @notice Add to a project's balance with native ETH.
-    function addToBalanceWithETH(uint256 amount) external {
+    function addToBalanceWithEth(uint256 amount) external {
         amount = bound(amount, 1, 10 ether);
 
         vm.deal(address(this), amount);
@@ -483,7 +492,7 @@ contract RouterTerminalInvariant is Test {
         weth = new InvariantMockWETH9();
         destTerminal = new MockDestTerminal();
         cashOutTerminal = new MockCashOutTerminal();
-        cashOutTerminal.setJBToken(jbProjectToken);
+        cashOutTerminal.setJbToken(jbProjectToken);
 
         // Create addresses for mocked protocol contracts.
         mockDirectory = makeAddr("mockDirectory");
@@ -570,10 +579,10 @@ contract RouterTerminalInvariant is Test {
 
         // Target all handler functions (including the cashout handler).
         bytes4[] memory selectors = new bytes4[](7);
-        selectors[0] = RouterTerminalHandler.payWithETH.selector;
+        selectors[0] = RouterTerminalHandler.payWithEth.selector;
         selectors[1] = RouterTerminalHandler.payWithTokenA.selector;
         selectors[2] = RouterTerminalHandler.payWithTokenB.selector;
-        selectors[3] = RouterTerminalHandler.addToBalanceWithETH.selector;
+        selectors[3] = RouterTerminalHandler.addToBalanceWithEth.selector;
         selectors[4] = RouterTerminalHandler.addToBalanceWithTokenA.selector;
         selectors[5] = RouterTerminalHandler.addToBalanceWithTokenB.selector;
         selectors[6] = RouterTerminalHandler.payWithCashOut.selector;
@@ -637,7 +646,7 @@ contract RouterTerminalInvariant is Test {
     }
 
     /// @notice Sanity check: the fuzzer actually called some operations.
-    function invariant_callSummary() public view {
+    function invariant_callSummary() public pure {
         // This invariant just logs — it always passes.
         // When run with -vv, you can see the operation count.
         assert(true);

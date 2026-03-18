@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
-import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -114,7 +113,7 @@ contract AuditHarness is JBRouterTerminal {
         JBRouterTerminal(d, p, pr, t, pm, o, w, f, pm4, tf)
     {}
 
-    function exposed_acceptFundsFor(
+    function exposedAcceptFundsFor(
         address token,
         uint256 amount,
         bytes calldata metadata
@@ -126,7 +125,7 @@ contract AuditHarness is JBRouterTerminal {
         return _acceptFundsFor(token, amount, metadata);
     }
 
-    function exposed_transferFrom(address from, address payable to, address token, uint256 amount) external {
+    function exposedTransferFrom(address from, address payable to, address token, uint256 amount) external {
         _transferFrom(from, to, token, amount);
     }
 }
@@ -239,6 +238,7 @@ contract TestAuditGaps is Test {
         vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals));
 
         JBAccountingContext[] memory ctx = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         ctx[0] = JBAccountingContext({token: tokenOut, decimals: 18, currency: uint32(uint160(tokenOut))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(ctx));
 
@@ -268,7 +268,7 @@ contract TestAuditGaps is Test {
         fot.approve(address(router), 1000);
 
         vm.prank(payer);
-        uint256 received = router.exposed_acceptFundsFor(address(fot), 1000, "");
+        uint256 received = router.exposedAcceptFundsFor(address(fot), 1000, "");
 
         assertEq(received, 950, "Balance-delta should capture fee-on-transfer deduction");
         assertEq(fot.balanceOf(address(router)), 950, "Router balance should reflect actual received");
@@ -284,7 +284,7 @@ contract TestAuditGaps is Test {
         tok.approve(address(router), 1000);
 
         vm.prank(payer);
-        uint256 received = router.exposed_acceptFundsFor(address(tok), 1000, "");
+        uint256 received = router.exposedAcceptFundsFor(address(tok), 1000, "");
 
         assertEq(received, 1000, "Standard token should return full amount");
     }
@@ -333,7 +333,7 @@ contract TestAuditGaps is Test {
         // No allowance granted => falls through to Permit2 path => overflow check.
 
         vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_AmountOverflow.selector, overflow));
-        router.exposed_transferFrom(payer, payable(recip), address(tok), overflow);
+        router.exposedTransferFrom(payer, payable(recip), address(tok), overflow);
     }
 
     /// @notice With sufficient direct allowance, amounts > uint160.max bypass the Permit2 path.
@@ -347,7 +347,7 @@ contract TestAuditGaps is Test {
         vm.prank(payer);
         tok.approve(address(router), large);
 
-        router.exposed_transferFrom(payer, payable(recip), address(tok), large);
+        router.exposedTransferFrom(payer, payable(recip), address(tok), large);
 
         assertEq(tok.balanceOf(recip), large, "Recipient should receive large amount via direct transfer");
     }
@@ -366,13 +366,18 @@ contract TestAuditGaps is Test {
         vm.mockCall(
             address(permit2),
             abi.encodeWithSignature(
-                "transferFrom(address,address,uint160,address)", payer, recip, uint160(exactMax), address(tok)
+                "transferFrom(address,address,uint160,address)",
+                payer,
+                recip,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                uint160(exactMax),
+                address(tok)
             ),
             abi.encode()
         );
 
         // Should NOT revert.
-        router.exposed_transferFrom(payer, payable(recip), address(tok), exactMax);
+        router.exposedTransferFrom(payer, payable(recip), address(tok), exactMax);
     }
 
     /// @notice JBRouterTerminalRegistry._transferFrom also reverts on overflow.

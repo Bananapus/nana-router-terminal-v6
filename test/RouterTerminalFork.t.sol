@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 // JB core (via TestBaseWorkflow pattern — deploy fresh within fork).
 import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
@@ -25,13 +25,10 @@ import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadat
 import {JBTerminalConfig} from "@bananapus/core-v6/src/structs/JBTerminalConfig.sol";
 import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
-import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
-import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 
 // Uniswap.
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
@@ -97,7 +94,7 @@ contract RouterTerminalForkTest is Test {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
         // Deploy all JB core contracts fresh within the fork.
-        _deployJBCore();
+        _deployJbCore();
 
         // Deploy the router terminal with real Uniswap + real Permit2, but fresh JB core.
         routerTerminal = new JBRouterTerminal({
@@ -135,22 +132,22 @@ contract RouterTerminalForkTest is Test {
 
     function test_fork_payETH_projectAcceptsUSDC_small() public {
         uint256 amountIn = 0.01 ether;
-        _payETHAndAssert(usdcProjectId, amountIn, address(USDC));
+        _payEthAndAssert(usdcProjectId, amountIn, address(USDC));
     }
 
     function test_fork_payETH_projectAcceptsUSDC_medium() public {
         uint256 amountIn = 1 ether;
-        _payETHAndAssert(usdcProjectId, amountIn, address(USDC));
+        _payEthAndAssert(usdcProjectId, amountIn, address(USDC));
     }
 
     function test_fork_payETH_projectAcceptsUSDC_large() public {
         uint256 amountIn = 100 ether;
-        _payETHAndAssert(usdcProjectId, amountIn, address(USDC));
+        _payEthAndAssert(usdcProjectId, amountIn, address(USDC));
     }
 
     function test_fork_payETH_projectAcceptsUSDC_veryLarge() public {
         uint256 amountIn = 1000 ether;
-        _payETHAndAssert(usdcProjectId, amountIn, address(USDC));
+        _payEthAndAssert(usdcProjectId, amountIn, address(USDC));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -159,12 +156,12 @@ contract RouterTerminalForkTest is Test {
 
     function test_fork_payUSDC_projectAcceptsETH_small() public {
         uint256 amountIn = 10e6; // 10 USDC
-        _payERC20AndAssert(usdcProjectId, ethProjectId, address(USDC), amountIn, JBConstants.NATIVE_TOKEN);
+        _payErc20AndAssert(usdcProjectId, ethProjectId, address(USDC), amountIn, JBConstants.NATIVE_TOKEN);
     }
 
     function test_fork_payUSDC_projectAcceptsETH_large() public {
         uint256 amountIn = 1_000_000e6; // 1M USDC
-        _payERC20AndAssert(usdcProjectId, ethProjectId, address(USDC), amountIn, JBConstants.NATIVE_TOKEN);
+        _payErc20AndAssert(usdcProjectId, ethProjectId, address(USDC), amountIn, JBConstants.NATIVE_TOKEN);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -237,7 +234,7 @@ contract RouterTerminalForkTest is Test {
 
     function test_fork_payETH_projectAcceptsDAI() public {
         uint256 amountIn = 1 ether;
-        _payETHAndAssert(daiProjectId, amountIn, address(DAI));
+        _payEthAndAssert(daiProjectId, amountIn, address(DAI));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -335,7 +332,7 @@ contract RouterTerminalForkTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @dev Pay ETH via the router terminal to a project that accepts `expectedTokenOut`. Asserts swap happened.
-    function _payETHAndAssert(uint256 projectId, uint256 amountIn, address expectedTokenOut) internal {
+    function _payEthAndAssert(uint256 projectId, uint256 amountIn, address expectedTokenOut) internal {
         vm.deal(payer, amountIn);
         uint256 payerBalBefore = payer.balance;
 
@@ -367,7 +364,7 @@ contract RouterTerminalForkTest is Test {
     }
 
     /// @dev Pay ERC-20 via the router terminal to a project that accepts a different token.
-    function _payERC20AndAssert(
+    function _payErc20AndAssert(
         uint256, /* sourceProjectIdForDeal — unused */
         uint256 destProjectId,
         address tokenIn,
@@ -409,7 +406,7 @@ contract RouterTerminalForkTest is Test {
     // ───────────────────────── JB Core Deployment
     // ─────────────────────────
 
-    function _deployJBCore() internal {
+    function _deployJbCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
         jbProjects = new JBProjects(multisig, address(0), trustedForwarder);
         jbDirectory = new JBDirectory(jbPermissions, jbProjects, multisig);
@@ -456,6 +453,7 @@ contract RouterTerminalForkTest is Test {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: 0,
+            // forge-lint: disable-next-line(unsafe-typecast)
             baseCurrency: uint32(uint160(acceptedToken)),
             pausePay: false,
             pauseCreditTransfers: false,
@@ -487,7 +485,8 @@ contract RouterTerminalForkTest is Test {
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
         tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});

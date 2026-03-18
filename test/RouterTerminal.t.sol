@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
@@ -17,13 +17,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
@@ -133,7 +131,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         )
     {}
 
-    function exposed_resolveTokenOut(
+    function exposedResolveTokenOut(
         uint256 projectId,
         address tokenIn,
         bytes calldata metadata
@@ -145,7 +143,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         return _resolveTokenOut(projectId, tokenIn, metadata);
     }
 
-    function exposed_discoverPool(
+    function exposedDiscoverPool(
         address normalizedTokenIn,
         address normalizedTokenOut
     )
@@ -159,7 +157,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         }
     }
 
-    function exposed_settleV4(Currency currency, uint256 amount) external {
+    function exposedSettleV4(Currency currency, uint256 amount) external {
         _settleV4(currency, amount);
     }
 }
@@ -224,15 +222,16 @@ contract RouterTerminalTest is Test {
         JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, token);
         assertEq(ctx.token, token);
         assertEq(ctx.decimals, 18);
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(ctx.currency, uint32(uint160(token)));
     }
 
-    function test_accountingContexts_empty() public {
+    function test_accountingContexts_empty() public view {
         JBAccountingContext[] memory ctxs = routerTerminal.accountingContextsOf(1);
         assertEq(ctxs.length, 0);
     }
 
-    function test_currentSurplus_zero() public {
+    function test_currentSurplus_zero() public view {
         assertEq(routerTerminal.currentSurplusOf(1, new JBAccountingContext[](0), 18, 1), 0);
     }
 
@@ -253,7 +252,7 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
-        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
+        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
 
         assertEq(tokenOut, tokenIn);
         assertEq(address(destTerminal), mockTerminal);
@@ -278,7 +277,7 @@ contract RouterTerminalTest is Test {
         );
 
         (address tokenOut, IJBTerminal destTerminal) =
-            routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, metadata);
+            routerTerminal.exposedResolveTokenOut(projectId, tokenIn, metadata);
 
         assertEq(tokenOut, desiredTokenOut);
         assertEq(address(destTerminal), mockTerminal);
@@ -309,7 +308,8 @@ contract RouterTerminalTest is Test {
 
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
         contexts[0] =
-            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mock V3 pool discovery: pool exists at 0.3% fee tier with liquidity.
@@ -340,7 +340,7 @@ contract RouterTerminalTest is Test {
         // Mock V4 — no pools found (extsload returns 0 for all).
         _mockV4NoPools(tokenIn, acceptedToken);
 
-        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
+        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
 
         assertEq(tokenOut, acceptedToken);
         assertEq(address(destTerminal), mockTerminal);
@@ -366,7 +366,7 @@ contract RouterTerminalTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
-        routerTerminal.exposed_resolveTokenOut(projectId, tokenIn, "");
+        routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
     }
 
     //*********************************************************************//
@@ -572,7 +572,7 @@ contract RouterTerminalTest is Test {
         // Mock V4 — no pools.
         _mockV4NoPools(tokenA, tokenB);
 
-        PoolInfo memory result = routerTerminal.exposed_discoverPool(tokenA, tokenB);
+        PoolInfo memory result = routerTerminal.exposedDiscoverPool(tokenA, tokenB);
         assertFalse(result.isV4);
         assertEq(address(result.v3Pool), pool500);
     }
@@ -590,14 +590,14 @@ contract RouterTerminalTest is Test {
         _mockV4NoPools(tokenA, tokenB);
 
         vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB));
-        routerTerminal.exposed_discoverPool(tokenA, tokenB);
+        routerTerminal.exposedDiscoverPool(tokenA, tokenB);
     }
 
     //*********************************************************************//
     // -------------------- supports interface tests -------------------- //
     //*********************************************************************//
 
-    function test_supportsInterface() public {
+    function test_supportsInterface() public view {
         assertTrue(routerTerminal.supportsInterface(type(IJBTerminal).interfaceId));
         assertTrue(routerTerminal.supportsInterface(type(IERC165).interfaceId));
     }
@@ -668,7 +668,7 @@ contract RouterTerminalTest is Test {
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
         _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
 
-        PoolInfo memory result = routerTerminal.exposed_discoverPool(tokenA, tokenB);
+        PoolInfo memory result = routerTerminal.exposedDiscoverPool(tokenA, tokenB);
         assertTrue(result.isV4);
         assertEq(Currency.unwrap(result.v4Key.currency0), sorted0);
         assertEq(Currency.unwrap(result.v4Key.currency1), sorted1);
@@ -721,7 +721,7 @@ contract RouterTerminalTest is Test {
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
         _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
 
-        PoolInfo memory result = routerTerminal.exposed_discoverPool(tokenA, tokenB);
+        PoolInfo memory result = routerTerminal.exposedDiscoverPool(tokenA, tokenB);
         assertFalse(result.isV4);
         assertEq(address(result.v3Pool), v3Pool);
     }
@@ -754,7 +754,7 @@ contract RouterTerminalTest is Test {
         _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
         _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
 
-        PoolInfo memory result = routerTerminal.exposed_discoverPool(tokenA, tokenB);
+        PoolInfo memory result = routerTerminal.exposedDiscoverPool(tokenA, tokenB);
         assertTrue(result.isV4);
         assertEq(result.v4Key.fee, 500);
         assertEq(result.v4Key.tickSpacing, int24(10));
@@ -803,7 +803,7 @@ contract RouterTerminalTest is Test {
         );
 
         // V4 is skipped (POOL_MANAGER = address(0)), should find V3 pool.
-        PoolInfo memory result = noV4Router.exposed_discoverPool(tokenA, tokenB);
+        PoolInfo memory result = noV4Router.exposedDiscoverPool(tokenA, tokenB);
         assertFalse(result.isV4);
         assertEq(address(result.v3Pool), v3Pool);
     }
@@ -959,6 +959,7 @@ contract RouterTerminalTest is Test {
         });
 
         uint256 amount = 1e18;
+        // forge-lint: disable-next-line(unsafe-typecast)
         int256 amountSpecified = -int256(amount); // exact-input: NEGATIVE
         uint160 sqrtPriceLimitX96 = 4_295_128_740; // MIN_SQRT_RATIO + 1
         uint256 minAmountOut = 0;
@@ -1177,7 +1178,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), wethPortion, "Setup: router WETH balance");
 
         // Settle 1 ETH via _settleV4. Should withdraw only 0.5 WETH (the deficit).
-        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), totalAmount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), totalAmount);
 
         // PoolManager should have received 1 ETH.
         assertEq(poolManager.lastSettleAmount(), totalAmount, "PoolManager received correct amount");
@@ -1204,7 +1205,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), 0.5 ether, "Setup: router WETH balance");
 
         // Settle 1 ETH. No WETH should be withdrawn.
-        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), amount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount);
 
         // PoolManager received the ETH.
         assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");
@@ -1227,7 +1228,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), amount, "Setup: router WETH balance");
 
         // Settle 1 ETH. Should withdraw all 1 WETH.
-        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), amount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount);
 
         // PoolManager received the ETH.
         assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");

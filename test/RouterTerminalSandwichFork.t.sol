@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 
 // JB core (deploy fresh within fork — same pattern as RouterTerminalFork.t.sol).
 import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
@@ -25,9 +25,7 @@ import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadat
 import {JBTerminalConfig} from "@bananapus/core-v6/src/structs/JBTerminalConfig.sol";
 import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
-import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
-import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 
 // Uniswap V3.
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -41,7 +39,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {ModifyLiquidityParams, SwapParams as V4SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
@@ -78,9 +76,11 @@ contract V3SwapAttacker is IUniswapV3SwapCallback {
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external override {
         // Pay the pool whatever it asks for.
         if (amount0Delta > 0) {
+            // forge-lint: disable-next-line(unsafe-typecast, erc20-unchecked-transfer)
             IERC20(IUniswapV3Pool(msg.sender).token0()).transfer(msg.sender, uint256(amount0Delta));
         }
         if (amount1Delta > 0) {
+            // forge-lint: disable-next-line(unsafe-typecast, erc20-unchecked-transfer)
             IERC20(IUniswapV3Pool(msg.sender).token1()).transfer(msg.sender, uint256(amount1Delta));
         }
     }
@@ -90,6 +90,7 @@ contract V3SwapAttacker is IUniswapV3SwapCallback {
 
 /// @notice Attacker that swaps directly through V4 PoolManager.
 contract V4SwapAttacker is IUnlockCallback {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     IPoolManager public immutable poolManager;
 
     struct SwapParams {
@@ -150,11 +151,13 @@ contract V4SwapAttacker is IUnlockCallback {
 
     function _settleIfNegative(Currency currency, int128 delta) internal {
         if (delta >= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amount = uint256(uint128(-delta));
         if (currency.isAddressZero()) {
             poolManager.settle{value: amount}();
         } else {
             poolManager.sync(currency);
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
             poolManager.settle();
         }
@@ -162,6 +165,7 @@ contract V4SwapAttacker is IUnlockCallback {
 
     function _takeIfPositive(Currency currency, int128 delta) internal {
         if (delta <= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         poolManager.take(currency, address(this), uint256(uint128(delta)));
     }
 
@@ -170,6 +174,7 @@ contract V4SwapAttacker is IUnlockCallback {
 
 /// @notice Helper that adds liquidity to a V4 pool.
 contract V4LiquidityHelper is IUnlockCallback {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     IPoolManager public immutable poolManager;
 
     struct AddLiqParams {
@@ -192,6 +197,7 @@ contract V4LiquidityHelper is IUnlockCallback {
         external
         payable
     {
+        // forge-lint: disable-next-line(named-struct-fields)
         poolManager.unlock(abi.encode(AddLiqParams(key, tickLower, tickUpper, liquidityDelta)));
     }
 
@@ -220,11 +226,13 @@ contract V4LiquidityHelper is IUnlockCallback {
 
     function _settleIfNegative(Currency currency, int128 delta) internal {
         if (delta >= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amount = uint256(uint128(-delta));
         if (currency.isAddressZero()) {
             poolManager.settle{value: amount}();
         } else {
             poolManager.sync(currency);
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
             poolManager.settle();
         }
@@ -232,6 +240,7 @@ contract V4LiquidityHelper is IUnlockCallback {
 
     function _takeIfPositive(Currency currency, int128 delta) internal {
         if (delta <= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
         poolManager.take(currency, address(this), uint256(uint128(delta)));
     }
 
@@ -307,7 +316,7 @@ contract RouterTerminalSandwichForkTest is Test {
     function setUp() public {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
-        _deployJBCore();
+        _deployJbCore();
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
@@ -358,12 +367,13 @@ contract RouterTerminalSandwichForkTest is Test {
 
         // Baseline: victim swap with no attack.
         uint256 snapBaseline = vm.snapshotState();
-        uint256 baselineTokens = _payETH(usdcProjectId, victimAmount);
+        uint256 baselineTokens = _payEth(usdcProjectId, victimAmount);
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 baselineUSDC = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         vm.revertToState(snapBaseline);
 
         console.log(
-            "  Baseline: %s tokens minted, %s USDC in terminal", _toString(baselineTokens), _formatUSDC(baselineUSDC)
+            "  Baseline: %s tokens minted, %s USDC in terminal", _toString(baselineTokens), _formatUsdc(baselineUSDC)
         );
         console.log("");
 
@@ -379,24 +389,31 @@ contract RouterTerminalSandwichForkTest is Test {
             // This pushes the WETH price down (makes USDC cheaper per WETH).
             deal(token1, address(v3Attacker), attackSize);
 
-            (int256 frontAmount0, int256 frontAmount1) = v3Attacker.swap(WETH_USDC_V3, false, int256(attackSize));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            (int256 frontAmount0,) = v3Attacker.swap(WETH_USDC_V3, false, int256(attackSize));
 
             // V3: with zeroForOne=false exact input, amount0 is negative (USDC received by attacker).
+            // forge-lint: disable-next-line(unsafe-typecast, mixed-case-variable)
             uint256 attackerUSDCReceived = frontAmount0 < 0 ? uint256(-frontAmount0) : 0;
 
             // Step 2: Victim pays through router terminal.
-            uint256 victimTokens = _payETH(usdcProjectId, victimAmount);
+            _payEth(usdcProjectId, victimAmount);
+            // forge-lint: disable-next-line(mixed-case-variable)
             uint256 victimUSDC = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
 
             // Step 3: Attacker backrun — sell USDC back for WETH.
+            // forge-lint: disable-next-line(mixed-case-variable)
             uint256 attackerWETHBack = 0;
             if (attackerUSDCReceived > 0) {
                 deal(token0, address(v3Attacker), attackerUSDCReceived);
                 // V3: zeroForOne=true exact input of USDC. amount1 is negative (WETH received).
+                // forge-lint: disable-next-line(unsafe-typecast)
                 (, int256 backAmount1) = v3Attacker.swap(WETH_USDC_V3, true, int256(attackerUSDCReceived));
+                // forge-lint: disable-next-line(unsafe-typecast)
                 attackerWETHBack = backAmount1 < 0 ? uint256(-backAmount1) : 0;
             }
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             int256 attackerProfit = int256(attackerWETHBack) - int256(attackSize);
             uint256 victimLossBps = baselineUSDC > 0
                 ? ((baselineUSDC > victimUSDC ? baselineUSDC - victimUSDC : 0) * 10_000) / baselineUSDC
@@ -404,11 +421,13 @@ contract RouterTerminalSandwichForkTest is Test {
 
             console.log("  Attack: %s ETH", _formatEther(attackSize));
             console.log(
-                "    Victim: %s USDC (loss: %s bps vs baseline)", _formatUSDC(victimUSDC), _toString(victimLossBps)
+                "    Victim: %s USDC (loss: %s bps vs baseline)", _formatUsdc(victimUSDC), _toString(victimLossBps)
             );
             if (attackerProfit >= 0) {
+                // forge-lint: disable-next-line(unsafe-typecast)
                 console.log("    Attacker: +%s ETH profit", _formatEther(uint256(attackerProfit)));
             } else {
+                // forge-lint: disable-next-line(unsafe-typecast)
                 console.log("    Attacker: -%s ETH LOSS", _formatEther(uint256(-attackerProfit)));
             }
 
@@ -437,15 +456,16 @@ contract RouterTerminalSandwichForkTest is Test {
         uint256 twapQuoteBefore = OracleLibrary.getQuoteAtTick(tickBefore, 1 ether, address(WETH), address(USDC));
 
         console.log("  TWAP tick before: %s", _tickStr(tickBefore));
-        console.log("  TWAP quote before: %s USDC per ETH", _formatUSDC(twapQuoteBefore));
+        console.log("  TWAP quote before: %s USDC per ETH", _formatUsdc(twapQuoteBefore));
 
         // Manipulate: large swap to move spot price.
         uint256 manipSize = 100 ether;
         deal(address(WETH), address(v3Attacker), manipSize);
+        // forge-lint: disable-next-line(unsafe-typecast)
         v3Attacker.swap(WETH_USDC_V3, false, int256(manipSize));
 
         // Read spot price after manipulation.
-        (uint160 sqrtPriceAfter, int24 spotTickAfter,,,,,) = WETH_USDC_V3.slot0();
+        (, int24 spotTickAfter,,,,,) = WETH_USDC_V3.slot0();
         uint256 spotQuoteAfter = OracleLibrary.getQuoteAtTick(spotTickAfter, 1 ether, address(WETH), address(USDC));
 
         // Read TWAP after manipulation (same block!).
@@ -454,8 +474,8 @@ contract RouterTerminalSandwichForkTest is Test {
 
         console.log("");
         console.log("  After %s ETH manipulation:", _formatEther(manipSize));
-        console.log("  Spot tick: %s | Spot quote: %s USDC", _tickStr(spotTickAfter), _formatUSDC(spotQuoteAfter));
-        console.log("  TWAP tick: %s | TWAP quote: %s USDC", _tickStr(tickAfter), _formatUSDC(twapQuoteAfter));
+        console.log("  Spot tick: %s | Spot quote: %s USDC", _tickStr(spotTickAfter), _formatUsdc(spotQuoteAfter));
+        console.log("  TWAP tick: %s | TWAP quote: %s USDC", _tickStr(tickAfter), _formatUsdc(twapQuoteAfter));
 
         uint256 spotDeltaBps =
             twapQuoteBefore > spotQuoteAfter ? ((twapQuoteBefore - spotQuoteAfter) * 10_000) / twapQuoteBefore : 0;
@@ -489,21 +509,24 @@ contract RouterTerminalSandwichForkTest is Test {
 
         // Get baseline USDC output.
         uint256 snapBaseline = vm.snapshotState();
-        _payETH(usdcProjectId, victimAmount);
+        _payEth(usdcProjectId, victimAmount);
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 baselineUSDC = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
         vm.revertToState(snapBaseline);
 
-        console.log("  Baseline USDC: %s", _formatUSDC(baselineUSDC));
+        console.log("  Baseline USDC: %s", _formatUsdc(baselineUSDC));
 
         // User sets tight quote: 0.5% slippage.
+        // forge-lint: disable-next-line(mixed-case-variable)
         uint256 userMinUSDC = (baselineUSDC * 995) / 1000;
-        console.log("  User min USDC (0.5%% slippage): %s", _formatUSDC(userMinUSDC));
+        console.log("  User min USDC (0.5%% slippage): %s", _formatUsdc(userMinUSDC));
 
         // Attacker frontruns.
         uint256 attackSize = 50 ether;
         uint256 snapId = vm.snapshotState();
 
         deal(address(WETH), address(v3Attacker), attackSize);
+        // forge-lint: disable-next-line(unsafe-typecast)
         v3Attacker.swap(WETH_USDC_V3, false, int256(attackSize));
 
         // Victim pays with tight user quote.
@@ -526,8 +549,9 @@ contract RouterTerminalSandwichForkTest is Test {
         }) returns (
             uint256 tokenCount
         ) {
+            // forge-lint: disable-next-line(mixed-case-variable)
             uint256 victimUSDC = jbTerminalStore.balanceOf(address(jbMultiTerminal), usdcProjectId, address(USDC));
-            console.log("  Swap succeeded: %s tokens, %s USDC", _toString(tokenCount), _formatUSDC(victimUSDC));
+            console.log("  Swap succeeded: %s tokens, %s USDC", _toString(tokenCount), _formatUsdc(victimUSDC));
             console.log("  (Attack was within 0.5%% tolerance)");
         } catch {
             reverted = true;
@@ -562,7 +586,7 @@ contract RouterTerminalSandwichForkTest is Test {
 
         (PoolKey memory key, uint256 quoteBefore) = _setupV4Pool();
 
-        console.log("  Quote before: %s USDC per ETH", _formatUSDC(quoteBefore));
+        console.log("  Quote before: %s USDC per ETH", _formatUsdc(quoteBefore));
 
         // Attacker manipulates V4 pool spot price at varying sizes.
         uint256[3] memory attackSizes = [uint256(10 ether), 50 ether, 100 ether];
@@ -621,6 +645,7 @@ contract RouterTerminalSandwichForkTest is Test {
         IERC20(wethAddr).approve(address(V4_POOL_MANAGER), type(uint256).max);
         vm.stopPrank();
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         v4Attacker.swap(key, false, -int256(attackSize), V4TickMath.MAX_SQRT_PRICE - 1);
 
         (, int24 spotAfter,,) = V4_POOL_MANAGER.getSlot0(key.toId());
@@ -628,7 +653,7 @@ contract RouterTerminalSandwichForkTest is Test {
         uint256 deltaBps = quoteBefore > quoteAfter ? ((quoteBefore - quoteAfter) * 10_000) / quoteBefore : 0;
 
         console.log("  Attack %s ETH: spot moved %s bps", _formatEther(attackSize), _toString(deltaBps));
-        console.log("    Price: %s -> %s USDC/ETH", _formatUSDC(quoteBefore), _formatUSDC(quoteAfter));
+        console.log("    Price: %s -> %s USDC/ETH", _formatUsdc(quoteBefore), _formatUsdc(quoteAfter));
 
         vm.revertToState(snapId);
     }
@@ -637,7 +662,7 @@ contract RouterTerminalSandwichForkTest is Test {
     // ----------------------- Internal helpers -------------------------- //
     //*********************************************************************//
 
-    function _payETH(uint256 projectId, uint256 amountIn) internal returns (uint256 tokenCount) {
+    function _payEth(uint256 projectId, uint256 amountIn) internal returns (uint256 tokenCount) {
         vm.deal(payer, amountIn);
         vm.prank(payer);
         tokenCount = routerTerminal.pay{value: amountIn}({
@@ -651,7 +676,7 @@ contract RouterTerminalSandwichForkTest is Test {
         });
     }
 
-    function _deployJBCore() internal {
+    function _deployJbCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
         jbProjects = new JBProjects(multisig, address(0), trustedForwarder);
         jbDirectory = new JBDirectory(jbPermissions, jbProjects, multisig);
@@ -697,6 +722,7 @@ contract RouterTerminalSandwichForkTest is Test {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: 0,
+            // forge-lint: disable-next-line(unsafe-typecast)
             baseCurrency: uint32(uint160(acceptedToken)),
             pausePay: false,
             pauseCreditTransfers: false,
@@ -728,7 +754,8 @@ contract RouterTerminalSandwichForkTest is Test {
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
         tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});
@@ -753,7 +780,7 @@ contract RouterTerminalSandwichForkTest is Test {
         return string(abi.encodePacked(_toString(whole), ".", _toString(frac)));
     }
 
-    function _formatUSDC(uint256 amount) internal pure returns (string memory) {
+    function _formatUsdc(uint256 amount) internal pure returns (string memory) {
         uint256 whole = amount / 1e6;
         uint256 frac = (amount % 1e6) / 1e4;
         if (frac < 10) return string(abi.encodePacked(_toString(whole), ".0", _toString(frac)));
@@ -771,6 +798,7 @@ contract RouterTerminalSandwichForkTest is Test {
         bytes memory buffer = new bytes(digits);
         while (value != 0) {
             digits--;
+            // forge-lint: disable-next-line(unsafe-typecast)
             buffer[digits] = bytes1(uint8(48 + value % 10));
             value /= 10;
         }
@@ -778,7 +806,9 @@ contract RouterTerminalSandwichForkTest is Test {
     }
 
     function _tickStr(int24 tick) internal pure returns (string memory) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (tick >= 0) return _toString(uint256(uint24(tick)));
+        // forge-lint: disable-next-line(unsafe-typecast)
         return string(abi.encodePacked("-", _toString(uint256(uint24(-tick)))));
     }
 }

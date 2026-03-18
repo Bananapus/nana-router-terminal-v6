@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
-import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -317,7 +315,7 @@ contract RouterTerminalCreditCashoutTest is Test {
 
     /// @notice Verify the metadata encoding/decoding is consistent between test and contract.
     /// The cashOutSource metadata key encodes (sourceProjectId, creditAmount).
-    function test_creditCashout_metadataParsing() public {
+    function test_creditCashout_metadataParsing() public view {
         uint256 sourceProjectId = 42;
         uint256 creditAmount = 123e18;
 

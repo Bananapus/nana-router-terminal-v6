@@ -10,9 +10,7 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -151,6 +149,7 @@ contract CashOutLoopLimitTest is Test {
 
         // Accounting context: terminal accepts the reclaim token.
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] = JBAccountingContext({token: reclaimToken, decimals: 18, currency: uint32(uint160(reclaimToken))});
         vm.mockCall(terminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 

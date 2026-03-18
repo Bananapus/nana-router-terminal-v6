@@ -208,7 +208,11 @@ contract V4SpotPriceSlippageTest is Test {
             uint256 amountSmall = 1000; // Very small swap to ensure negligible impact
 
             uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-                tick: tick, baseAmount: uint128(amountSmall), baseToken: tokenIn, quoteToken: tokenOut
+                tick: tick,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                baseAmount: uint128(amountSmall),
+                baseToken: tokenIn,
+                quoteToken: tokenOut
             });
 
             uint256 impact = lib.calculateImpact(amountSmall, liquidityDeep, sqrtP, true);
@@ -233,7 +237,11 @@ contract V4SpotPriceSlippageTest is Test {
             uint256 amount = 1 ether;
 
             uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-                tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
+                tick: tick,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                baseAmount: uint128(amount),
+                baseToken: tokenIn,
+                quoteToken: tokenOut
             });
 
             uint256 impact = lib.calculateImpact(amount, liquidity, sqrtP, true);
@@ -265,7 +273,11 @@ contract V4SpotPriceSlippageTest is Test {
         address tokenOut = address(0x2222);
 
         uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-            tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
+            tick: tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(amount),
+            baseToken: tokenIn,
+            quoteToken: tokenOut
         });
 
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(tick);
@@ -303,7 +315,11 @@ contract V4SpotPriceSlippageTest is Test {
         address tokenOut = address(0x2222);
 
         uint256 spotQuote = OracleLibrary.getQuoteAtTick({
-            tick: tick, baseAmount: uint128(amount), baseToken: tokenIn, quoteToken: tokenOut
+            tick: tick,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            baseAmount: uint128(amount),
+            baseToken: tokenIn,
+            quoteToken: tokenOut
         });
 
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(tick);
