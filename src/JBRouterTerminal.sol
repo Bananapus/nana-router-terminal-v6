@@ -80,6 +80,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+    error JBRouterTerminal_ReentrantRouting();
     error JBRouterTerminal_TokenNotAccepted(uint256 projectId, address token);
 
     //*********************************************************************//
@@ -124,6 +125,13 @@ contract JBRouterTerminal is
 
     /// @notice The ERC-20 wrapper for the native token.
     IWETH9 public immutable WETH;
+
+    //*********************************************************************//
+    // ---------------------- private stored properties ----------------- //
+    //*********************************************************************//
+
+    /// @notice Reentrancy guard flag. True while `_route()` is executing.
+    bool private _routing;
 
     //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
@@ -326,6 +334,8 @@ contract JBRouterTerminal is
         payable
         override
     {
+        if (_routing) revert JBRouterTerminal_ReentrantRouting();
+
         IJBTerminal destTerminal;
         {
             amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -380,6 +390,8 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
+        if (_routing) revert JBRouterTerminal_ReentrantRouting();
+
         IJBTerminal destTerminal;
         {
             amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -1341,6 +1353,8 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
+        _routing = true;
+
         // Check for credit source override.
         uint256 sourceProjectIdOverride;
         {
@@ -1369,6 +1383,7 @@ contract JBRouterTerminal is
 
             // If the cashout loop found a terminal that accepts the reclaimed token, we're done.
             if (address(destTerminal) != address(0)) {
+                _routing = false;
                 return (destTerminal, tokenOut, amountOut);
             }
 
@@ -1384,13 +1399,16 @@ contract JBRouterTerminal is
         amountOut = _convert({
             tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata
         });
+
+        _routing = false;
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
     function _settleV4(Currency currency, uint256 amount) internal {
         if (Currency.unwrap(currency) == address(0)) {
-            // Unwrap WETH if needed (caller may have paid with WETH ERC-20).
-            if (address(this).balance < amount) WETH.withdraw(amount);
+            // Unwrap only the WETH deficit (caller may hold partial ETH + partial WETH).
+            uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
+            if (deficit > 0) WETH.withdraw(deficit);
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {

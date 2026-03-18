@@ -350,6 +350,9 @@ contract RouterTerminalReentrancyTest is Test {
         // The malicious terminal's reentry was attempted.
         assertTrue(malicious.reentered(), "malicious terminal should have attempted reentry");
 
+        // The reentry should have been reverted by the reentrancy guard.
+        assertTrue(malicious.reentryReverted(), "reentry should have been reverted by reentrancy guard");
+
         // The router forwarded all the reclaimed ETH to the destination terminal.
         // In a mock scenario, the router should have sent exactly what the cashout returned.
         assertEq(
@@ -421,6 +424,9 @@ contract RouterTerminalReentrancyTest is Test {
 
         // The malicious terminal's reentry was attempted.
         assertTrue(malicious.reentered(), "malicious terminal should have attempted reentry");
+
+        // The reentry should have been reverted by the reentrancy guard.
+        assertTrue(malicious.reentryReverted(), "reentry should have been reverted by reentrancy guard");
 
         // Router forwarded all the reclaimed ETH to the destination terminal.
         assertEq(
