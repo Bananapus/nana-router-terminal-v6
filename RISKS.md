@@ -58,10 +58,11 @@
 
 ### 8.1 No reentrancy guard (stateless routing)
 
-The router terminal has no `ReentrancyGuard` or `_routing` flag. During `_cashOutLoop`, the cashout terminal's callback could re-enter `pay()` or `addToBalanceOf()` on this router. This is safe because:
+The router terminal has no `ReentrancyGuard` or `_routing` flag. This is a conscious design choice, not an oversight. During `_cashOutLoop`, the cashout terminal's callback could re-enter `pay()` or `addToBalanceOf()` on this router. This is safe because:
 
-- **The router is stateless.** It does not maintain mutable accounting between `_route()` and the final `destTerminal.pay/addToBalanceOf`. Each call independently accepts funds, routes them, and forwards the result. There is no shared state that a re-entrant call could corrupt.
+- **The router is stateless.** It does not maintain mutable accounting between `_route()` and the final `destTerminal.pay/addToBalanceOf`. Each call independently accepts funds, routes them, and forwards the result. There is no shared mutable state that a re-entrant call could corrupt — no balances, no counters, no flags. The only storage is immutable configuration (DIRECTORY, TOKENS, WETH, etc.).
+- **CEI ordering is maintained within each call.** The execution flow follows a strict pipeline: (1) `_acceptFundsFor` pulls funds from the caller, (2) `_route` computes the destination and converts tokens if needed, (3) `_beforeTransferFor` + `destTerminal.pay/addToBalanceOf` forwards the result. Because there is no mutable state written between steps (1) and (3), there is nothing for a re-entrant call to read-before-write or corrupt. The "checks" and "effects" are collapsed into stateless computation, and the "interaction" (the final forwarding call) operates only on local variables.
 - **Each call uses its own funds.** The re-entrant call would need to supply its own tokens/ETH (via `_acceptFundsFor`). It cannot consume funds belonging to the outer call because those funds are already committed to the routing pipeline.
 - **A reentrancy guard would block legitimate composition.** Projects may have terminal chains where terminal A routes through this router, which cashes out into terminal B, which itself routes through this router for a different project. A blanket reentrancy guard would break such flows.
 
-Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` and `addToBalanceOf()` succeed without corrupting the outer call's ETH forwarding.
+Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` and `addToBalanceOf()` succeed without corrupting the outer call's ETH forwarding. The invariant suite (`RouterTerminalInvariant.t.sol`) further confirms that the router holds zero tokens and zero ETH after every operation — including operations that exercise the cashout recursion loop (`_cashOutLoop`, up to `_MAX_CASHOUT_ITERATIONS = 20`).
