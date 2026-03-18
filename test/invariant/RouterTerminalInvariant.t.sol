@@ -42,6 +42,12 @@ contract InvariantMockERC20 {
         totalSupply += amount;
     }
 
+    function burn(address from, uint256 amount) external {
+        require(balanceOf[from] >= amount, "ERC20: insufficient balance");
+        balanceOf[from] -= amount;
+        totalSupply -= amount;
+    }
+
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
         return true;
@@ -190,6 +196,66 @@ contract MockDestTerminal {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Mock cashout terminal that simulates cashing out JB project tokens for ETH.
+// When cashOutTokensOf is called, it sends ETH back to the caller (the router)
+// to simulate the bonding curve reclaim. The reclaim amount is a fraction of
+// the cashOutCount to simulate realistic slippage.
+// ──────────────────────────────────────────────────────────────────────────────
+contract MockCashOutTerminal {
+    uint256 public cashOutCallCount;
+
+    /// @notice The JB project token whose cashouts this terminal handles.
+    /// Set by the invariant test's setUp so the mock can burn tokens from the holder.
+    InvariantMockERC20 public jbToken;
+
+    function setJBToken(InvariantMockERC20 _jbToken) external {
+        jbToken = _jbToken;
+    }
+
+    /// @notice Simulates cashing out project tokens. Returns 80% of cashOutCount as ETH reclaim.
+    /// Burns the project tokens from the holder to match real terminal behavior.
+    function cashOutTokensOf(
+        address holder,
+        uint256, /* projectId */
+        uint256 cashOutCount,
+        address, /* tokenToReclaim */
+        uint256, /* minTokensReclaimed */
+        address payable beneficiary,
+        bytes calldata /* metadata */
+    )
+        external
+        returns (uint256 reclaimAmount)
+    {
+        cashOutCallCount++;
+
+        // Burn the project tokens from the holder (simulates what a real terminal does via JBTokens.burnFrom).
+        if (address(jbToken) != address(0) && cashOutCount > 0) {
+            jbToken.burn(holder, cashOutCount);
+        }
+
+        // Simulate bonding curve: reclaim 80% of the cashout count (in wei, treating count as ETH amount).
+        reclaimAmount = cashOutCount * 80 / 100;
+        if (reclaimAmount > 0) {
+            (bool ok,) = beneficiary.call{value: reclaimAmount}("");
+            require(ok, "MockCashOutTerminal: ETH transfer failed");
+        }
+    }
+
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return true;
+    }
+
+    function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+        });
+    }
+
+    receive() external payable {}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Handler contract that exercises pay() and addToBalanceOf() with bounded
 // random inputs. The fuzzer calls operations on this handler.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -197,29 +263,37 @@ contract RouterTerminalHandler is Test {
     JBRouterTerminal public router;
     InvariantMockERC20 public tokenA;
     InvariantMockERC20 public tokenB;
+    InvariantMockERC20 public jbProjectToken;
     InvariantMockWETH9 public weth;
     MockDestTerminal public destTerminal;
+    MockCashOutTerminal public cashOutTerminal;
 
     uint256 public constant PROJECT_ID = 1;
+    uint256 public constant SOURCE_PROJECT_ID = 2;
 
     // Ghost variables: track total amounts sent to the router.
     uint256 public ghost_totalETHPaid;
     uint256 public ghost_totalTokenAPaid;
     uint256 public ghost_totalTokenBPaid;
+    uint256 public ghost_totalCashOutETH;
     uint256 public ghost_operationCount;
 
     constructor(
         JBRouterTerminal _router,
         InvariantMockERC20 _tokenA,
         InvariantMockERC20 _tokenB,
+        InvariantMockERC20 _jbProjectToken,
         InvariantMockWETH9 _weth,
-        MockDestTerminal _destTerminal
+        MockDestTerminal _destTerminal,
+        MockCashOutTerminal _cashOutTerminal
     ) {
         router = _router;
         tokenA = _tokenA;
         tokenB = _tokenB;
+        jbProjectToken = _jbProjectToken;
         weth = _weth;
         destTerminal = _destTerminal;
+        cashOutTerminal = _cashOutTerminal;
     }
 
     /// @notice Pay a project with native ETH.
@@ -343,6 +417,35 @@ contract RouterTerminalHandler is Test {
         ghost_operationCount++;
     }
 
+    /// @notice Pay a project with a JB project token, triggering the cashout loop.
+    /// The router detects the token is a JB project token, enters _cashOutLoop, cashes out
+    /// for ETH via the MockCashOutTerminal, and forwards the reclaimed ETH to the dest terminal.
+    function payWithCashOut(uint256 amount) external {
+        amount = bound(amount, 1, 10 ether);
+
+        // Mint the JB project token to the handler and approve the router.
+        jbProjectToken.mint(address(this), amount);
+        jbProjectToken.approve(address(router), amount);
+
+        // Fund the cashout terminal with enough ETH to cover the reclaim (80% of amount).
+        uint256 expectedReclaim = amount * 80 / 100;
+        vm.deal(address(cashOutTerminal), expectedReclaim);
+
+        router.pay({
+            projectId: PROJECT_ID,
+            token: address(jbProjectToken),
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        ghost_totalCashOutETH += expectedReclaim;
+        ghost_totalETHPaid += expectedReclaim;
+        ghost_operationCount++;
+    }
+
     // Allow receiving ETH (needed for vm.deal).
     receive() external payable {}
 }
@@ -354,8 +457,10 @@ contract RouterTerminalInvariant is Test {
     JBRouterTerminal public router;
     InvariantMockERC20 public tokenA;
     InvariantMockERC20 public tokenB;
+    InvariantMockERC20 public jbProjectToken;
     InvariantMockWETH9 public weth;
     MockDestTerminal public destTerminal;
+    MockCashOutTerminal public cashOutTerminal;
     RouterTerminalHandler public handler;
 
     // Mocked protocol contracts.
@@ -368,13 +473,17 @@ contract RouterTerminalInvariant is Test {
     address public mockPoolManager;
 
     uint256 public constant PROJECT_ID = 1;
+    uint256 public constant SOURCE_PROJECT_ID = 2;
 
     function setUp() public {
         // Deploy real mock tokens.
         tokenA = new InvariantMockERC20("Token A", "TKA");
         tokenB = new InvariantMockERC20("Token B", "TKB");
+        jbProjectToken = new InvariantMockERC20("JB Project Token", "JBT");
         weth = new InvariantMockWETH9();
         destTerminal = new MockDestTerminal();
+        cashOutTerminal = new MockCashOutTerminal();
+        cashOutTerminal.setJBToken(jbProjectToken);
 
         // Create addresses for mocked protocol contracts.
         mockDirectory = makeAddr("mockDirectory");
@@ -426,28 +535,53 @@ contract RouterTerminalInvariant is Test {
             abi.encode(address(destTerminal))
         );
 
-        // ── Mock: tokens.projectIdOf returns 0 (not a JB project token) ──
+        // ── Mock: tokens.projectIdOf returns 0 by default (not a JB project token) ──
         // This makes the router skip the cashout loop and go straight to resolve+convert.
         vm.mockCall(mockTokens, abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
 
+        // ── Mock: tokens.projectIdOf returns SOURCE_PROJECT_ID for our JB project token ──
+        // This specific mock overrides the default for this token, triggering the cashout loop.
+        vm.mockCall(
+            mockTokens,
+            abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(jbProjectToken)))),
+            abi.encode(SOURCE_PROJECT_ID)
+        );
+
+        // ── Mock: dest project does NOT accept the JB project token directly ──
+        // This forces the router into the cashout loop instead of direct forwarding.
+        vm.mockCall(
+            mockDirectory,
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(jbProjectToken))),
+            abi.encode(address(0))
+        );
+
+        // ── Mock: directory.terminalsOf returns the cashout terminal for the source project ──
+        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+        sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
+        vm.mockCall(
+            mockDirectory, abi.encodeCall(IJBDirectory.terminalsOf, (SOURCE_PROJECT_ID)), abi.encode(sourceTerminals)
+        );
+
         // Deploy handler.
-        handler = new RouterTerminalHandler(router, tokenA, tokenB, weth, destTerminal);
+        handler = new RouterTerminalHandler(router, tokenA, tokenB, jbProjectToken, weth, destTerminal, cashOutTerminal);
 
         // Target only the handler for invariant testing.
         targetContract(address(handler));
 
-        // Target all handler functions.
-        bytes4[] memory selectors = new bytes4[](6);
+        // Target all handler functions (including the cashout handler).
+        bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = RouterTerminalHandler.payWithETH.selector;
         selectors[1] = RouterTerminalHandler.payWithTokenA.selector;
         selectors[2] = RouterTerminalHandler.payWithTokenB.selector;
         selectors[3] = RouterTerminalHandler.addToBalanceWithETH.selector;
         selectors[4] = RouterTerminalHandler.addToBalanceWithTokenA.selector;
         selectors[5] = RouterTerminalHandler.addToBalanceWithTokenB.selector;
+        selectors[6] = RouterTerminalHandler.payWithCashOut.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
-    // ────────────────────────────────── INVARIANTS ──────────────────────────────────
+    // ────────────────────────────────── INVARIANTS
+    // ──────────────────────────────────
 
     /// @notice The router should never hold ETH after completing an operation.
     /// It is a pass-through: all ETH should be forwarded to the destination terminal.
@@ -495,6 +629,11 @@ contract RouterTerminalInvariant is Test {
             handler.ghost_totalTokenBPaid(),
             "Token B forwarded to terminal != token B paid to router"
         );
+    }
+
+    /// @notice The router should never hold the JB project token after a cashout operation.
+    function invariant_routerHoldsNoJBProjectToken() public view {
+        assertEq(jbProjectToken.balanceOf(address(router)), 0, "Router holds JB project token after operation");
     }
 
     /// @notice Sanity check: the fuzzer actually called some operations.
