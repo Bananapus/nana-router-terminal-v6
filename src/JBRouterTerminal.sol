@@ -1389,8 +1389,9 @@ contract JBRouterTerminal is
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
     function _settleV4(Currency currency, uint256 amount) internal {
         if (Currency.unwrap(currency) == address(0)) {
-            // Unwrap WETH if needed (caller may have paid with WETH ERC-20).
-            if (address(this).balance < amount) WETH.withdraw(amount);
+            // Unwrap only the WETH deficit (caller may hold partial ETH + partial WETH).
+            uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
+            if (deficit > 0) WETH.withdraw(deficit);
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {

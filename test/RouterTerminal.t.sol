@@ -57,6 +57,63 @@ contract MockERC20 {
     }
 }
 
+/// @notice Mock WETH that tracks balances and sends ETH on withdraw.
+contract MockWETH9 {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "MockWETH9: insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "MockWETH9: ETH transfer failed");
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        allowance[from][msg.sender] -= amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function totalSupply() external pure returns (uint256) {
+        return 0;
+    }
+
+    receive() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+}
+
+/// @notice Mock PoolManager that only supports settle{value:...}() for _settleV4 testing.
+contract MockPoolManagerForSettle {
+    uint256 public lastSettleAmount;
+
+    function settle() external payable returns (uint256) {
+        lastSettleAmount = msg.value;
+        return msg.value;
+    }
+
+    // Fallback so vm.etch and other calls don't revert.
+    fallback() external payable {}
+    receive() external payable {}
+}
+
 /// @notice A harness that exposes internal functions for testing.
 contract RouterTerminalHarness is JBRouterTerminal {
     constructor(
@@ -100,6 +157,10 @@ contract RouterTerminalHarness is JBRouterTerminal {
         if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
+    }
+
+    function exposed_settleV4(Currency currency, uint256 amount) external {
+        _settleV4(currency, amount);
     }
 }
 
@@ -1035,5 +1096,144 @@ contract RouterTerminalTest is Test {
 
         vm.prank(payer);
         routerTerminal.pay(1, jbToken, 100e18, payer, 0, "", metadata);
+    }
+}
+
+/// @notice Tests for the _settleV4 WETH deficit-only withdrawal fix.
+contract SettleV4DeficitTest is Test {
+    RouterTerminalHarness routerTerminal;
+
+    MockWETH9 weth;
+    MockPoolManagerForSettle poolManager;
+
+    // Mocked JB dependencies (unused by _settleV4 but required for constructor).
+    IJBDirectory mockDirectory;
+    IJBPermissions mockPermissions;
+    IJBProjects mockProjects;
+    IJBTokens mockTokens;
+    IPermit2 mockPermit2;
+    IUniswapV3Factory mockFactory;
+
+    function setUp() public {
+        mockDirectory = IJBDirectory(makeAddr("mockDirectory"));
+        vm.etch(address(mockDirectory), hex"00");
+        mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
+        vm.etch(address(mockPermissions), hex"00");
+        mockProjects = IJBProjects(makeAddr("mockProjects"));
+        vm.etch(address(mockProjects), hex"00");
+        mockTokens = IJBTokens(makeAddr("mockTokens"));
+        vm.etch(address(mockTokens), hex"00");
+        mockPermit2 = IPermit2(makeAddr("mockPermit2"));
+        vm.etch(address(mockPermit2), hex"00");
+        mockFactory = IUniswapV3Factory(makeAddr("mockFactory"));
+        vm.etch(address(mockFactory), hex"00");
+
+        // Deploy real mock WETH and PoolManager.
+        weth = new MockWETH9();
+        poolManager = new MockPoolManagerForSettle();
+
+        routerTerminal = new RouterTerminalHarness(
+            mockDirectory,
+            mockPermissions,
+            mockProjects,
+            mockTokens,
+            mockPermit2,
+            makeAddr("owner"),
+            IWETH9(address(weth)),
+            mockFactory,
+            IPoolManager(address(poolManager)),
+            address(0)
+        );
+    }
+
+    /// @notice Settlement with partial ETH + partial WETH should only withdraw the deficit.
+    ///         Pre-load 0.5 ETH in the contract and 0.5 WETH, then settle 1 ETH total.
+    function test_settleV4_partialEthPartialWeth() public {
+        uint256 totalAmount = 1 ether;
+        uint256 ethPortion = 0.5 ether;
+        uint256 wethPortion = 0.5 ether;
+
+        // Give the router terminal partial raw ETH.
+        vm.deal(address(routerTerminal), ethPortion);
+
+        // Give the router terminal partial WETH (fund the mock WETH contract with ETH
+        // so withdraw can send it back, then credit the router terminal's WETH balance).
+        vm.deal(address(weth), wethPortion);
+        weth.deposit{value: 0}(); // just to ensure contract is initialized
+        // Directly set the WETH balance for the router terminal.
+        vm.deal(address(weth), wethPortion); // ensure WETH contract has ETH to pay out
+        // Credit WETH balance to the router terminal by depositing on its behalf.
+        vm.deal(address(routerTerminal), ethPortion); // keep ETH portion
+        vm.prank(address(routerTerminal));
+        weth.deposit{value: 0}();
+        // Manually set the WETH balance for the router (MockWETH9 uses a mapping).
+        // We need to deposit from the router's perspective.
+        vm.deal(address(routerTerminal), ethPortion + wethPortion);
+        vm.prank(address(routerTerminal));
+        weth.deposit{value: wethPortion}();
+
+        // Verify setup: router has 0.5 ETH + 0.5 WETH.
+        assertEq(address(routerTerminal).balance, ethPortion, "Setup: router ETH balance");
+        assertEq(weth.balanceOf(address(routerTerminal)), wethPortion, "Setup: router WETH balance");
+
+        // Settle 1 ETH via _settleV4. Should withdraw only 0.5 WETH (the deficit).
+        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), totalAmount);
+
+        // PoolManager should have received 1 ETH.
+        assertEq(poolManager.lastSettleAmount(), totalAmount, "PoolManager received correct amount");
+
+        // Router terminal should have 0 ETH and 0 WETH remaining.
+        assertEq(address(routerTerminal).balance, 0, "Router ETH should be drained");
+        assertEq(weth.balanceOf(address(routerTerminal)), 0, "Router WETH should be drained");
+    }
+
+    /// @notice Settlement with sufficient raw ETH should NOT withdraw any WETH.
+    function test_settleV4_sufficientEth_noWethWithdraw() public {
+        uint256 amount = 1 ether;
+
+        // Give the router terminal enough raw ETH.
+        vm.deal(address(routerTerminal), amount);
+
+        // Give it some WETH too (should remain untouched).
+        vm.deal(address(routerTerminal), amount + 0.5 ether);
+        vm.prank(address(routerTerminal));
+        weth.deposit{value: 0.5 ether}();
+
+        // Verify setup.
+        assertEq(address(routerTerminal).balance, amount, "Setup: router ETH balance");
+        assertEq(weth.balanceOf(address(routerTerminal)), 0.5 ether, "Setup: router WETH balance");
+
+        // Settle 1 ETH. No WETH should be withdrawn.
+        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), amount);
+
+        // PoolManager received the ETH.
+        assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");
+
+        // WETH should be untouched.
+        assertEq(weth.balanceOf(address(routerTerminal)), 0.5 ether, "WETH should remain untouched");
+    }
+
+    /// @notice Settlement with zero ETH should withdraw the full amount from WETH.
+    function test_settleV4_allWeth_fullWithdraw() public {
+        uint256 amount = 1 ether;
+
+        // Give the router terminal only WETH, no raw ETH.
+        vm.deal(address(routerTerminal), amount);
+        vm.prank(address(routerTerminal));
+        weth.deposit{value: amount}();
+
+        // Verify setup: 0 ETH, 1 WETH.
+        assertEq(address(routerTerminal).balance, 0, "Setup: router should have 0 ETH");
+        assertEq(weth.balanceOf(address(routerTerminal)), amount, "Setup: router WETH balance");
+
+        // Settle 1 ETH. Should withdraw all 1 WETH.
+        routerTerminal.exposed_settleV4(Currency.wrap(address(0)), amount);
+
+        // PoolManager received the ETH.
+        assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");
+
+        // All WETH drained.
+        assertEq(weth.balanceOf(address(routerTerminal)), 0, "WETH should be fully drained");
+        assertEq(address(routerTerminal).balance, 0, "ETH should be fully drained");
     }
 }

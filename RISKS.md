@@ -53,3 +53,15 @@
 - `unlockCallback` only executes when called by `POOL_MANAGER`.
 - Credit cashout path: credits are transferred FROM `_msgSender()` only, never from arbitrary addresses.
 - Cashout loop terminates: either finds a terminal, reverts with `CashOutLoopLimit`, or reverts with `NoCashOutPath`.
+
+## 8. Accepted Behaviors
+
+### 8.1 No reentrancy guard (stateless routing)
+
+The router terminal has no `ReentrancyGuard` or `_routing` flag. During `_cashOutLoop`, the cashout terminal's callback could re-enter `pay()` or `addToBalanceOf()` on this router. This is safe because:
+
+- **The router is stateless.** It does not maintain mutable accounting between `_route()` and the final `destTerminal.pay/addToBalanceOf`. Each call independently accepts funds, routes them, and forwards the result. There is no shared state that a re-entrant call could corrupt.
+- **Each call uses its own funds.** The re-entrant call would need to supply its own tokens/ETH (via `_acceptFundsFor`). It cannot consume funds belonging to the outer call because those funds are already committed to the routing pipeline.
+- **A reentrancy guard would block legitimate composition.** Projects may have terminal chains where terminal A routes through this router, which cashes out into terminal B, which itself routes through this router for a different project. A blanket reentrancy guard would break such flows.
+
+Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` and `addToBalanceOf()` succeed without corrupting the outer call's ETH forwarding.
