@@ -80,7 +80,6 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
-    error JBRouterTerminal_ReentrantRouting();
     error JBRouterTerminal_TokenNotAccepted(uint256 projectId, address token);
 
     //*********************************************************************//
@@ -130,8 +129,6 @@ contract JBRouterTerminal is
     // ---------------------- private stored properties ----------------- //
     //*********************************************************************//
 
-    /// @notice Reentrancy guard flag. True while `_route()` is executing.
-    bool private _routing;
 
     //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
@@ -334,8 +331,6 @@ contract JBRouterTerminal is
         payable
         override
     {
-        if (_routing) revert JBRouterTerminal_ReentrantRouting();
-
         IJBTerminal destTerminal;
         {
             amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -390,8 +385,6 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        if (_routing) revert JBRouterTerminal_ReentrantRouting();
-
         IJBTerminal destTerminal;
         {
             amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -1353,8 +1346,6 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
-        _routing = true;
-
         // Check for credit source override.
         uint256 sourceProjectIdOverride;
         {
@@ -1383,7 +1374,6 @@ contract JBRouterTerminal is
 
             // If the cashout loop found a terminal that accepts the reclaimed token, we're done.
             if (address(destTerminal) != address(0)) {
-                _routing = false;
                 return (destTerminal, tokenOut, amountOut);
             }
 
@@ -1399,8 +1389,6 @@ contract JBRouterTerminal is
         amountOut = _convert({
             tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata
         });
-
-        _routing = false;
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
