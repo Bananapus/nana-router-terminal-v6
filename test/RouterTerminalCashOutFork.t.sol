@@ -214,14 +214,10 @@ contract RouterTerminalCashOutForkTest is Test {
             "router should have no leftover project A tokens"
         );
         assertEq(address(routerTerminal).balance, 0, "router should have no leftover ETH");
-        assertEq(
-            IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router should have no leftover WETH"
-        );
+        assertEq(IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router should have no leftover WETH");
 
         // 4. Payer should have spent all their project A tokens.
-        assertEq(
-            IERC20(address(projectAToken)).balanceOf(payer), 0, "payer should have no remaining project A tokens"
-        );
+        assertEq(IERC20(address(projectAToken)).balanceOf(payer), 0, "payer should have no remaining project A tokens");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -251,8 +247,7 @@ contract RouterTerminalCashOutForkTest is Test {
         assertGt(paTokenBalance, 0, "payer should have project A ERC-20 tokens");
 
         // Record project B (USDC) balance before the router pay.
-        uint256 projectBBalBefore =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
+        uint256 projectBBalBefore = jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
 
         // Step 3: Pay project B (USDC) via router terminal using project A's ERC-20 tokens.
         vm.startPrank(payer);
@@ -274,8 +269,7 @@ contract RouterTerminalCashOutForkTest is Test {
         assertGt(tokenCount, 0, "no project B tokens minted");
 
         // 2. Project B terminal received USDC (balance increased).
-        uint256 projectBBalAfter =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
+        uint256 projectBBalAfter = jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
         assertGt(projectBBalAfter, projectBBalBefore, "project B USDC balance should have increased");
 
         // 3. Router has no leftover tokens.
@@ -285,15 +279,11 @@ contract RouterTerminalCashOutForkTest is Test {
             "router should have no leftover project A tokens"
         );
         assertEq(address(routerTerminal).balance, 0, "router should have no leftover ETH");
-        assertEq(
-            IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router should have no leftover WETH"
-        );
+        assertEq(IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router should have no leftover WETH");
         assertEq(USDC.balanceOf(address(routerTerminal)), 0, "router should have no leftover USDC");
 
         // 4. Payer should have spent all their project A tokens.
-        assertEq(
-            IERC20(address(projectAToken)).balanceOf(payer), 0, "payer should have no remaining project A tokens"
-        );
+        assertEq(IERC20(address(projectAToken)).balanceOf(payer), 0, "payer should have no remaining project A tokens");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -398,9 +388,7 @@ contract RouterTerminalCashOutForkTest is Test {
         // Router clean.
         assertEq(address(routerTerminal).balance, 0, "router has leftover ETH");
         assertEq(
-            IERC20(address(projectAToken)).balanceOf(address(routerTerminal)),
-            0,
-            "router has leftover project A tokens"
+            IERC20(address(projectAToken)).balanceOf(address(routerTerminal)), 0, "router has leftover project A tokens"
         );
     }
 
@@ -446,21 +434,16 @@ contract RouterTerminalCashOutForkTest is Test {
         assertGt(tokenCount, 0, "no project B tokens minted for large amount");
 
         // Project B terminal received USDC.
-        uint256 projectBUsdcBal =
-            jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
+        uint256 projectBUsdcBal = jbTerminalStore.balanceOf(address(jbMultiTerminal), projectBUsdcId, address(USDC));
         assertGt(projectBUsdcBal, 0, "project B should have USDC balance");
 
         // Router clean.
         assertEq(address(routerTerminal).balance, 0, "router has leftover ETH");
         assertEq(USDC.balanceOf(address(routerTerminal)), 0, "router has leftover USDC");
         assertEq(
-            IERC20(address(projectAToken)).balanceOf(address(routerTerminal)),
-            0,
-            "router has leftover project A tokens"
+            IERC20(address(projectAToken)).balanceOf(address(routerTerminal)), 0, "router has leftover project A tokens"
         );
-        assertEq(
-            IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router has leftover WETH"
-        );
+        assertEq(IERC20(address(WETH)).balanceOf(address(routerTerminal)), 0, "router has leftover WETH");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
