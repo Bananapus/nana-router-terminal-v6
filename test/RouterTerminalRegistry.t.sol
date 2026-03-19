@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -138,6 +139,26 @@ contract RouterTerminalRegistryTest is Test {
         registry.setTerminalFor(projectId, terminalB);
 
         assertEq(address(registry.terminalOf(projectId)), address(terminalB));
+    }
+
+    function test_accountingContext_passthroughDoesNotCorrectTerminalDecimals() public {
+        address usdcLike = makeAddr("usdcLike");
+        JBAccountingContext memory expected =
+            JBAccountingContext({token: usdcLike, decimals: 18, currency: uint32(uint160(usdcLike))});
+
+        vm.mockCall(
+            address(terminalA),
+            abi.encodeCall(IJBTerminal.accountingContextForTokenOf, (projectId, usdcLike)),
+            abi.encode(expected)
+        );
+
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        JBAccountingContext memory context = registry.accountingContextForTokenOf(projectId, usdcLike);
+        assertEq(context.token, usdcLike);
+        assertEq(context.decimals, 18);
+        assertEq(context.currency, expected.currency);
     }
 
     // ──────────────────────────────────────────────────────────────────────
