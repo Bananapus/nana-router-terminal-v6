@@ -226,6 +226,15 @@ contract RouterTerminalTest is Test {
         assertEq(ctx.currency, uint32(uint160(token)));
     }
 
+    function test_accountingContext_remainsSyntheticForNon18DecimalToken() public {
+        address usdcLike = makeAddr("usdcLike");
+        JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, usdcLike);
+        assertEq(ctx.token, usdcLike);
+        assertEq(ctx.decimals, 18);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        assertEq(ctx.currency, uint32(uint160(usdcLike)));
+    }
+
     function test_accountingContexts_empty() public view {
         JBAccountingContext[] memory ctxs = routerTerminal.accountingContextsOf(1);
         assertEq(ctxs.length, 0);
