@@ -56,7 +56,8 @@ contract MockObscureToken is ERC20 {
 ///      2. Clean revert when no direct pool exists (mock token with no Uniswap pool).
 ///      3. Slippage protection catches bad pricing on thin-liquidity pools.
 contract RouterTerminalMultihopForkTest is Test {
-    // ───────────────────────── Mainnet addresses ──────────────────────────
+    // ───────────────────────── Mainnet addresses
+    // ──────────────────────────
 
     // Post-V4-deployment block (V4 PoolManager deployed ~21,690,000) with good TWAP history.
     uint256 constant BLOCK_NUMBER = 21_700_000;
@@ -68,7 +69,8 @@ contract RouterTerminalMultihopForkTest is Test {
     IPermit2 constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
     IPoolManager constant V4_POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
 
-    // ───────────────────────── JB core (deployed fresh) ────────────────────
+    // ───────────────────────── JB core (deployed fresh)
+    // ────────────────────
 
     address multisig = address(0xBEEF);
     address payer = makeAddr("payer");
@@ -97,7 +99,8 @@ contract RouterTerminalMultihopForkTest is Test {
     MockObscureToken obscureToken;
     uint256 obscureProjectId;
 
-    // ───────────────────────── Setup ──────────────────────────────────────
+    // ───────────────────────── Setup
+    // ──────────────────────────────────────
 
     function setUp() public {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
@@ -253,7 +256,8 @@ contract RouterTerminalMultihopForkTest is Test {
         vm.stopPrank();
     }
 
-    // ───────────────────────── JB Core Deployment ─────────────────────────
+    // ───────────────────────── JB Core Deployment
+    // ─────────────────────────
 
     function _deployJbCore() internal {
         jbPermissions = new JBPermissions(trustedForwarder);
