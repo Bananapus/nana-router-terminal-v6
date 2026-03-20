@@ -2,6 +2,11 @@
 
 A Juicebox terminal that accepts payments in any token, dynamically discovers what token each destination project accepts, and routes the payment there -- via direct forwarding, Uniswap swap, JB token cashout, or a combination. Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
 
+This contract family is a routing surface, not an accounting-truth surface. `JBRouterTerminal` synthesizes
+`JBAccountingContext` values with `decimals = 18` for any token, and the registry simply forwards that context. Do not
+reuse the router terminal or router terminal registry as an accounting-sensitive terminal source for lending or other
+logic that relies on real token decimals.
+
 _If you're having trouble understanding this contract, take a look at the [core protocol contracts](https://github.com/Bananapus/nana-core-v6) and the [documentation](https://docs.juicebox.money/) first. If you have questions, reach out on [Discord](https://discord.com/invite/ErQYmth4dS)._
 
 ## Architecture

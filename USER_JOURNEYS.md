@@ -2,6 +2,10 @@
 
 Every path a user or integrated contract can take through the router terminal.
 
+The journeys below describe payment routing behavior. They should not be read as proof that the router terminal or
+registry is a truthful accounting source for arbitrary tokens. Both surfaces report synthetic accounting contexts with
+`decimals = 18`, so any integration that depends on real token decimals must query a real terminal instead.
+
 ---
 
 ## Journey 1: Pay a Project Through the Router Terminal
