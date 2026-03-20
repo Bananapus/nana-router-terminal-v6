@@ -273,7 +273,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Preview a payment by simulating the router's routing logic in view context.
-    /// @dev Reverts if the route depends on an onchain swap, since the router only returns exact previews.
+    /// @dev Returns the router's best estimate using current routing and quote data, including swap quotes when needed.
     /// @param projectId The ID of the destination project being paid.
     /// @param token The token that would be provided to the router.
     /// @param amount The amount of the input token that would be provided.
@@ -312,10 +312,7 @@ contract JBRouterTerminal is
         (destTerminal, token, amount, isExact) =
             _previewRoute({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
 
-        // Refuse to return a best-effort result for routes that need an onchain swap to know the outcome.
-        if (!isExact) revert JBRouterTerminal_PreviewNotAccurateForRoute();
-
-        // Forward the exact preview call to the terminal that would ultimately receive the payment.
+        // Forward the best available preview call to the terminal that would ultimately receive the payment.
         return destTerminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
@@ -1595,7 +1592,7 @@ contract JBRouterTerminal is
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
     /// @return destTerminal The terminal that would receive the payment.
     /// @return tokenOut The token that terminal would receive.
-    /// @return amountOut The amount that terminal would receive.
+    /// @return amountOut The amount that terminal would receive, estimated when a swap is required.
     /// @return isExact Whether the preview exactly matches the router's execution path.
     function _previewRoute(
         uint256 destProjectId,
@@ -1648,8 +1645,17 @@ contract JBRouterTerminal is
             return (destTerminal, tokenOut, amount, true);
         }
 
-        // Swap routes remain inexact because preview mode has no execution-faithful quote for the live swap result.
-        return (destTerminal, tokenOut, 0, false);
+        // Quote the swap using the same pool-discovery and quote-selection logic production uses for swap bounds.
+        (amountOut,) = _pickPoolAndQuote({
+            metadata: metadata,
+            normalizedTokenIn: _normalize(tokenIn),
+            amount: amount,
+            normalizedTokenOut: _normalize(tokenOut)
+        });
+
+        // Swap previews are still estimates because execution-time pool state can move before the real transaction
+        // lands.
+        return (destTerminal, tokenOut, amountOut, false);
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
