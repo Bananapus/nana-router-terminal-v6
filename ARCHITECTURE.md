@@ -12,6 +12,7 @@ src/
 ├── JBRouterTerminalRegistry.sol — Registry mapping projects to router terminal configs
 ├── interfaces/
 │   ├── IJBRouterTerminal.sol
+│   ├── IJBRouterTerminalRegistry.sol
 │   └── IWETH9.sol
 ├── libraries/
 │   └── JBSwapLib.sol            — Uniswap V3/V4 swap helpers, pool discovery
@@ -29,8 +30,16 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
   → If different token:
     → Compare V3 and V4 pool quotes
     → Swap via better pool
-    → Forward swapped tokens to project's terminal
+  → Forward swapped tokens to project's terminal
   → Return token count from destination payment
+```
+
+### Preview Routing
+```
+Caller → JBRouterTerminal.previewPayFor(projectId, token, amount)
+  → Mirror source-of-funds and routing logic in view context
+  → If direct, wrap-unwrap, or exact cashout route: forward preview to destination terminal
+  → If swap route: revert with JBRouterTerminal_PreviewNotAccurateForRoute()
 ```
 
 ## Extension Points

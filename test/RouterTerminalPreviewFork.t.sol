@@ -4,32 +4,32 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-import {IJBDirectory as IRouterDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions as IRouterPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects as IRouterProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
-import {IJBTokens as IRouterTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {JBController} from "local-core/src/JBController.sol";
-import {JBDirectory} from "local-core/src/JBDirectory.sol";
-import {JBFeelessAddresses} from "local-core/src/JBFeelessAddresses.sol";
-import {JBFundAccessLimits} from "local-core/src/JBFundAccessLimits.sol";
-import {JBMultiTerminal} from "local-core/src/JBMultiTerminal.sol";
-import {JBPermissions} from "local-core/src/JBPermissions.sol";
-import {JBPrices} from "local-core/src/JBPrices.sol";
-import {JBProjects} from "local-core/src/JBProjects.sol";
-import {JBRulesets} from "local-core/src/JBRulesets.sol";
-import {JBSplits} from "local-core/src/JBSplits.sol";
-import {JBTerminalStore} from "local-core/src/JBTerminalStore.sol";
-import {JBTokens} from "local-core/src/JBTokens.sol";
-import {JBERC20} from "local-core/src/JBERC20.sol";
-import {IJBRulesetApprovalHook} from "local-core/src/interfaces/IJBRulesetApprovalHook.sol";
-import {JBConstants} from "local-core/src/libraries/JBConstants.sol";
-import {JBAccountingContext} from "local-core/src/structs/JBAccountingContext.sol";
-import {JBFundAccessLimitGroup} from "local-core/src/structs/JBFundAccessLimitGroup.sol";
-import {JBRuleset} from "local-core/src/structs/JBRuleset.sol";
-import {JBRulesetConfig} from "local-core/src/structs/JBRulesetConfig.sol";
-import {JBRulesetMetadata} from "local-core/src/structs/JBRulesetMetadata.sol";
-import {JBSplitGroup} from "local-core/src/structs/JBSplitGroup.sol";
-import {JBTerminalConfig} from "local-core/src/structs/JBTerminalConfig.sol";
+import {JBController} from "@bananapus/core-v6/src/JBController.sol";
+import {JBDirectory} from "@bananapus/core-v6/src/JBDirectory.sol";
+import {JBFeelessAddresses} from "@bananapus/core-v6/src/JBFeelessAddresses.sol";
+import {JBFundAccessLimits} from "@bananapus/core-v6/src/JBFundAccessLimits.sol";
+import {JBMultiTerminal} from "@bananapus/core-v6/src/JBMultiTerminal.sol";
+import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
+import {JBPrices} from "@bananapus/core-v6/src/JBPrices.sol";
+import {JBProjects} from "@bananapus/core-v6/src/JBProjects.sol";
+import {JBRulesets} from "@bananapus/core-v6/src/JBRulesets.sol";
+import {JBSplits} from "@bananapus/core-v6/src/JBSplits.sol";
+import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
+import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
+import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
+import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
+import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadata.sol";
+import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
+import {JBTerminalConfig} from "@bananapus/core-v6/src/structs/JBTerminalConfig.sol";
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -38,24 +38,6 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 contract RouterTerminalPreviewForkTest is Test {
-    struct RulesetLite {
-        uint48 cycleNumber;
-        uint48 id;
-        uint48 basedOnId;
-        uint48 start;
-        uint32 duration;
-        uint112 weight;
-        uint32 weightCutPercent;
-        address approvalHook;
-        uint256 metadata;
-    }
-
-    struct PayHookSpecificationLite {
-        address hook;
-        uint256 amount;
-        bytes metadata;
-    }
-
     uint256 internal constant BLOCK_NUMBER = 21_700_000;
     bytes32 internal constant _PAY_EVENT_SIGNATURE =
         keccak256("Pay(uint256,uint256,uint256,address,address,uint256,uint256,string,bytes,address)");
@@ -94,10 +76,10 @@ contract RouterTerminalPreviewForkTest is Test {
         _deployJbCore();
 
         routerTerminal = new JBRouterTerminal({
-            directory: IRouterDirectory(address(jbDirectory)),
-            permissions: IRouterPermissions(address(jbPermissions)),
-            projects: IRouterProjects(address(jbProjects)),
-            tokens: IRouterTokens(address(jbTokens)),
+            directory: jbDirectory,
+            permissions: IJBPermissions(address(jbPermissions)),
+            projects: IJBProjects(address(jbProjects)),
+            tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
             owner: multisig,
             weth: WETH,
@@ -199,20 +181,11 @@ contract RouterTerminalPreviewForkTest is Test {
             uint256 specCount
         )
     {
-        (bool success, bytes memory returndata) = address(routerTerminal)
-            .staticcall(
-                abi.encodeCall(JBRouterTerminal.previewPayFor, (projectId, token, amount, beneficiary_, metadata))
-            );
-        if (!success) {
-            assembly {
-                revert(add(returndata, 0x20), mload(returndata))
-            }
-        }
-
-        RulesetLite memory ruleset;
-        PayHookSpecificationLite[] memory specs;
-        (ruleset, beneficiaryTokenCount, reservedTokenCount, specs) =
-            abi.decode(returndata, (RulesetLite, uint256, uint256, PayHookSpecificationLite[]));
+        JBRuleset memory ruleset;
+        JBPayHookSpecification[] memory specs;
+        (ruleset, beneficiaryTokenCount, reservedTokenCount, specs) = routerTerminal.previewPayFor({
+            projectId: projectId, token: token, amount: amount, beneficiary: beneficiary_, metadata: metadata
+        });
 
         return (ruleset.id, ruleset.cycleNumber, beneficiaryTokenCount, reservedTokenCount, specs.length);
     }

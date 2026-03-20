@@ -14,8 +14,8 @@ _If you're having trouble understanding this contract, take a look at the [core 
 
 | Contract | Description |
 |----------|-------------|
-| `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews exact direct routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
+| `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews exact payment routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
+| `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal` and the extra registry management surface via `IJBRouterTerminalRegistry`. |
 
 ## How It Works
 
@@ -133,8 +133,6 @@ nana-router-terminal-v6/
 │   ├── interfaces/
 │   │   ├── IJBRouterTerminal.sol         # Router terminal interface
 │   │   ├── IJBRouterTerminalRegistry.sol # Registry interface (extends IJBTerminal)
-│   │   ├── IJBPreviewCashOutTerminal.sol # Local compatibility interface for unpublished core cashout preview
-│   │   ├── IJBPreviewPayTerminal.sol     # Local compatibility interface for unpublished core pay preview
 │   │   └── IWETH9.sol                    # WETH wrapper interface
 │   ├── libraries/
 │   │   └── JBSwapLib.sol                 # Slippage tolerance, impact, and price limit math
@@ -147,7 +145,8 @@ nana-router-terminal-v6/
 └── test/
     ├── RouterTerminal.t.sol              # Unit tests (mocked dependencies)
     ├── RouterTerminalRegistry.t.sol      # Registry unit tests
-    └── RouterTerminalFork.t.sol          # Fork tests against mainnet Uniswap pools
+    ├── RouterTerminalFork.t.sol          # Fork tests against mainnet Uniswap pools
+    └── RouterTerminalPreviewFork.t.sol   # Fork parity tests for previewPayFor
 ```
 
 ## Payment Metadata

@@ -17,7 +17,6 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
-import {IJBPreviewPayTerminal} from "../src/interfaces/IJBPreviewPayTerminal.sol";
 import {IJBRouterTerminalRegistry} from "../src/interfaces/IJBRouterTerminalRegistry.sol";
 
 contract RouterTerminalRegistryTest is Test {
@@ -341,8 +340,7 @@ contract RouterTerminalRegistryTest is Test {
         vm.mockCall(
             address(terminalA),
             abi.encodeCall(
-                IJBPreviewPayTerminal.previewPayFor,
-                (projectId, JBConstants.NATIVE_TOKEN, 1 ether, address(this), bytes(""))
+                IJBTerminal.previewPayFor, (projectId, JBConstants.NATIVE_TOKEN, 1 ether, address(this), bytes(""))
             ),
             abi.encode(expectedRuleset, uint256(9), uint256(10), expectedSpecs)
         );

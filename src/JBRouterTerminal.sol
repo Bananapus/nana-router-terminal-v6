@@ -43,8 +43,6 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
-import {IJBPreviewCashOutTerminal} from "./interfaces/IJBPreviewCashOutTerminal.sol";
-import {IJBPreviewPayTerminal} from "./interfaces/IJBPreviewPayTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
@@ -302,10 +300,9 @@ contract JBRouterTerminal is
 
         if (!isExact) revert JBRouterTerminal_PreviewNotAccurateForRoute();
 
-        return IJBPreviewPayTerminal(address(destTerminal))
-            .previewPayFor({
-                projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
-            });
+        return destTerminal.previewPayFor({
+            projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
+        });
     }
 
     //*********************************************************************//
@@ -841,15 +838,14 @@ contract JBRouterTerminal is
         (tokenToReclaim, cashOutTerminal) =
             _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
-        (, reclaimAmount,,) = IJBPreviewCashOutTerminal(address(cashOutTerminal))
-            .previewCashOutFrom({
-                holder: address(this),
-                projectId: sourceProjectId,
-                cashOutCount: amount,
-                tokenToReclaim: tokenToReclaim,
-                beneficiary: payable(address(this)),
-                metadata: ""
-            });
+        (, reclaimAmount,,) = cashOutTerminal.previewCashOutFrom({
+            holder: address(this),
+            projectId: sourceProjectId,
+            cashOutCount: amount,
+            tokenToReclaim: tokenToReclaim,
+            beneficiary: payable(address(this)),
+            metadata: ""
+        });
     }
 
     /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for NATIVE/WETH, or swap via Uniswap.

@@ -8,8 +8,8 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 | Contract | Role |
 |----------|------|
-| `JBRouterTerminal` | Core terminal: accepts any token, discovers the best route to the destination project's accepted token, swaps via Uniswap V3 or V4, cashes out JB project tokens, forwards to the primary terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`/`addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
+| `JBRouterTerminal` | Core terminal: accepts any token, previews exact payment routes with `previewPayFor`, discovers the best route to the destination project's accepted token, swaps via Uniswap V3 or V4, cashes out JB project tokens, and forwards to the primary terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, `IJBRouterTerminal`. |
+| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
 
 ## Key Functions
 

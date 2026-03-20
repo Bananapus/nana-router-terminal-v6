@@ -28,8 +28,6 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
-import {IJBPreviewCashOutTerminal} from "../src/interfaces/IJBPreviewCashOutTerminal.sol";
-import {IJBPreviewPayTerminal} from "../src/interfaces/IJBPreviewPayTerminal.sol";
 import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
@@ -855,7 +853,7 @@ contract RouterTerminalTest is Test {
         JBPayHookSpecification[] memory expectedSpecs = new JBPayHookSpecification[](0);
         vm.mockCall(
             destTerminal,
-            abi.encodeCall(IJBPreviewPayTerminal.previewPayFor, (projectId, tokenIn, 100, beneficiary, bytes(""))),
+            abi.encodeCall(IJBTerminal.previewPayFor, (projectId, tokenIn, 100, beneficiary, bytes(""))),
             abi.encode(expectedRuleset, uint256(11), uint256(12), expectedSpecs)
         );
 
@@ -904,9 +902,7 @@ contract RouterTerminalTest is Test {
         JBPayHookSpecification[] memory expectedSpecs = new JBPayHookSpecification[](0);
         vm.mockCall(
             destTerminal,
-            abi.encodeCall(
-                IJBPreviewPayTerminal.previewPayFor, (projectId, address(mockWeth), 1 ether, beneficiary, bytes(""))
-            ),
+            abi.encodeCall(IJBTerminal.previewPayFor, (projectId, address(mockWeth), 1 ether, beneficiary, bytes(""))),
             abi.encode(expectedRuleset, uint256(21), uint256(22), expectedSpecs)
         );
 
@@ -968,7 +964,7 @@ contract RouterTerminalTest is Test {
         vm.mockCall(
             cashOutTerminal,
             abi.encodeCall(
-                IJBPreviewCashOutTerminal.previewCashOutFrom,
+                IJBCashOutTerminal.previewCashOutFrom,
                 (
                     address(routerTerminal),
                     sourceProjectId,
@@ -1001,8 +997,7 @@ contract RouterTerminalTest is Test {
         vm.mockCall(
             destTerminal,
             abi.encodeCall(
-                IJBPreviewPayTerminal.previewPayFor,
-                (destProjectId, JBConstants.NATIVE_TOKEN, 60, beneficiary, bytes(""))
+                IJBTerminal.previewPayFor, (destProjectId, JBConstants.NATIVE_TOKEN, 60, beneficiary, bytes(""))
             ),
             abi.encode(expectedRuleset, uint256(31), uint256(32), expectedSpecs)
         );
