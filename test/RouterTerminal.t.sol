@@ -261,6 +261,12 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
         (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
 
         assertEq(tokenOut, tokenIn);
@@ -284,6 +290,12 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, desiredTokenOut)),
             abi.encode(mockTerminal)
         );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: desiredTokenOut, decimals: 18, currency: uint32(uint160(desiredTokenOut))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         (address tokenOut, IJBTerminal destTerminal) =
             routerTerminal.exposedResolveTokenOut(projectId, tokenIn, metadata);
@@ -402,6 +414,12 @@ contract RouterTerminalTest is Test {
             abi.encode(mockTerminal)
         );
 
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
         // Mint tokens to payer and approve the router terminal.
         token.mint(payer, amount);
         vm.prank(payer);
@@ -436,6 +454,10 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, JBConstants.NATIVE_TOKEN)),
             abi.encode(mockTerminal)
         );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(0)});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mock dest terminal pay (should receive msg.value).
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(50)));
@@ -524,6 +546,12 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
             abi.encode(mockTerminal)
         );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mint tokens to payer and approve the router terminal.
         token.mint(payer, amount);

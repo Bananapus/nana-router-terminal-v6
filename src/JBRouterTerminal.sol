@@ -187,7 +187,6 @@ contract JBRouterTerminal is
     /// @dev The router terminal does not store accounting contexts — it constructs them on the fly because it can
     /// accept any token.
     /// @param token The address of the token to get the accounting context for.
-    /// @return context A `JBAccountingContext` for the specified token.
     function accountingContextForTokenOf(
         uint256,
         address token
@@ -669,7 +668,6 @@ contract JBRouterTerminal is
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
-                // Skip if the destination terminal is this router itself (would recurse).
                 if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
                     return (destTerminal, token, amount);
                 }
@@ -1321,17 +1319,15 @@ contract JBRouterTerminal is
 
         // 2. Direct acceptance — project accepts tokenIn as-is.
         destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenIn});
-        if (address(destTerminal) != address(0)) {
+        if (address(destTerminal) != address(0) && destTerminal.accountingContextsOf(projectId).length != 0) {
             return (tokenIn, destTerminal);
         }
 
         // 2b. Check NATIVE_TOKEN <-> WETH equivalence.
-        if (tokenIn == JBConstants.NATIVE_TOKEN) {
-            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: address(WETH)});
-            if (address(destTerminal) != address(0)) return (address(WETH), destTerminal);
-        } else if (tokenIn == address(WETH)) {
-            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: JBConstants.NATIVE_TOKEN});
-            if (address(destTerminal) != address(0)) return (JBConstants.NATIVE_TOKEN, destTerminal);
+        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WETH)) {
+            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : JBConstants.NATIVE_TOKEN;
+            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            if (address(destTerminal) != address(0)) return (tokenOut, destTerminal);
         }
 
         // 3. Dynamic discovery — iterate terminals, find accepted token with best Uniswap pool.

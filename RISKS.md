@@ -26,7 +26,9 @@
 - **Synthetic accounting contexts.** `JBRouterTerminal.accountingContextForTokenOf()` always returns `decimals = 18`,
   and `JBRouterTerminalRegistry` simply forwards that synthetic context. This is safe for routing discovery but
   unsafe for integrations that treat the router or registry as a truthful accounting source for non-18-decimal assets.
-  Lending and debt-normalization flows must point at a real terminal, not the router layer.
+  Lending and debt-normalization flows must point at a real terminal, not the router layer. The router now refuses
+  to treat a primary terminal as direct acceptance unless that terminal also exposes non-empty accounting contexts for
+  the project, so router-stack terminals do not win the direct-forward fast path.
 
 ## 4. DoS Vectors
 
