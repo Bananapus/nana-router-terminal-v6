@@ -97,7 +97,7 @@ contract JBRouterTerminal is
     uint256 internal constant _MAX_CASHOUT_ITERATIONS = 20;
 
     /// @notice The denominator used for slippage tolerance basis points.
-    uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
+    uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -337,7 +337,7 @@ contract JBRouterTerminal is
             poolFeeBps: poolFeeBps
         });
 
-        if (slippageTolerance >= SLIPPAGE_DENOMINATOR) return 0;
+        if (slippageTolerance >= _SLIPPAGE_DENOMINATOR) return 0;
 
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
 
@@ -349,7 +349,7 @@ contract JBRouterTerminal is
             quoteToken: tokenOut
         });
 
-        minAmountOut -= (minAmountOut * slippageTolerance) / SLIPPAGE_DENOMINATOR;
+        minAmountOut -= (minAmountOut * slippageTolerance) / _SLIPPAGE_DENOMINATOR;
     }
 
     //*********************************************************************//
@@ -1066,7 +1066,7 @@ contract JBRouterTerminal is
     /// @param tokenIn The input token.
     /// @param arithmeticMeanTick The TWAP arithmetic mean tick (or spot tick for V4).
     /// @param poolFeeBps The pool fee in basis points.
-    /// @return The slippage tolerance in basis points of SLIPPAGE_DENOMINATOR.
+    /// @return The slippage tolerance in basis points of _SLIPPAGE_DENOMINATOR.
     function _getSlippageTolerance(
         uint256 amountIn,
         uint128 liquidity,
@@ -1083,7 +1083,7 @@ contract JBRouterTerminal is
         bool zeroForOne = tokenIn == token0;
 
         uint160 sqrtP = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-        if (sqrtP == 0) return SLIPPAGE_DENOMINATOR;
+        if (sqrtP == 0) return _SLIPPAGE_DENOMINATOR;
 
         uint256 impact =
             JBSwapLib.calculateImpact({amountIn: amountIn, liquidity: liquidity, sqrtP: sqrtP, zeroForOne: zeroForOne});
