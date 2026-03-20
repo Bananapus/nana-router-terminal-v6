@@ -164,6 +164,42 @@ contract RouterTerminalPreviewForkTest is Test {
         assertEq(cycleNumber, previewCycleNumber, "preview cycle number mismatch");
     }
 
+    function test_fork_previewPayForEstimatesEthToUsdcSwapRoute() public view {
+        uint256 amountIn = 1 ether;
+
+        (
+            uint256 previewRulesetId,
+            uint256 previewCycleNumber,
+            uint256 previewTokenCount,
+            uint256 previewReservedTokenCount,
+            uint256 specCount
+        ) = _previewPayFor(usdcProjectId, JBConstants.NATIVE_TOKEN, amountIn, beneficiary, "");
+
+        assertGt(previewRulesetId, 0, "preview ruleset id missing");
+        assertGt(previewCycleNumber, 0, "preview cycle number missing");
+        assertGt(previewTokenCount, 0, "swap preview minted no beneficiary tokens");
+        assertEq(previewReservedTokenCount, 0, "unexpected reserved token preview");
+        assertEq(specCount, 0, "unexpected hook specs");
+    }
+
+    function test_fork_previewPayForEstimatesUsdcToEthSwapRoute() public view {
+        uint256 amountIn = 1000e6;
+
+        (
+            uint256 previewRulesetId,
+            uint256 previewCycleNumber,
+            uint256 previewTokenCount,
+            uint256 previewReservedTokenCount,
+            uint256 specCount
+        ) = _previewPayFor(ethProjectId, address(USDC), amountIn, beneficiary, "");
+
+        assertGt(previewRulesetId, 0, "preview ruleset id missing");
+        assertGt(previewCycleNumber, 0, "preview cycle number missing");
+        assertGt(previewTokenCount, 0, "swap preview minted no beneficiary tokens");
+        assertEq(previewReservedTokenCount, 0, "unexpected reserved token preview");
+        assertEq(specCount, 0, "unexpected hook specs");
+    }
+
     function _previewPayFor(
         uint256 projectId,
         address token,
