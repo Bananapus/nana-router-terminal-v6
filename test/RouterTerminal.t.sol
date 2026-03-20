@@ -55,6 +55,24 @@ contract MockERC20 {
     }
 }
 
+contract MockERC20WithDecimals is MockERC20 {
+    uint8 internal immutable _decimals;
+
+    constructor(uint8 decimals_) {
+        _decimals = decimals_;
+    }
+
+    function decimals() external view returns (uint8) {
+        return _decimals;
+    }
+}
+
+contract MockERC20BrokenDecimals is MockERC20 {
+    function decimals() external pure returns (uint8) {
+        revert();
+    }
+}
+
 /// @notice Mock WETH that tracks balances and sends ETH on withdraw.
 contract MockWETH9 {
     mapping(address => uint256) public balanceOf;
@@ -217,8 +235,8 @@ contract RouterTerminalTest is Test {
     // -------------------- accounting context tests -------------------- //
     //*********************************************************************//
 
-    function test_accountingContext_dynamic() public {
-        address token = makeAddr("someToken");
+    function test_accountingContext_nativeTokenFallsBackTo18Decimals() public view {
+        address token = JBConstants.NATIVE_TOKEN;
         JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, token);
         assertEq(ctx.token, token);
         assertEq(ctx.decimals, 18);
@@ -226,13 +244,23 @@ contract RouterTerminalTest is Test {
         assertEq(ctx.currency, uint32(uint160(token)));
     }
 
-    function test_accountingContext_remainsSyntheticForNon18DecimalToken() public {
-        address usdcLike = makeAddr("usdcLike");
+    function test_accountingContext_usesBestEffortTokenDecimals() public {
+        address usdcLike = address(new MockERC20WithDecimals(6));
         JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, usdcLike);
         assertEq(ctx.token, usdcLike);
-        assertEq(ctx.decimals, 18);
+        assertEq(ctx.decimals, 6);
         // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(ctx.currency, uint32(uint160(usdcLike)));
+    }
+
+    function test_accountingContext_fallsBackTo18WhenTokenBreaksDecimals() public {
+        address weirdToken = address(new MockERC20BrokenDecimals());
+
+        JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, weirdToken);
+        assertEq(ctx.token, weirdToken);
+        assertEq(ctx.decimals, 18);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        assertEq(ctx.currency, uint32(uint160(weirdToken)));
     }
 
     function test_accountingContexts_empty() public view {

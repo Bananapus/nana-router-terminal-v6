@@ -80,7 +80,6 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
-    error JBRouterTerminal_TokenNotAccepted(uint256 projectId, address token);
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
@@ -90,7 +89,7 @@ contract JBRouterTerminal is
     uint256 public constant DEFAULT_TWAP_WINDOW = 10 minutes;
 
     /// @notice The denominator used for slippage tolerance basis points.
-    uint256 public constant SLIPPAGE_DENOMINATOR = 10_000;
+    uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
     // ------------------------ internal constants ----------------------- //
@@ -183,21 +182,31 @@ contract JBRouterTerminal is
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
 
-    /// @notice Returns a dynamic accounting context for any token with 18 decimals.
-    /// @dev The router terminal does not store accounting contexts — it constructs them on the fly because it can
-    /// accept any token.
+    /// @notice Returns a best-effort accounting context for any token the router can route.
+    /// @dev This surface is still synthetic for routing discovery, but it probes ERC-20 decimals when available and
+    /// falls back to 18 if a token omits or breaks `decimals()`.
     /// @param token The address of the token to get the accounting context for.
     function accountingContextForTokenOf(
         uint256,
         address token
     )
         external
-        pure
+        view
         override
-        returns (JBAccountingContext memory context)
+        returns (JBAccountingContext memory)
     {
+        uint8 decimals = 18;
+
+        if (token != JBConstants.NATIVE_TOKEN) {
+            try IJBToken(token).decimals() returns (uint8 resolvedDecimals) {
+                decimals = resolvedDecimals;
+            } catch {
+                // Non-standard ERC-20s that omit or break `decimals()` remain discoverable with a synthetic fallback.
+            }
+        }
+
         // forge-lint: disable-next-line(unsafe-typecast)
-        context = JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
+        return JBAccountingContext({token: token, decimals: decimals, currency: uint32(uint160(token))});
     }
 
     /// @notice Returns an empty array — this terminal accepts any token dynamically.
@@ -574,9 +583,7 @@ contract JBRouterTerminal is
             (JBSingleAllowance memory allowance) = abi.decode(parsedMetadata, (JBSingleAllowance));
 
             // Make sure the permit allowance is enough for this payment. If not, revert early.
-            if (amount > allowance.amount) {
-                revert JBRouterTerminal_PermitAllowanceNotEnough(amount, allowance.amount);
-            }
+            if (amount > allowance.amount) revert JBRouterTerminal_PermitAllowanceNotEnough(amount, allowance.amount);
 
             // Keep a reference to the permit rules.
             IAllowanceTransfer.PermitSingle memory permitSingle = IAllowanceTransfer.PermitSingle({
@@ -679,9 +686,7 @@ contract JBRouterTerminal is
                 sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
 
             // If it's not a JB project token, return as-is (caller handles the swap).
-            if (sourceProjectId == 0) {
-                return (IJBTerminal(address(0)), token, amount);
-            }
+            if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
 
             // Find which terminal to cash out from and which token to reclaim.
             (address tokenToReclaim, IJBCashOutTerminal cashOutTerminal) =
@@ -736,11 +741,8 @@ contract JBRouterTerminal is
 
         if (nIn == nOut) {
             // Same underlying token — just wrap or unwrap.
-            if (tokenIn == JBConstants.NATIVE_TOKEN) {
-                WETH.deposit{value: amount}();
-            } else {
-                WETH.withdraw(amount);
-            }
+            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.deposit{value: amount}();
+            else WETH.withdraw(amount);
             return amount;
         }
 
@@ -1031,9 +1033,7 @@ contract JBRouterTerminal is
                     // slither-disable-next-line calls-loop
                     IJBTerminal destTerminal =
                         DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
-                    if (address(destTerminal) != address(0)) {
-                        return (contextToken, terminal);
-                    }
+                    if (address(destTerminal) != address(0)) return (contextToken, terminal);
                 }
 
                 // Priority 2: Is this a JB project token (so we can recurse)?
@@ -1310,9 +1310,7 @@ contract JBRouterTerminal is
             if (exists) {
                 (tokenOut) = abi.decode(routeData, (address));
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
-                if (address(destTerminal) == address(0)) {
-                    revert JBRouterTerminal_TokenNotAccepted(projectId, tokenOut);
-                }
+                if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
                 return (tokenOut, destTerminal);
             }
         }
@@ -1379,9 +1377,7 @@ contract JBRouterTerminal is
             });
 
             // If the cashout loop found a terminal that accepts the reclaimed token, we're done.
-            if (address(destTerminal) != address(0)) {
-                return (destTerminal, tokenOut, amountOut);
-            }
+            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut);
 
             // Cashout produced a base token the destination doesn't accept — fall through to resolve + convert.
             tokenIn = tokenOut;
@@ -1419,9 +1415,7 @@ contract JBRouterTerminal is
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
-        if (Currency.unwrap(currency) == address(0)) {
-            WETH.deposit{value: amount}();
-        }
+        if (Currency.unwrap(currency) == address(0)) WETH.deposit{value: amount}();
     }
 
     /// @notice Transfers tokens.
