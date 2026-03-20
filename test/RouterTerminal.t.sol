@@ -1042,12 +1042,12 @@ contract RouterTerminalTest is Test {
         );
 
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)),
-            abi.encode(pool)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)), abi.encode(pool)
         );
         vm.mockCall(
-            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 500)), abi.encode(address(0))
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 500)),
+            abi.encode(address(0))
         );
         vm.mockCall(
             address(mockFactory),
@@ -1055,7 +1055,9 @@ contract RouterTerminalTest is Test {
             abi.encode(address(0))
         );
         vm.mockCall(
-            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 100)), abi.encode(address(0))
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 100)),
+            abi.encode(address(0))
         );
         vm.mockCall(pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1000)));
         _mockV4NoPools(tokenIn, tokenOut);
@@ -1208,7 +1210,9 @@ contract RouterTerminalTest is Test {
         JBPayHookSpecification[] memory expectedSpecs = new JBPayHookSpecification[](0);
         vm.mockCall(
             destTerminal,
-            abi.encodeCall(IJBTerminal.previewPayFor, (destProjectId, tokenOut, quotedAmountOut, beneficiary, metadata)),
+            abi.encodeCall(
+                IJBTerminal.previewPayFor, (destProjectId, tokenOut, quotedAmountOut, beneficiary, metadata)
+            ),
             abi.encode(expectedRuleset, uint256(51), uint256(52), expectedSpecs)
         );
 
@@ -1248,12 +1252,12 @@ contract RouterTerminalTest is Test {
             abi.encode(destTerminal)
         );
         vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)),
-            abi.encode(pool)
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)), abi.encode(pool)
         );
         vm.mockCall(
-            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 500)), abi.encode(address(0))
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 500)),
+            abi.encode(address(0))
         );
         vm.mockCall(
             address(mockFactory),
@@ -1261,7 +1265,9 @@ contract RouterTerminalTest is Test {
             abi.encode(address(0))
         );
         vm.mockCall(
-            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 100)), abi.encode(address(0))
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 100)),
+            abi.encode(address(0))
         );
         vm.mockCall(pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1000)));
         _mockV4NoPools(tokenIn, tokenOut);

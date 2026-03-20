@@ -188,6 +188,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Forward the preview request unchanged to whichever terminal was resolved above.
+        // slither-disable-next-line unused-return
         return terminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });

@@ -309,6 +309,7 @@ contract JBRouterTerminal is
             _previewRoute({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
 
         // Forward the best available preview call to the terminal that would ultimately receive the payment.
+        // slither-disable-next-line unused-return
         return destTerminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
@@ -893,6 +894,7 @@ contract JBRouterTerminal is
             _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
         // Ask that terminal how much of the reclaim token this cashout count would return.
+        // slither-disable-next-line unused-return
         (, reclaimAmount,,) = cashOutTerminal.previewCashOutFrom({
             holder: address(this),
             projectId: sourceProjectId,
