@@ -39,7 +39,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
-import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
@@ -670,10 +669,8 @@ contract JBRouterTerminal is
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
-                if (
-                    address(destTerminal) != address(0)
-                        && !_isRouterLikeTerminal({projectId: destProjectId, terminal: destTerminal})
-                ) {
+                // Skip if the destination terminal is this router itself (would recurse).
+                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
                     return (destTerminal, token, amount);
                 }
             }
@@ -1036,10 +1033,7 @@ contract JBRouterTerminal is
                     // slither-disable-next-line calls-loop
                     IJBTerminal destTerminal =
                         DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
-                    if (
-                        address(destTerminal) != address(0)
-                            && !_isRouterLikeTerminal({projectId: destProjectId, terminal: destTerminal})
-                    ) {
+                    if (address(destTerminal) != address(0)) {
                         return (contextToken, terminal);
                     }
                 }
@@ -1318,10 +1312,7 @@ contract JBRouterTerminal is
             if (exists) {
                 (tokenOut) = abi.decode(routeData, (address));
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
-                if (
-                    address(destTerminal) == address(0)
-                        || _isRouterLikeTerminal({projectId: projectId, terminal: destTerminal})
-                ) {
+                if (address(destTerminal) == address(0)) {
                     revert JBRouterTerminal_TokenNotAccepted(projectId, tokenOut);
                 }
                 return (tokenOut, destTerminal);
@@ -1330,51 +1321,21 @@ contract JBRouterTerminal is
 
         // 2. Direct acceptance — project accepts tokenIn as-is.
         destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenIn});
-        if (address(destTerminal) != address(0) && !_isRouterLikeTerminal({projectId: projectId, terminal: destTerminal})) {
+        if (address(destTerminal) != address(0)) {
             return (tokenIn, destTerminal);
         }
 
         // 2b. Check NATIVE_TOKEN <-> WETH equivalence.
         if (tokenIn == JBConstants.NATIVE_TOKEN) {
             destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: address(WETH)});
-            if (
-                address(destTerminal) != address(0)
-                    && !_isRouterLikeTerminal({projectId: projectId, terminal: destTerminal})
-            ) return (address(WETH), destTerminal);
+            if (address(destTerminal) != address(0)) return (address(WETH), destTerminal);
         } else if (tokenIn == address(WETH)) {
             destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: JBConstants.NATIVE_TOKEN});
-            if (
-                address(destTerminal) != address(0)
-                    && !_isRouterLikeTerminal({projectId: projectId, terminal: destTerminal})
-            ) return (JBConstants.NATIVE_TOKEN, destTerminal);
+            if (address(destTerminal) != address(0)) return (JBConstants.NATIVE_TOKEN, destTerminal);
         }
 
         // 3. Dynamic discovery — iterate terminals, find accepted token with best Uniswap pool.
         (tokenOut, destTerminal) = _discoverAcceptedToken({projectId: projectId, tokenIn: tokenIn});
-    }
-
-    /// @notice Whether a terminal is part of the router stack rather than a terminal that truly accepts funds.
-    /// @dev Router terminals and the router registry intentionally advertise broad token acceptance so the directory
-    /// can route into this router stack. They must never satisfy the direct-acceptance checks here, or routed
-    /// payments recurse back into the router instead of reaching a real terminal.
-    function _isRouterLikeTerminal(uint256 projectId, IJBTerminal terminal) internal view returns (bool) {
-        if (address(terminal) == address(0) || address(terminal) == address(this)) return true;
-
-        {
-            (bool success, bytes memory data) = address(terminal).staticcall(
-                abi.encodeCall(IERC165.supportsInterface, (type(IJBRouterTerminalRegistry).interfaceId))
-            );
-            if (success && data.length >= 32 && abi.decode(data, (bool))) return true;
-        }
-
-        {
-            (bool success, bytes memory data) =
-                address(terminal).staticcall(abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)));
-            if (!success || data.length < 64) return false;
-
-            JBAccountingContext[] memory contexts = abi.decode(data, (JBAccountingContext[]));
-            return contexts.length == 0;
-        }
     }
 
     /// @notice Core routing logic shared by pay() and addToBalanceOf().

@@ -22,7 +22,6 @@
 - **No access control on `pay` / `addToBalanceOf`.** Anyone can route payments. This is by design but means the contract processes arbitrary token types and amounts.
 - **Fee-on-transfer tokens unsupported.** `_acceptFundsFor` in the terminal uses balance-delta, but the registry does NOT. Fee-on-transfer tokens through the registry will mismatch.
 - **Credit cashout path.** `_acceptFundsFor` processes `cashOutSource` metadata to transfer credits from `_msgSender()`. Requires `TRANSFER_CREDITS` permission. If a user has this permission set broadly, any caller through the trusted forwarder could drain their credits.
-- **Router-stack terminals are not direct acceptance.** `JBRouterTerminal` and `JBRouterTerminalRegistry` intentionally advertise broad token acceptance so the directory can route into the router stack. The router therefore filters them out of direct-acceptance checks and only treats non-router terminals as true destination acceptance.
 - **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing a terminal clears the default if it matches but does NOT clear per-project terminal settings already set to the disallowed terminal.
 - **Synthetic accounting contexts.** `JBRouterTerminal.accountingContextForTokenOf()` always returns `decimals = 18`,
   and `JBRouterTerminalRegistry` simply forwards that synthetic context. This is safe for routing discovery but

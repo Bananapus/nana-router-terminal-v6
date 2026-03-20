@@ -108,7 +108,7 @@ State touched: Source project's token supply (burned), terminal balances. Potent
 - **Slippage exceeded:** Reverts with `JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut)`.
 - **Amount overflow:** Reverts with `JBRouterTerminal_AmountOverflow(amount)` if swap amount exceeds `type(uint128).max`, or if Permit2 transfer amount exceeds `type(uint160).max`.
 - **ETH sent with ERC-20 payment:** Reverts with `JBRouterTerminal_NoMsgValueAllowed(value)`.
-- **Router-stack terminal returned by directory:** If `primaryTerminalOf` returns the router itself or the router registry, it is skipped and the router continues discovery to find a real accepting terminal.
+- **Router is destination terminal:** If `primaryTerminalOf` returns the router itself, it is skipped to prevent infinite recursion (line 625).
 - **Destination terminal reverts:** The entire transaction reverts atomically. No tokens are stuck.
 - **Destination terminal accepts tokens but misbehaves:** If it does not revert but does not credit the project, tokens are lost. No recovery mechanism.
 

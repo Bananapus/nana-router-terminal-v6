@@ -21,7 +21,7 @@ _If you're having trouble understanding this contract, take a look at the [core 
 1. A payer calls `pay(projectId, token, amount, ...)` with any token.
 2. The terminal accepts the token (supports ERC-20 approvals, Permit2, and credit transfers).
 3. If the input is a JB project token (ERC-20 or credits), it recursively cashes out through the source project's terminals until reaching a base token.
-4. It resolves which token the destination project accepts, checking: metadata override (`routeTokenOut`), direct acceptance, NATIVE/WETH equivalence, then dynamic pool discovery across all terminals. Router terminals and the router registry are intentionally excluded from "direct acceptance" so the router cannot recurse into itself.
+4. It resolves which token the destination project accepts, checking: metadata override (`routeTokenOut`), direct acceptance, NATIVE/WETH equivalence, then dynamic pool discovery across all terminals.
 5. If the resolved token differs from the input, it converts -- wrapping/unwrapping ETH/WETH, or swapping through the best Uniswap V3 or V4 pool.
 6. Slippage protection: the caller can pass a minimum output quote in metadata (`quoteForSwap` key), or the terminal calculates one using TWAP (V3) or spot price (V4) with a dynamic sigmoid slippage tolerance based on estimated price impact.
 7. The output tokens are forwarded to the project's primary terminal via `terminal.pay(...)` or `terminal.addToBalanceOf(...)`.
