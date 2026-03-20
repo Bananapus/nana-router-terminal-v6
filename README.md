@@ -3,9 +3,10 @@
 A Juicebox terminal that accepts payments in any token, dynamically discovers what token each destination project accepts, and routes the payment there -- via direct forwarding, Uniswap swap, JB token cashout, or a combination. Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
 
 This contract family is a routing surface, not an accounting-truth surface. `JBRouterTerminal` synthesizes
-`JBAccountingContext` values with `decimals = 18` for any token, and the registry simply forwards that context. Do not
-reuse the router terminal or router terminal registry as an accounting-sensitive terminal source for lending or other
-logic that relies on real token decimals.
+best-effort `JBAccountingContext` values for routing discovery: native tokens use `18` decimals, ERC-20s probe
+`IERC20Metadata.decimals()` when available, and broken or non-standard tokens fall back to `18`. The registry simply
+forwards that context. Do not reuse the router terminal or router terminal registry as an accounting-sensitive terminal
+source for lending or other logic that relies on real token decimals.
 
 _If you're having trouble understanding this contract, take a look at the [core protocol contracts](https://github.com/Bananapus/nana-core-v6) and the [documentation](https://docs.juicebox.money/) first. If you have questions, reach out on [Discord](https://discord.com/invite/ErQYmth4dS)._
 
@@ -21,7 +22,7 @@ _If you're having trouble understanding this contract, take a look at the [core 
 1. A payer calls `pay(projectId, token, amount, ...)` with any token.
 2. The terminal accepts the token (supports ERC-20 approvals, Permit2, and credit transfers).
 3. If the input is a JB project token (ERC-20 or credits), it recursively cashes out through the source project's terminals until reaching a base token.
-4. It resolves which token the destination project accepts, checking: metadata override (`routeTokenOut`), direct acceptance, NATIVE/WETH equivalence, then dynamic pool discovery across all terminals.
+4. It resolves which token the destination project accepts, checking: metadata override (`routeTokenOut`), direct acceptance only if the chosen terminal exposes non-empty accounting contexts for the project, NATIVE/WETH equivalence, then dynamic pool discovery across all terminals.
 5. If the resolved token differs from the input, it converts -- wrapping/unwrapping ETH/WETH, or swapping through the best Uniswap V3 or V4 pool.
 6. Slippage protection: the caller can pass a minimum output quote in metadata (`quoteForSwap` key), or the terminal calculates one using TWAP (V3) or spot price (V4) with a dynamic sigmoid slippage tolerance based on estimated price impact.
 7. The output tokens are forwarded to the project's primary terminal via `terminal.pay(...)` or `terminal.addToBalanceOf(...)`.

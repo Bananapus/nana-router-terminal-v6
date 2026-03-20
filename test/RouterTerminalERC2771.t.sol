@@ -9,6 +9,7 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -152,6 +153,12 @@ contract RouterTerminalERC2771Test is Test {
             abi.encode(mockTerminal)
         );
 
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
         // Mint tokens to the REAL caller and have them approve the router.
         token.mint(realCaller, amount);
         vm.prank(realCaller);
@@ -203,6 +210,12 @@ contract RouterTerminalERC2771Test is Test {
             abi.encode(mockTerminal)
         );
 
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
         // Mint tokens to the direct caller and have them approve the router.
         token.mint(directCaller, amount);
         vm.prank(directCaller);
@@ -245,6 +258,10 @@ contract RouterTerminalERC2771Test is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, JBConstants.NATIVE_TOKEN)),
             abi.encode(mockTerminal)
         );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(0)});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mock dest terminal pay.
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));

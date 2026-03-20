@@ -302,6 +302,12 @@ contract TestAuditGaps is Test {
         // Project accepts tokenIn directly.
         vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, tokenIn)), abi.encode(dest));
 
+        JBAccountingContext[] memory ctx = new JBAccountingContext[](1);
+        ctx[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(dest, abi.encodeCall(IJBTerminal.accountingContextsOf, (1)), abi.encode(ctx));
+
         fot.mint(payer, 5000);
         vm.prank(payer);
         fot.approve(address(router), 5000);
