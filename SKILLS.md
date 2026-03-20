@@ -21,7 +21,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same routing flow as `pay` but calls `terminal.addToBalanceOf(...)` instead of `terminal.pay(...)`. |
 | `discoverPool(normalizedTokenIn, normalizedTokenOut) -> IUniswapV3Pool` | Search V3 factory for highest-liquidity pool across 4 fee tiers. Returns the V3 pool (or zero address if V4 was better). |
 | `discoverBestPool(normalizedTokenIn, normalizedTokenOut) -> PoolInfo` | Discover best pool across both V3 and V4, comparing in-range liquidity. Returns `PoolInfo` indicating protocol version and pool details. |
-| `accountingContextForTokenOf(projectId, token) -> JBAccountingContext` | Returns a dynamically constructed context with 18 decimals and currency = `uint32(uint160(token))`. Does not read from storage. |
+| `accountingContextForTokenOf(projectId, token) -> JBAccountingContext` | Returns a real accounting context only if the destination terminal reports `token` in `accountingContextsOf(projectId)`. Reverts for router-stack synthetic acceptance. |
 | `accountingContextsOf(projectId) -> JBAccountingContext[]` | Always returns an empty array (this terminal accepts any token dynamically). |
 | `currentSurplusOf(...) -> uint256` | Always returns 0. This terminal holds no surplus. |
 | `uniswapV3SwapCallback(amount0Delta, amount1Delta, data)` | V3 swap callback. Verifies caller is a legitimate pool via the factory. Wraps ETH if needed and transfers input tokens to the pool. |
@@ -50,7 +50,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Function | What it does |
 |----------|--------------|
 | `_route(destProjectId, tokenIn, amount, metadata)` | Core routing logic. Detects JB project tokens, runs `_cashOutLoop` if needed, then resolves output token and converts. |
-| `_resolveTokenOut(projectId, tokenIn, metadata)` | Priority: 1) `routeTokenOut` metadata override, 2) direct acceptance, 3) NATIVE/WETH equivalence, 4) `_discoverAcceptedToken`. |
+| `_resolveTokenOut(projectId, tokenIn, metadata)` | Priority: 1) `routeTokenOut` metadata override, 2) real direct acceptance proven by terminal accounting contexts, 3) NATIVE/WETH equivalence, 4) `_discoverAcceptedToken`. |
 | `_discoverAcceptedToken(projectId, tokenIn)` | Iterates all terminals and their accounting contexts for a project. Finds the accepted token with the deepest Uniswap pool. Falls back to the first accepted token if no pool exists. |
 | `_convert(tokenIn, tokenOut, amount, projectId, metadata)` | No-op if same token, wrap/unwrap for NATIVE/WETH, or swap via `_handleSwap`. |
 | `_handleSwap(projectId, tokenIn, tokenOut, amount, metadata)` | Discovers the best pool, gets a quote, executes the swap (V3 or V4), unwraps output if needed, returns leftover input to payer. |
@@ -81,7 +81,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Struct | Fields | Used In |
 |--------|--------|---------|
 | `PoolInfo` | `bool isV4`, `IUniswapV3Pool v3Pool`, `PoolKey v4Key` | Returned by `discoverBestPool` and used internally by `_discoverPool`, `_pickPoolAndQuote`. Indicates whether the best route is V3 or V4 and stores the pool reference. |
-| `JBAccountingContext` | `address token`, `uint8 decimals`, `uint32 currency` | Token accounting contexts for accepted tokens. The router terminal constructs these dynamically with 18 decimals. |
+| `JBAccountingContext` | `address token`, `uint8 decimals`, `uint32 currency` | Token accounting contexts for accepted tokens. The router terminal only surfaces contexts reported by a real destination terminal. |
 | `JBSingleAllowance` | `uint48 sigDeadline`, `uint160 amount`, `uint48 expiration`, `uint48 nonce`, `bytes signature` | Decoded from `permit2` metadata key for gasless approvals. |
 
 ## Constants
@@ -166,7 +166,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 ## Gotchas
 
-- **Dynamic accounting contexts**: `accountingContextsOf()` returns an empty array and `accountingContextForTokenOf()` constructs contexts on the fly with 18 decimals. This is intentional -- the router accepts any token.
+- **Non-authoritative router contexts**: `accountingContextsOf()` returns an empty array and `accountingContextForTokenOf()` only succeeds for a token that a real destination terminal reports as directly accepted. The router still accepts any input token for routing, but it no longer pretends to be the accounting terminal for that token.
 - **No surplus, no migration**: `currentSurplusOf()` always returns 0. `migrateBalanceOf()` always returns 0. The terminal is stateless between transactions.
 - Unlike `JBMultiTerminal` which has a fixed `TOKEN_OUT`, the router terminal dynamically discovers what token each project accepts. This makes it a universal entry point.
 - Pool discovery runs at call time -- it searches V3 and V4 pools across 4 fee tiers each (8 pools total). The best pool (by in-range liquidity) wins. This is gas-intensive but ensures optimal routing.

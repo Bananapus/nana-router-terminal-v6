@@ -44,9 +44,10 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
 ## Composition Boundary
 
 The router terminal exposes the `IJBTerminal` surface because it needs to participate in Juicebox routing, but its
-accounting context is intentionally synthetic. `accountingContextForTokenOf()` returns `decimals = 18` for any token,
-and the registry forwards that value unchanged. Treat the router layer as a payment router only, not as an
-accounting-sensitive terminal source for loan sizing, debt normalization, or any other decimals-dependent logic.
+accounting surface is intentionally narrow. `accountingContextForTokenOf()` only returns a context when a destination
+terminal actually reports the token in `accountingContextsOf()`. Router-stack terminals that only provide synthetic
+routing support are rejected. Treat the router layer as a payment router only, not as an accounting-sensitive terminal
+source for loan sizing, debt normalization, or any other decimals-dependent logic.
 
 ## Dependencies
 - `@bananapus/core-v6` — Terminal, directory, permissions

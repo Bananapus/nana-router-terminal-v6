@@ -217,22 +217,50 @@ contract RouterTerminalTest is Test {
     // -------------------- accounting context tests -------------------- //
     //*********************************************************************//
 
-    function test_accountingContext_dynamic() public {
+    function test_accountingContext_returnsRealAcceptedContext() public {
+        uint256 projectId = 1;
         address token = makeAddr("someToken");
-        JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, token);
-        assertEq(ctx.token, token);
-        assertEq(ctx.decimals, 18);
+        address mockTerminal = makeAddr("destTerminal");
+        vm.etch(mockTerminal, hex"00");
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
         // forge-lint: disable-next-line(unsafe-typecast)
-        assertEq(ctx.currency, uint32(uint160(token)));
+        contexts[0] = JBAccountingContext({token: token, decimals: 6, currency: uint32(uint160(token))});
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, token)),
+            abi.encode(mockTerminal)
+        );
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
+        JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(projectId, token);
+        assertEq(ctx.token, token);
+        assertEq(ctx.decimals, 6);
+        assertEq(ctx.currency, contexts[0].currency);
     }
 
-    function test_accountingContext_remainsSyntheticForNon18DecimalToken() public {
-        address usdcLike = makeAddr("usdcLike");
-        JBAccountingContext memory ctx = routerTerminal.accountingContextForTokenOf(1, usdcLike);
-        assertEq(ctx.token, usdcLike);
-        assertEq(ctx.decimals, 18);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        assertEq(ctx.currency, uint32(uint160(usdcLike)));
+    function test_accountingContext_revertsForSyntheticRouterAcceptance() public {
+        uint256 projectId = 1;
+        address token = makeAddr("someToken");
+        address routerLikeTerminal = makeAddr("routerLikeTerminal");
+        vm.etch(routerLikeTerminal, hex"00");
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, token)),
+            abi.encode(routerLikeTerminal)
+        );
+        vm.mockCall(
+            routerLikeTerminal,
+            abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)),
+            abi.encode(new JBAccountingContext[](0))
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_TokenNotAccepted.selector, projectId, token)
+        );
+        routerTerminal.accountingContextForTokenOf(projectId, token);
     }
 
     function test_accountingContexts_empty() public view {
@@ -260,6 +288,10 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
             abi.encode(mockTerminal)
         );
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
 
@@ -284,11 +316,79 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, desiredTokenOut)),
             abi.encode(mockTerminal)
         );
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 desiredCurrency = uint32(uint160(desiredTokenOut));
+        contexts[0] = JBAccountingContext({token: desiredTokenOut, decimals: 18, currency: desiredCurrency});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         (address tokenOut, IJBTerminal destTerminal) =
             routerTerminal.exposedResolveTokenOut(projectId, tokenIn, metadata);
 
         assertEq(tokenOut, desiredTokenOut);
+        assertEq(address(destTerminal), mockTerminal);
+    }
+
+    function test_resolveTokenOut_ignoresSyntheticDirectAcceptanceAndDiscoversRealToken() public {
+        uint256 projectId = 1;
+        address tokenIn = makeAddr("tokenIn");
+        address acceptedToken = makeAddr("acceptedToken");
+        address routerLikeTerminal = makeAddr("routerLikeTerminal");
+        address mockTerminal = makeAddr("destTerminal");
+        address mockPool = makeAddr("mockPool");
+        vm.etch(routerLikeTerminal, hex"00");
+        vm.etch(mockTerminal, hex"00");
+        vm.etch(mockPool, hex"00");
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
+            abi.encode(routerLikeTerminal)
+        );
+        vm.mockCall(
+            routerLikeTerminal,
+            abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)),
+            abi.encode(new JBAccountingContext[](0))
+        );
+
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(mockTerminal);
+        vm.mockCall(
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
+        );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 acceptedCurrency = uint32(uint160(acceptedToken));
+        contexts[0] = JBAccountingContext({token: acceptedToken, decimals: 18, currency: acceptedCurrency});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, acceptedToken, 3000)),
+            abi.encode(mockPool)
+        );
+        vm.mockCall(mockPool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1000e18)));
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, acceptedToken, 500)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, acceptedToken, 10_000)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, acceptedToken, 100)),
+            abi.encode(address(0))
+        );
+        _mockV4NoPools(tokenIn, acceptedToken);
+
+        (address tokenOut, IJBTerminal destTerminal) = routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
+
+        assertEq(tokenOut, acceptedToken);
         assertEq(address(destTerminal), mockTerminal);
     }
 
@@ -401,6 +501,10 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
             abi.encode(mockTerminal)
         );
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mint tokens to payer and approve the router terminal.
         token.mint(payer, amount);
@@ -436,6 +540,11 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, JBConstants.NATIVE_TOKEN)),
             abi.encode(mockTerminal)
         );
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+        });
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mock dest terminal pay (should receive msg.value).
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(50)));
@@ -524,6 +633,10 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
             abi.encode(mockTerminal)
         );
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
         // Mint tokens to payer and approve the router terminal.
         token.mint(payer, amount);
@@ -1036,6 +1149,13 @@ contract RouterTerminalTest is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, JBConstants.NATIVE_TOKEN)),
             abi.encode(mockTerminal)
         );
+        {
+            JBAccountingContext[] memory destContexts = new JBAccountingContext[](1);
+            destContexts[0] = JBAccountingContext({
+                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            });
+            vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (1)), abi.encode(destContexts));
+        }
 
         // Dest project doesn't accept jbToken directly.
         vm.mockCall(

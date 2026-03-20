@@ -183,22 +183,26 @@ contract JBRouterTerminal is
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
 
-    /// @notice Returns a dynamic accounting context for any token with 18 decimals.
-    /// @dev The router terminal does not store accounting contexts — it constructs them on the fly because it can
-    /// accept any token.
+    /// @notice Returns the real accounting context for a token that a destination project actually accepts directly.
+    /// @dev Router-stack terminals are excluded here so downstream integrations do not mistake synthetic routing
+    ///      support for true accounting support.
     /// @param token The address of the token to get the accounting context for.
     /// @return context A `JBAccountingContext` for the specified token.
     function accountingContextForTokenOf(
-        uint256,
+        uint256 projectId,
         address token
     )
         external
-        pure
+        view
         override
         returns (JBAccountingContext memory context)
     {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        context = JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
+        IJBTerminal terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
+        (bool isDirectlyAccepted, JBAccountingContext memory directContext) =
+            _directAccountingContextOf({projectId: projectId, token: token, terminal: terminal});
+        if (!isDirectlyAccepted) revert JBRouterTerminal_TokenNotAccepted(projectId, token);
+
+        return directContext;
     }
 
     /// @notice Returns an empty array — this terminal accepts any token dynamically.
@@ -669,8 +673,9 @@ contract JBRouterTerminal is
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
-                // Skip if the destination terminal is this router itself (would recurse).
-                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                (bool acceptsFinalToken,) =
+                    _directAccountingContextOf({projectId: destProjectId, token: token, terminal: destTerminal});
+                if (acceptsFinalToken) {
                     return (destTerminal, token, amount);
                 }
             }
@@ -1312,7 +1317,9 @@ contract JBRouterTerminal is
             if (exists) {
                 (tokenOut) = abi.decode(routeData, (address));
                 destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
-                if (address(destTerminal) == address(0)) {
+                (bool acceptsRequestedTokenOut,) =
+                    _directAccountingContextOf({projectId: projectId, token: tokenOut, terminal: destTerminal});
+                if (!acceptsRequestedTokenOut) {
                     revert JBRouterTerminal_TokenNotAccepted(projectId, tokenOut);
                 }
                 return (tokenOut, destTerminal);
@@ -1321,7 +1328,9 @@ contract JBRouterTerminal is
 
         // 2. Direct acceptance — project accepts tokenIn as-is.
         destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenIn});
-        if (address(destTerminal) != address(0)) {
+        (bool isDirectlyAccepted,) =
+            _directAccountingContextOf({projectId: projectId, token: tokenIn, terminal: destTerminal});
+        if (isDirectlyAccepted) {
             return (tokenIn, destTerminal);
         }
 
@@ -1336,6 +1345,26 @@ contract JBRouterTerminal is
 
         // 3. Dynamic discovery — iterate terminals, find accepted token with best Uniswap pool.
         (tokenOut, destTerminal) = _discoverAcceptedToken({projectId: projectId, tokenIn: tokenIn});
+    }
+
+    /// @notice Check whether a terminal truly accepts a token as an accounting context, instead of only routing it.
+    /// @dev Router-stack terminals report empty contexts, so this rejects the synthetic recursion path.
+    function _directAccountingContextOf(
+        uint256 projectId,
+        address token,
+        IJBTerminal terminal
+    )
+        internal
+        view
+        returns (bool isDirectlyAccepted, JBAccountingContext memory context)
+    {
+        if (address(terminal) == address(0) || address(terminal) == address(this)) return (false, context);
+
+        try terminal.accountingContextsOf(projectId) returns (JBAccountingContext[] memory contexts) {
+            for (uint256 i; i < contexts.length; i++) {
+                if (contexts[i].token == token) return (true, contexts[i]);
+            }
+        } catch {}
     }
 
     /// @notice Core routing logic shared by pay() and addToBalanceOf().
