@@ -153,7 +153,17 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         returns (uint256)
     {}
 
-    /// @notice Preview a payment by forwarding to the resolved terminal's preview function.
+    /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
+    /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
+    /// @param projectId The ID of the project being paid.
+    /// @param token The token that would be paid into the resolved terminal.
+    /// @param amount The amount of the input token to preview.
+    /// @param beneficiary The address that would receive any minted project tokens.
+    /// @param metadata Extra data to forward unchanged to the resolved terminal preview.
+    /// @return ruleset The ruleset the resolved terminal would use for the preview.
+    /// @return beneficiaryTokenCount The number of project tokens the beneficiary would receive.
+    /// @return reservedTokenCount The number of project tokens that would be reserved.
+    /// @return hookSpecifications Any pay hook specifications returned by the resolved terminal.
     function previewPayFor(
         uint256 projectId,
         address token,
@@ -171,9 +181,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             JBPayHookSpecification[] memory hookSpecifications
         )
     {
+        // Read the terminal explicitly configured for this project, if any.
         IJBTerminal terminal = _terminalOf[projectId];
+
+        // If the project has not pinned a terminal, use the registry-wide default terminal instead.
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
+        // Forward the preview request unchanged to whichever terminal was resolved above.
         return terminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
