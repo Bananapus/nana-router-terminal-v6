@@ -3,10 +3,11 @@ pragma solidity ^0.8.0;
 
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
+import {IJBPreviewPayTerminal} from "./IJBPreviewPayTerminal.sol";
 import {PoolInfo} from "../structs/PoolInfo.sol";
 
 /// @notice A terminal that routes payments by discovering what token a project accepts and converting automatically.
-interface IJBRouterTerminal {
+interface IJBRouterTerminal is IJBPreviewPayTerminal {
     /// @notice Discover the best pool across both V3 and V4 for a token pair.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).

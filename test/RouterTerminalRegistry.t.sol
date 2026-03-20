@@ -5,7 +5,10 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.sol";
@@ -14,6 +17,7 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
+import {IJBPreviewPayTerminal} from "../src/interfaces/IJBPreviewPayTerminal.sol";
 import {IJBRouterTerminalRegistry} from "../src/interfaces/IJBRouterTerminalRegistry.sol";
 
 contract RouterTerminalRegistryTest is Test {
@@ -315,6 +319,45 @@ contract RouterTerminalRegistryTest is Test {
         });
 
         assertEq(returned, 100);
+    }
+
+    function test_previewPayFor_forwardsToDefault() public {
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        JBRuleset memory expectedRuleset = JBRuleset({
+            cycleNumber: 1,
+            id: 2,
+            basedOnId: 3,
+            start: 4,
+            duration: 5,
+            weight: 6,
+            weightCutPercent: 7,
+            approvalHook: IJBRulesetApprovalHook(address(0)),
+            metadata: 8
+        });
+        JBPayHookSpecification[] memory expectedSpecs = new JBPayHookSpecification[](0);
+
+        vm.mockCall(
+            address(terminalA),
+            abi.encodeCall(
+                IJBPreviewPayTerminal.previewPayFor,
+                (projectId, JBConstants.NATIVE_TOKEN, 1 ether, address(this), bytes(""))
+            ),
+            abi.encode(expectedRuleset, uint256(9), uint256(10), expectedSpecs)
+        );
+
+        (
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        ) = registry.previewPayFor(projectId, JBConstants.NATIVE_TOKEN, 1 ether, address(this), "");
+
+        assertEq(ruleset.id, expectedRuleset.id);
+        assertEq(beneficiaryTokenCount, 9);
+        assertEq(reservedTokenCount, 10);
+        assertEq(hookSpecifications.length, 0);
     }
 
     // ──────────────────────────────────────────────────────────────────────

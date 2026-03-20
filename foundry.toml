@@ -2,7 +2,10 @@
 solc = '0.8.26'
 evm_version = 'cancun'
 optimizer_runs = 200
+via_ir = true
 libs = ["node_modules", "lib"]
+remappings = ["local-core/=../nana-core-v6/"]
+allow_paths = ["../nana-core-v6"]
 fs_permissions = [{ access = "read-write", path = "./"}]
 
 [fuzz]

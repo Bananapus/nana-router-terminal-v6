@@ -14,6 +14,9 @@ import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
@@ -40,6 +43,8 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {IJBPreviewCashOutTerminal} from "./interfaces/IJBPreviewCashOutTerminal.sol";
+import {IJBPreviewPayTerminal} from "./interfaces/IJBPreviewPayTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
@@ -79,6 +84,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
+    error JBRouterTerminal_PreviewNotAccurateForRoute();
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
 
     //*********************************************************************//
@@ -269,6 +275,39 @@ contract JBRouterTerminal is
         if (!info.isV4) pool = info.v3Pool;
     }
 
+    /// @notice Preview a payment by mirroring the router's routing logic in view context.
+    /// @dev Reverts if the route would require an onchain swap, since the router has no exact quoter today.
+    function previewPayFor(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
+    {
+        amount = _previewAcceptFundsFor({amount: amount, metadata: metadata});
+
+        IJBTerminal destTerminal;
+        bool isExact;
+        (destTerminal, token, amount, isExact) =
+            _previewRoute({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
+
+        if (!isExact) revert JBRouterTerminal_PreviewNotAccurateForRoute();
+
+        return IJBPreviewPayTerminal(address(destTerminal))
+            .previewPayFor({
+                projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
+            });
+    }
+
     //*********************************************************************//
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
@@ -279,7 +318,8 @@ contract JBRouterTerminal is
     /// @return A flag indicating if the provided interface ID is supported.
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IJBPermitTerminal).interfaceId
-            || interfaceId == type(IERC165).interfaceId || interfaceId == type(IJBPermissioned).interfaceId;
+            || interfaceId == type(IJBRouterTerminal).interfaceId || interfaceId == type(IERC165).interfaceId
+            || interfaceId == type(IJBPermissioned).interfaceId;
     }
 
     //*********************************************************************//
@@ -629,6 +669,28 @@ contract JBRouterTerminal is
         return 0;
     }
 
+    /// @notice Parse the optional `cashOutSource` metadata.
+    /// @return sourceProjectId The source project override, or 0 if none is specified.
+    /// @return amount The credit amount, or 0 if none is specified.
+    function _cashOutSourceFrom(bytes calldata metadata)
+        internal
+        view
+        returns (uint256 sourceProjectId, uint256 amount)
+    {
+        (bool exists, bytes memory creditData) = JBMetadataResolver.getDataFor({
+            id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata
+        });
+        if (exists) (sourceProjectId, amount) = abi.decode(creditData, (uint256, uint256));
+    }
+
+    /// @notice A view-only mirror of `_acceptFundsFor` used for previews.
+    /// @dev Preview semantics use the caller-supplied `amount` as the intended input amount.
+    function _previewAcceptFundsFor(uint256 amount, bytes calldata metadata) internal view returns (uint256) {
+        (, uint256 creditAmount) = _cashOutSourceFrom(metadata);
+        if (creditAmount != 0) return creditAmount;
+        return amount;
+    }
+
     /// @notice Find the highest liquidity across all V3 fee tiers and V4 pools for a token pair.
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
@@ -714,6 +776,80 @@ contract JBRouterTerminal is
 
         // If we reach here, the loop exceeded the maximum iteration count.
         revert JBRouterTerminal_CashOutLoopLimit();
+    }
+
+    /// @notice A view-only mirror of `_cashOutLoop`.
+    /// @return destTerminal The terminal that accepts the final token, if found.
+    /// @return finalToken The token after all cash-out steps.
+    /// @return finalAmount The amount of the final token.
+    /// @return isExact Whether the preview exactly matches the router's execution path.
+    function _previewCashOutLoop(
+        uint256 destProjectId,
+        address token,
+        uint256 amount,
+        uint256 sourceProjectIdOverride,
+        bytes calldata metadata
+    )
+        internal
+        view
+        returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount, bool isExact)
+    {
+        uint256 minTokensReclaimed;
+        {
+            (bool exists, bytes memory minData) =
+                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
+            if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
+        }
+
+        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
+            if (sourceProjectIdOverride == 0) {
+                destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
+                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                    return (destTerminal, token, amount, true);
+                }
+            }
+
+            uint256 sourceProjectId =
+                sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
+
+            if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount, true);
+
+            address tokenToReclaim;
+            (tokenToReclaim, amount) =
+                _previewCashOutStep({sourceProjectId: sourceProjectId, destProjectId: destProjectId, amount: amount});
+
+            if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
+
+            minTokensReclaimed = 0;
+            token = tokenToReclaim;
+            sourceProjectIdOverride = 0;
+        }
+
+        revert JBRouterTerminal_CashOutLoopLimit();
+    }
+
+    function _previewCashOutStep(
+        uint256 sourceProjectId,
+        uint256 destProjectId,
+        uint256 amount
+    )
+        internal
+        view
+        returns (address tokenToReclaim, uint256 reclaimAmount)
+    {
+        IJBCashOutTerminal cashOutTerminal;
+        (tokenToReclaim, cashOutTerminal) =
+            _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
+
+        (, reclaimAmount,,) = IJBPreviewCashOutTerminal(address(cashOutTerminal))
+            .previewCashOutFrom({
+                holder: address(this),
+                projectId: sourceProjectId,
+                cashOutCount: amount,
+                tokenToReclaim: tokenToReclaim,
+                beneficiary: payable(address(this)),
+                metadata: ""
+            });
     }
 
     /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for NATIVE/WETH, or swap via Uniswap.
@@ -1391,6 +1527,53 @@ contract JBRouterTerminal is
         amountOut = _convert({
             tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata
         });
+    }
+
+    /// @notice A view-only mirror of `_route`.
+    /// @return destTerminal The terminal that would receive the payment.
+    /// @return tokenOut The token that terminal would receive.
+    /// @return amountOut The amount that terminal would receive.
+    /// @return isExact Whether the preview exactly matches the router's execution path.
+    function _previewRoute(
+        uint256 destProjectId,
+        address tokenIn,
+        uint256 amount,
+        bytes calldata metadata
+    )
+        internal
+        view
+        returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut, bool isExact)
+    {
+        uint256 sourceProjectIdOverride;
+        (sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
+
+        uint256 sourceProjectId = sourceProjectIdOverride;
+        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
+            sourceProjectId = TOKENS.projectIdOf(IJBToken(tokenIn));
+        }
+
+        if (sourceProjectId != 0) {
+            (destTerminal, tokenOut, amountOut, isExact) = _previewCashOutLoop({
+                destProjectId: destProjectId,
+                token: tokenIn,
+                amount: amount,
+                sourceProjectIdOverride: sourceProjectIdOverride,
+                metadata: metadata
+            });
+
+            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut, isExact);
+
+            tokenIn = tokenOut;
+            amount = amountOut;
+        }
+
+        (tokenOut, destTerminal) = _resolveTokenOut({projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
+
+        if (tokenIn == tokenOut || _normalize(tokenIn) == _normalize(tokenOut)) {
+            return (destTerminal, tokenOut, amount, true);
+        }
+
+        return (destTerminal, tokenOut, 0, false);
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).

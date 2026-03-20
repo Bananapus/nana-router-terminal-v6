@@ -20,7 +20,10 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.sol";
 
+import {IJBPreviewPayTerminal} from "./interfaces/IJBPreviewPayTerminal.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
     // A library that adds default safety checks to ERC20 functionality.
@@ -150,6 +153,33 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256)
     {}
+
+    /// @notice Preview a payment by forwarding to the resolved terminal's preview function.
+    function previewPayFor(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        override
+        returns (
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
+    {
+        IJBTerminal terminal = _terminalOf[projectId];
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+
+        return IJBPreviewPayTerminal(address(terminal))
+            .previewPayFor({
+                projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
+            });
+    }
 
     /// @notice The terminal for the given project, or the default terminal if none is set.
     /// @param projectId The ID of the project to get the terminal for.

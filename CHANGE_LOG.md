@@ -21,7 +21,7 @@ The main contract was renamed from `JBSwapTerminal` (and `JBSwapTerminal5_1`) to
 
 ### 1.4 `IJBSwapTerminal` Interface Removed, Replaced by `IJBRouterTerminal`
 - **v5 `IJBSwapTerminal`** exposed: `DEFAULT_PROJECT_ID()`, `MAX_TWAP_WINDOW()`, `MIN_TWAP_WINDOW()`, `MIN_DEFAULT_POOL_CARDINALITY()`, `UNCERTAIN_SLIPPAGE_TOLERANCE()`, `SLIPPAGE_DENOMINATOR()`, `twapWindowOf()`, `addDefaultPool()`, `addTwapParamsFor()`.
-- **v6 `IJBRouterTerminal`** exposes only: `discoverBestPool()`, `discoverPool()`.
+- **v6 `IJBRouterTerminal`** exposes: `discoverBestPool()`, `discoverPool()`, and `previewPayFor()`.
 - All pool/TWAP configuration functions are removed (see section 1.5).
 
 ### 1.5 Removed: Per-Project Pool Configuration and TWAP Management
@@ -44,7 +44,7 @@ The `SLIPPAGE_DENOMINATOR` constant was kept but changed from `uint160` to `uint
 
 ### 1.7 `supportsInterface` Changed
 - **v5:** Reported support for `IJBTerminal`, `IJBPermitTerminal`, `IERC165`, `IUniswapV3SwapCallback`, `IJBPermissioned`, `IJBSwapTerminal`.
-- **v6:** Reports support for `IJBTerminal`, `IJBPermitTerminal`, `IERC165`, `IJBPermissioned` only. No longer advertises `IUniswapV3SwapCallback` or the custom interface.
+- **v6:** Reports support for `IJBTerminal`, `IJBPermitTerminal`, `IJBRouterTerminal`, `IERC165`, and `IJBPermissioned`. It no longer advertises `IUniswapV3SwapCallback`.
 
 ### 1.8 Permission ID Changed (Registry)
 - **v5:** `lockTerminalFor()` and `setTerminalFor()` used `JBPermissionIds.ADD_SWAP_TERMINAL_POOL`.
@@ -121,18 +121,25 @@ New external view functions on `IJBRouterTerminal` for off-chain queries:
 - `discoverBestPool(tokenIn, tokenOut)` — returns a `PoolInfo` (V3 or V4).
 - `discoverPool(tokenIn, tokenOut)` — returns only the V3 pool (backwards-compatible helper).
 
-### 2.10 `Permit2AllowanceFailed` Event
+### 2.10 `previewPayFor()` Added
+New external view functions on the router surfaces:
+- `JBRouterTerminal.previewPayFor(projectId, token, amount, beneficiary, metadata)` mirrors the router's payment routing logic and forwards the preview to the terminal that would ultimately receive the payment.
+- `JBRouterTerminalRegistry.previewPayFor(projectId, token, amount, beneficiary, metadata)` resolves the router terminal for a project and forwards the preview.
+- Direct routes and wrap-unwrap routes are previewable exactly.
+- Swap routes revert with `JBRouterTerminal_PreviewNotAccurateForRoute()` instead of returning a non-exact result.
+
+### 2.11 `Permit2AllowanceFailed` Event
 In v6, when a Permit2 allowance call fails during `_acceptFundsFor()`, an event `Permit2AllowanceFailed(token, owner, reason)` is emitted (inherited from `IJBPermitTerminal`), and the payment continues using fallback transfer. In v5, the failure was silently swallowed with an empty `catch`.
 
-### 2.11 Fee-on-Transfer Token Handling
+### 2.12 Fee-on-Transfer Token Handling
 - **v5 `_acceptFundsFor`:** Returned `IERC20(token).balanceOf(address(this))` after transfer — would include any pre-existing balance.
 - **v6 `_acceptFundsFor`:** Uses balance-delta pattern (`balanceAfter - balanceBefore`) to accurately measure tokens received.
 
-### 2.12 Partial-Fill Leftover Handling via Balance Delta
+### 2.13 Partial-Fill Leftover Handling via Balance Delta
 - **v5 `_handleTokenTransfersAndSwap`:** Measured leftovers as the full `balanceOf(normalizedTokenIn)` — could include pre-existing balances.
 - **v6 `_handleSwap`:** Snapshots `balanceBefore` and uses `balanceAfter - balanceBefore` for accurate leftover calculation.
 
-### 2.13 `PERMIT2` Exposed on `IJBRouterTerminalRegistry` Interface
+### 2.14 `PERMIT2` Exposed on `IJBRouterTerminalRegistry` Interface
 - **v5:** `PERMIT2` was an immutable on the registry contract but not exposed on the `IJBSwapTerminalRegistry` interface.
 - **v6:** `PERMIT2()` is declared on the `IJBRouterTerminalRegistry` interface.
 
