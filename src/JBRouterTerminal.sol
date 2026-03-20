@@ -81,7 +81,6 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
-    error JBRouterTerminal_PreviewNotAccurateForRoute();
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
 
     //*********************************************************************//
@@ -305,11 +304,8 @@ contract JBRouterTerminal is
         // Hold the terminal that a real routed payment would end up calling.
         IJBTerminal destTerminal;
 
-        // Track whether the preview route can be represented exactly in view context.
-        bool isExact;
-
-        // Resolve the terminal, output token, output amount, and exactness for this route.
-        (destTerminal, token, amount, isExact) =
+        // Resolve the terminal, output token, and output amount for this route.
+        (destTerminal, token, amount) =
             _previewRoute({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
 
         // Forward the best available preview call to the terminal that would ultimately receive the payment.
@@ -808,7 +804,6 @@ contract JBRouterTerminal is
     /// @return destTerminal The terminal that accepts the final token, if found.
     /// @return finalToken The token after all cash-out steps.
     /// @return finalAmount The amount of the final token.
-    /// @return isExact Whether the preview exactly matches the router's execution path.
     function _previewCashOutLoop(
         uint256 destProjectId,
         address token,
@@ -818,7 +813,7 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount, bool isExact)
+        returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
         // Track the one-time minimum reclaim amount that the caller may require on the first hop.
         uint256 minTokensReclaimed;
@@ -840,7 +835,7 @@ contract JBRouterTerminal is
 
                 // If a real external terminal accepts this token, the preview route is complete and exact.
                 if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
-                    return (destTerminal, token, amount, true);
+                    return (destTerminal, token, amount);
                 }
             }
 
@@ -849,7 +844,7 @@ contract JBRouterTerminal is
                 sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
 
             // If this is no longer a JB project token, stop cashing out and let the caller continue routing from it.
-            if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount, true);
+            if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
 
             // Hold the token produced by the next previewed cashout hop.
             address tokenToReclaim;
@@ -1593,7 +1588,6 @@ contract JBRouterTerminal is
     /// @return destTerminal The terminal that would receive the payment.
     /// @return tokenOut The token that terminal would receive.
     /// @return amountOut The amount that terminal would receive, estimated when a swap is required.
-    /// @return isExact Whether the preview exactly matches the router's execution path.
     function _previewRoute(
         uint256 destProjectId,
         address tokenIn,
@@ -1602,7 +1596,7 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut, bool isExact)
+        returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
         // Hold any one-shot source-project override encoded in metadata.
         uint256 sourceProjectIdOverride;
@@ -1621,7 +1615,7 @@ contract JBRouterTerminal is
         // JB project tokens and credit routes must be previewed through the cash-out path first.
         if (sourceProjectId != 0) {
             // Preview the recursive cash-out flow until we either reach an accepting terminal or a base token.
-            (destTerminal, tokenOut, amountOut, isExact) = _previewCashOutLoop({
+            (destTerminal, tokenOut, amountOut) = _previewCashOutLoop({
                 destProjectId: destProjectId,
                 token: tokenIn,
                 amount: amount,
@@ -1630,7 +1624,7 @@ contract JBRouterTerminal is
             });
 
             // If cash-out preview already found the receiving terminal, the route is fully resolved.
-            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut, isExact);
+            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut);
 
             // Otherwise continue routing from the reclaimed base token and amount.
             tokenIn = tokenOut;
@@ -1642,7 +1636,7 @@ contract JBRouterTerminal is
 
         // Direct transfers and native/WETH wrap-unwrap paths can be previewed exactly.
         if (tokenIn == tokenOut || _normalize(tokenIn) == _normalize(tokenOut)) {
-            return (destTerminal, tokenOut, amount, true);
+            return (destTerminal, tokenOut, amount);
         }
 
         // Quote the swap using the same pool-discovery and quote-selection logic production uses for swap bounds.
@@ -1655,7 +1649,7 @@ contract JBRouterTerminal is
 
         // Swap previews are still estimates because execution-time pool state can move before the real transaction
         // lands.
-        return (destTerminal, tokenOut, amountOut, false);
+        return (destTerminal, tokenOut, amountOut);
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
