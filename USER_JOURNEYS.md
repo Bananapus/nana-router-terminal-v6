@@ -166,6 +166,46 @@ Same as Journey 1. Additionally:
 
 ---
 
+## Journey 2A: Preview a Payment Through the Router Terminal
+
+The caller asks what a payment would do without moving funds.
+
+### Entry Point
+
+```solidity
+function previewPayFor(
+    uint256 projectId,
+    address token,
+    uint256 amount,
+    address beneficiary,
+    bytes calldata metadata
+)
+    external
+    view
+    returns (
+        JBRuleset memory ruleset,
+        uint256 beneficiaryTokenCount,
+        uint256 reservedTokenCount,
+        JBPayHookSpecification[] memory hookSpecifications
+    )
+```
+
+### Behavior
+
+1. `_previewAcceptFundsFor()` mirrors the router's source-of-funds logic in view context.
+2. `_previewRoute()` mirrors `_route()` and determines which terminal would ultimately receive the payment.
+3. If the route is direct or wrap-unwrap, the router forwards an exact preview to that destination terminal.
+4. If the route requires a swap, the router estimates the output using current quote data, then forwards that best-effort preview to the destination terminal.
+
+### Exactness Boundary
+
+- **Direct forwarding:** exact
+- **Native/WETH wrap-unwrap:** exact
+- **Cashout-only routes:** exact when the downstream cashout terminal exposes an exact preview surface
+- **Swap routes:** best-effort estimates using current pool state and any caller-provided `quoteForSwap`
+
+---
+
 ## Journey 3: Pay a Project Through the Registry
 
 The registry resolves which router terminal instance a project uses, then forwards the payment.
@@ -197,6 +237,42 @@ function pay(
 - **No terminal set and no default:** The resolved terminal is `address(0)`. The subsequent `terminal.pay()` call will revert.
 - **Fee-on-transfer tokens:** The registry returns the user-supplied `amount` (not the actual received amount). If fewer tokens arrived due to transfer fees, the forwarding call may revert or behave incorrectly.
 - **Terminal disallowed after being set:** A project's explicit terminal remains set even if `disallowTerminal()` is called later. Only the default is cleared.
+
+---
+
+## Journey 3A: Preview a Payment Through the Registry
+
+The registry resolves which router terminal instance a project uses, then forwards the preview.
+
+### Entry Point
+
+```solidity
+// On JBRouterTerminalRegistry:
+function previewPayFor(
+    uint256 projectId,
+    address token,
+    uint256 amount,
+    address beneficiary,
+    bytes calldata metadata
+)
+    external
+    view
+    returns (
+        JBRuleset memory ruleset,
+        uint256 beneficiaryTokenCount,
+        uint256 reservedTokenCount,
+        JBPayHookSpecification[] memory hookSpecifications
+    )
+```
+
+### State Changes
+
+None. The registry resolves `_terminalOf[projectId]`, falling back to `defaultTerminal`, then forwards `previewPayFor()` to the resolved router terminal.
+
+### Edge Cases
+
+- **No terminal set and no default:** The preview will revert when forwarded to `address(0)`.
+- **Estimated downstream route:** The resolved router terminal may return a best-effort swap estimate rather than an execution-exact value.
 
 ---
 

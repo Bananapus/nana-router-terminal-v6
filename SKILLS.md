@@ -8,8 +8,8 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 | Contract | Role |
 |----------|------|
-| `JBRouterTerminal` | Core terminal: accepts any token, discovers the best route to the destination project's accepted token, swaps via Uniswap V3 or V4, cashes out JB project tokens, forwards to the primary terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`/`addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
+| `JBRouterTerminal` | Core terminal: accepts any token, previews payment routes with `previewPayFor`, discovers the best route to the destination project's accepted token, swaps via Uniswap V3 or V4, cashes out JB project tokens, and forwards to the primary terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, `IJBRouterTerminal`. |
+| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
 
 ## Key Functions
 
@@ -18,6 +18,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Function | What it does |
 |----------|--------------|
 | `pay(projectId, token, amount, beneficiary, minReturnedTokens, memo, metadata)` | Accept any token, route to the destination project's accepted token (cashout, swap, wrap/unwrap, or direct), forward to the project's primary terminal. Returns project token count. |
+| `previewPayFor(projectId, token, amount, beneficiary, metadata)` | Preview the terminal and mint result that the current payment route would produce. Swap routes return best-effort estimates using the router's quote-selection logic. |
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same routing flow as `pay` but calls `terminal.addToBalanceOf(...)` instead of `terminal.pay(...)`. |
 | `discoverPool(normalizedTokenIn, normalizedTokenOut) -> IUniswapV3Pool` | Search V3 factory for highest-liquidity pool across 4 fee tiers. Returns the V3 pool (or zero address if V4 was better). |
 | `discoverBestPool(normalizedTokenIn, normalizedTokenOut) -> PoolInfo` | Discover best pool across both V3 and V4, comparing in-range liquidity. Returns `PoolInfo` indicating protocol version and pool details. |
@@ -26,13 +27,14 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `currentSurplusOf(...) -> uint256` | Always returns 0. This terminal holds no surplus. |
 | `uniswapV3SwapCallback(amount0Delta, amount1Delta, data)` | V3 swap callback. Verifies caller is a legitimate pool via the factory. Wraps ETH if needed and transfers input tokens to the pool. |
 | `unlockCallback(data) -> bytes` | V4 swap callback. Called by PoolManager during `unlock()`. Executes the swap, settles input, takes output, checks slippage. |
-| `supportsInterface(interfaceId) -> bool` | Returns true for `IJBTerminal`, `IJBPermitTerminal`, `IERC165`, `IJBPermissioned`. |
+| `supportsInterface(interfaceId) -> bool` | Returns true for `IJBTerminal`, `IJBPermitTerminal`, `IJBRouterTerminal`, `IERC165`, `IJBPermissioned`. |
 
 ### JBRouterTerminalRegistry
 
 | Function | What it does |
 |----------|--------------|
 | `pay(projectId, token, amount, beneficiary, minReturnedTokens, memo, metadata)` | Resolves the terminal for the project (per-project or default), accepts funds, forwards payment. |
+| `previewPayFor(projectId, token, amount, beneficiary, metadata)` | Resolves the terminal for the project (per-project or default) and forwards the payment preview. |
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same resolution and forwarding but for balance additions. |
 | `terminalOf(projectId) -> IJBTerminal` | Returns the terminal for the project, or `defaultTerminal` if none is set. |
 | `setTerminalFor(projectId, terminal)` | Route a project to a specific allowed router terminal. Requires `SET_ROUTER_TERMINAL` permission (ID 28). Reverts if locked or terminal not allowed. |
@@ -50,6 +52,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Function | What it does |
 |----------|--------------|
 | `_route(destProjectId, tokenIn, amount, metadata)` | Core routing logic. Detects JB project tokens, runs `_cashOutLoop` if needed, then resolves output token and converts. |
+| `_previewRoute(destProjectId, tokenIn, amount, metadata)` | View mirror of `_route`. Returns the terminal, token, and amount that the current payment route would use, estimating swap outputs from current quote data when needed. |
 | `_resolveTokenOut(projectId, tokenIn, metadata)` | Priority: 1) `routeTokenOut` metadata override, 2) direct acceptance, 3) NATIVE/WETH equivalence, 4) `_discoverAcceptedToken`. |
 | `_discoverAcceptedToken(projectId, tokenIn)` | Iterates all terminals and their accounting contexts for a project. Finds the accepted token with the deepest Uniswap pool. Falls back to the first accepted token if no pool exists. |
 | `_convert(tokenIn, tokenOut, amount, projectId, metadata)` | No-op if same token, wrap/unwrap for NATIVE/WETH, or swap via `_handleSwap`. |
@@ -175,6 +178,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 - **V3 TWAP**: Reverts with `JBRouterTerminal_NoObservationHistory()` when a V3 pool has no observation history. The TWAP window is capped by the pool's oldest observation if shorter than 10 minutes.
 - **V4 spot price**: V4 vanilla pools have no built-in TWAP oracle. The terminal uses the current spot tick with the same sigmoid slippage formula.
 - **V4 requires cancun EVM**: Chains without EIP-1153 (transient storage) cannot use V4 routing. If `POOL_MANAGER` is `address(0)`, V4 discovery is skipped entirely.
+- **Preview estimates**: `previewPayFor()` returns exact values for direct and wrap-unwrap routes, and best-effort estimates for swap routes using current pool state or caller-provided quotes.
 - The `JBRouterTerminalRegistry` handles token custody during delegation -- it transfers tokens from the payer to itself, then approves and forwards to the underlying terminal.
 - `_msgSender()` (ERC-2771) is used instead of `msg.sender` for meta-transaction compatibility in both contracts.
 - The `JBSwapLib` library contains slippage tolerance math (sigmoid formula), price impact estimation, and V3-compatible `sqrtPriceLimitX96` calculation. It does not contain swap execution logic.
