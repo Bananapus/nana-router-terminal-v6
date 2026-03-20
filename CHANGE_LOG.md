@@ -126,7 +126,7 @@ New external view functions on the router surfaces:
 - `JBRouterTerminal.previewPayFor(projectId, token, amount, beneficiary, metadata)` mirrors the router's payment routing logic and forwards the preview to the terminal that would ultimately receive the payment.
 - `JBRouterTerminalRegistry.previewPayFor(projectId, token, amount, beneficiary, metadata)` resolves the router terminal for a project and forwards the preview.
 - Direct routes and wrap-unwrap routes are previewable exactly.
-- Swap routes revert with `JBRouterTerminal_PreviewNotAccurateForRoute()` instead of returning a non-exact result.
+- Swap routes return best-effort estimates using the same pool discovery and quote-selection logic used for execution bounds.
 
 ### 2.11 `Permit2AllowanceFailed` Event
 In v6, when a Permit2 allowance call fails during `_acceptFundsFor()`, an event `Permit2AllowanceFailed(token, owner, reason)` is emitted (inherited from `IJBPermitTerminal`), and the payment continues using fallback transfer. In v5, the failure was silently swallowed with an empty `catch`.

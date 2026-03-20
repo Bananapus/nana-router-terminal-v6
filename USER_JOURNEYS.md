@@ -194,15 +194,15 @@ function previewPayFor(
 
 1. `_previewAcceptFundsFor()` mirrors the router's source-of-funds logic in view context.
 2. `_previewRoute()` mirrors `_route()` and determines which terminal would ultimately receive the payment.
-3. If the route is exact, the router forwards `previewPayFor()` to that destination terminal.
-4. If the route would require a swap, the call reverts with `JBRouterTerminal_PreviewNotAccurateForRoute()`.
+3. If the route is direct or wrap-unwrap, the router forwards an exact preview to that destination terminal.
+4. If the route requires a swap, the router estimates the output using current quote data, then forwards that best-effort preview to the destination terminal.
 
 ### Exactness Boundary
 
 - **Direct forwarding:** exact
 - **Native/WETH wrap-unwrap:** exact
 - **Cashout-only routes:** exact when the downstream cashout terminal exposes an exact preview surface
-- **Swap routes:** not previewed today; the router reverts rather than returning a best-effort value
+- **Swap routes:** best-effort estimates using current pool state and any caller-provided `quoteForSwap`
 
 ---
 
@@ -272,7 +272,7 @@ None. The registry resolves `_terminalOf[projectId]`, falling back to `defaultTe
 ### Edge Cases
 
 - **No terminal set and no default:** The preview will revert when forwarded to `address(0)`.
-- **Inexact downstream route:** The resolved router terminal may revert with `JBRouterTerminal_PreviewNotAccurateForRoute()`.
+- **Estimated downstream route:** The resolved router terminal may return a best-effort swap estimate rather than an execution-exact value.
 
 ---
 

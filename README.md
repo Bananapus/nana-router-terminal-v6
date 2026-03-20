@@ -14,7 +14,7 @@ _If you're having trouble understanding this contract, take a look at the [core 
 
 | Contract | Description |
 |----------|-------------|
-| `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews exact payment routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
+| `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews payment routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
 | `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal` and the extra registry management surface via `IJBRouterTerminalRegistry`. |
 
 ## How It Works
@@ -29,12 +29,12 @@ _If you're having trouble understanding this contract, take a look at the [core 
 
 ### Previewing Payments
 
-`previewPayFor(...)` mirrors the router's payment routing logic and forwards the preview to the terminal that would ultimately receive the payment.
+`previewPayFor(...)` mirrors the router's payment routing logic and forwards the preview to the terminal that would ultimately receive the payment. When a swap is required, it returns the router's best estimate using the same pool-discovery and quote-selection logic used to derive execution bounds.
 
 - Direct routes are exact.
 - Native/WETH wrap-unwrap routes are exact.
 - Cashout-only routes are exact when the downstream cashout terminal exposes an exact preview surface.
-- Swap routes currently revert with `JBRouterTerminal_PreviewNotAccurateForRoute()` instead of returning a non-exact result, because the router does not yet have an execution-faithful onchain quoter.
+- Swap routes return best-effort estimates based on current pool state and any caller-provided `quoteForSwap` metadata.
 
 ```mermaid
 sequenceDiagram

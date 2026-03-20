@@ -39,7 +39,7 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
 Caller → JBRouterTerminal.previewPayFor(projectId, token, amount)
   → Mirror source-of-funds and routing logic in view context
   → If direct, wrap-unwrap, or exact cashout route: forward preview to destination terminal
-  → If swap route: revert with JBRouterTerminal_PreviewNotAccurateForRoute()
+  → If swap route: estimate output using the same quote-selection logic used for execution bounds
 ```
 
 ## Extension Points
