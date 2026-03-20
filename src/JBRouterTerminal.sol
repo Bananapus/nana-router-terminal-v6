@@ -88,9 +88,6 @@ contract JBRouterTerminal is
     /// @notice The default TWAP window used for auto-discovered pools.
     uint256 public constant DEFAULT_TWAP_WINDOW = 10 minutes;
 
-    /// @notice The denominator used for slippage tolerance basis points.
-    uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
-
     //*********************************************************************//
     // ------------------------ internal constants ----------------------- //
     //*********************************************************************//
@@ -98,6 +95,9 @@ contract JBRouterTerminal is
     /// @notice The maximum number of cashout iterations before reverting. Prevents infinite loops from circular
     /// token dependencies.
     uint256 internal constant _MAX_CASHOUT_ITERATIONS = 20;
+
+    /// @notice The denominator used for slippage tolerance basis points.
+    uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
