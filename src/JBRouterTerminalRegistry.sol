@@ -142,13 +142,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
     function currentSurplusOf(
-        uint256 projectId,
-        JBAccountingContext[] memory accountingContexts,
-        uint256 decimals,
-        uint256 currency
+        uint256,
+        address[] calldata,
+        uint256,
+        uint256
     )
         external
-        view
+        pure
         override
         returns (uint256)
     {}

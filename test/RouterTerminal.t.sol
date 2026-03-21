@@ -419,7 +419,7 @@ contract RouterTerminalTest is Test {
     }
 
     function test_currentSurplus_zero() public view {
-        assertEq(routerTerminal.currentSurplusOf(1, new JBAccountingContext[](0), 18, 1), 0);
+        assertEq(routerTerminal.currentSurplusOf(1, new address[](0), 18, 1), 0);
     }
 
     //*********************************************************************//
