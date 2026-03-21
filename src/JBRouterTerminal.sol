@@ -424,11 +424,13 @@ contract JBRouterTerminal is
         payable
         override
     {
-        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-
         IJBTerminal destTerminal;
-        (destTerminal, token, amount) =
-            _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
+        (destTerminal, token, amount) = _route({
+            destProjectId: projectId,
+            tokenIn: token,
+            amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
+            metadata: metadata
+        });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
@@ -472,11 +474,13 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-
         IJBTerminal destTerminal;
-        (destTerminal, token, amount) =
-            _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
+        (destTerminal, token, amount) = _route({
+            destProjectId: projectId,
+            tokenIn: token,
+            amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
+            metadata: metadata
+        });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
