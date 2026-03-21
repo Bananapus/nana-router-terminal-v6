@@ -141,17 +141,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
-    function currentSurplusOf(
-        uint256,
-        address[] calldata,
-        uint256,
-        uint256
-    )
-        external
-        pure
-        override
-        returns (uint256)
-    {}
+    function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {}
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
