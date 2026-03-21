@@ -141,18 +141,18 @@ The registry implements a two-phase terminal assignment:
 
 ## Fee-on-Transfer Token Risks
 
-**JBRouterTerminal:** Uses balance-delta accounting in `_acceptFundsFor()` (lines 550-556). Measures `balanceBefore` and `balanceAfter` the transfer, returning the actual amount received. This correctly handles fee-on-transfer tokens at the acceptance stage. However, the amount forwarded to the destination terminal is the delta, which may differ from what the destination terminal expects if it also performs balance-delta checks.
+**JBRouterTerminal:** Uses balance-delta accounting in `_acceptFundsFor()` (lines 569-575). Measures `balanceBefore` and `balanceAfter` the transfer, returning the actual amount received. This correctly handles fee-on-transfer tokens at the acceptance stage. However, the amount forwarded to the destination terminal is the delta, which may differ from what the destination terminal expects if it also performs balance-delta checks.
 
 **JBRouterTerminalRegistry:** Does NOT use balance-delta accounting in `_acceptFundsFor()` (line 437). It returns the user-supplied `amount` directly. If a fee-on-transfer token is used through the registry, the forwarded amount will exceed actual tokens received, causing a downstream revert or incorrect accounting.
 
-**Audit focus:** Verify that the registry's `_acceptFundsFor` cannot be exploited with fee-on-transfer tokens. The comment on line 433-435 states these are "not supported by design" -- confirm this is documented clearly enough and that no path silently loses funds.
+**Audit focus:** Verify that the registry's `_acceptFundsFor` cannot be exploited with fee-on-transfer tokens. The comment on lines 433-434 states these are "not supported by design" -- confirm this is documented clearly enough and that no path silently loses funds.
 
 ## uint160 Permit2 Truncation Risk
 
 Both contracts cast `amount` to `uint160` when falling through to `PERMIT2.transferFrom()`:
 
-- `JBRouterTerminal._transferFrom()` line 1425: `if (amount > type(uint160).max) revert JBRouterTerminal_AmountOverflow(amount);`
-- `JBRouterTerminalRegistry._transferFrom()` line 477: `if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow();`
+- `JBRouterTerminal._transferFrom()` line 944: `if (amount > type(uint160).max) revert JBRouterTerminal_AmountOverflow(amount);`
+- `JBRouterTerminalRegistry._transferFrom()` line 510: `if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow();`
 
 Both contracts now revert before truncation occurs. Verify these overflow checks are complete and that no code path can reach the `uint160()` cast without hitting the guard.
 

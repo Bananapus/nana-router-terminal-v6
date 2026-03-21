@@ -146,7 +146,22 @@ nana-router-terminal-v6/
     ├── RouterTerminal.t.sol              # Unit tests (mocked dependencies)
     ├── RouterTerminalRegistry.t.sol      # Registry unit tests
     ├── RouterTerminalFork.t.sol          # Fork tests against mainnet Uniswap pools
-    └── RouterTerminalPreviewFork.t.sol   # Fork parity tests for previewPayFor
+    ├── RouterTerminalPreviewFork.t.sol   # Fork parity tests for previewPayFor
+    ├── RouterTerminalCashOutFork.t.sol   # Fork tests for cashout routing
+    ├── RouterTerminalCreditCashout.t.sol # Credit cashout unit tests
+    ├── RouterTerminalERC2771.t.sol       # ERC-2771 meta-transaction tests
+    ├── RouterTerminalFeeCashOutFork.t.sol # Fee routing through cashout (fork)
+    ├── RouterTerminalMultihopFork.t.sol  # Multi-hop routing (fork)
+    ├── RouterTerminalReentrancy.t.sol    # Reentrancy attack tests
+    ├── RouterTerminalSandwichFork.t.sol  # MEV/sandwich resistance (fork)
+    ├── fork/
+    │   └── V4QuoteAndSettlementFork.t.sol # V4 quote and settlement (fork)
+    ├── invariant/
+    │   └── RouterTerminalInvariant.t.sol  # Invariant/fuzz tests
+    └── regression/
+        ├── CashOutLoopLimit.t.sol        # Circular cashout loop cap
+        ├── LockTerminalRace.t.sol        # Lock terminal race condition
+        └── V4SpotPriceSlippage.t.sol     # Sigmoid slippage math
 ```
 
 ## Payment Metadata

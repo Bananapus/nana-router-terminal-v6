@@ -53,9 +53,10 @@ Caller → JBRouterTerminal.previewPayFor(projectId, token, amount)
 ## Composition Boundary
 
 The router terminal exposes the `IJBTerminal` surface because it needs to participate in Juicebox routing, but its
-accounting context is intentionally synthetic. `accountingContextForTokenOf()` returns `decimals = 18` for any token,
-and the registry forwards that value unchanged. Treat the router layer as a payment router only, not as an
-accounting-sensitive terminal source for loan sizing, debt normalization, or any other decimals-dependent logic.
+accounting context is intentionally synthetic. `accountingContextForTokenOf()` returns `decimals = 18` for native
+tokens and probes `IERC20Metadata.decimals()` for ERC-20s (falling back to `18` if the call fails). The registry
+forwards that value unchanged. Treat the router layer as a payment router only, not as an accounting-sensitive
+terminal source for loan sizing, debt normalization, or any other decimals-dependent logic.
 
 ## Dependencies
 - `@bananapus/core-v6` — Terminal, directory, permissions
