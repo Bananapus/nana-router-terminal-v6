@@ -115,7 +115,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Error | When |
 |-------|------|
 | `JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn)` | No accepted token found for the project when iterating all terminals |
-| `JBRouterTerminal_TokenNotAccepted(uint256 projectId, address token)` | The `routeTokenOut` metadata override specifies a token the project does not accept |
+| `JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn)` | No accepted token found for the project, or the `routeTokenOut` metadata override specifies a token the project does not accept |
 | `JBRouterTerminal_CallerNotPool(address caller)` | V3 swap callback called by an address that is not a legitimate factory pool |
 | `JBRouterTerminal_CallerNotPoolManager(address caller)` | V4 unlock callback called by an address other than the PoolManager |
 | `JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut)` | Swap output is below the minimum acceptable amount |
