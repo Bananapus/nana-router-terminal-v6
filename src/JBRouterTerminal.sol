@@ -424,17 +424,11 @@ contract JBRouterTerminal is
         payable
         override
     {
-        IJBTerminal destTerminal;
-        {
-            amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
-            address tokenOut;
-            uint256 amountOut;
-            (destTerminal, tokenOut, amountOut) =
-                _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
-            token = tokenOut;
-            amount = amountOut;
-        }
+        IJBTerminal destTerminal;
+        (destTerminal, token, amount) =
+            _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
@@ -478,17 +472,11 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        IJBTerminal destTerminal;
-        {
-            amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
-            address tokenOut;
-            uint256 amountOut;
-            (destTerminal, tokenOut, amountOut) =
-                _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
-            token = tokenOut;
-            amount = amountOut;
-        }
+        IJBTerminal destTerminal;
+        (destTerminal, token, amount) =
+            _route({destProjectId: projectId, tokenIn: token, amount: amount, metadata: metadata});
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
@@ -552,22 +540,20 @@ contract JBRouterTerminal is
         });
 
         // Determine input/output amounts from the delta.
+        int128 delta0 = delta.amount0();
+        int128 delta1 = delta.amount1();
         uint256 amountIn;
         uint256 amountOut;
-        {
-            int128 delta0 = delta.amount0();
-            int128 delta1 = delta.amount1();
-            if (zeroForOne) {
-                // forge-lint: disable-next-line(unsafe-typecast)
-                amountIn = uint256(uint128(-delta0));
-                // forge-lint: disable-next-line(unsafe-typecast)
-                amountOut = uint256(uint128(delta1));
-            } else {
-                // forge-lint: disable-next-line(unsafe-typecast)
-                amountIn = uint256(uint128(-delta1));
-                // forge-lint: disable-next-line(unsafe-typecast)
-                amountOut = uint256(uint128(delta0));
-            }
+        if (zeroForOne) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amountIn = uint256(uint128(-delta0));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amountOut = uint256(uint128(delta1));
+        } else {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amountIn = uint256(uint128(-delta1));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amountOut = uint256(uint128(delta0));
         }
 
         if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
@@ -594,23 +580,21 @@ contract JBRouterTerminal is
     /// @return The amount of tokens that have been accepted.
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // Check for credit cash-out metadata.
-        {
-            (bool creditExists, bytes memory creditData) =
-                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
+        (bool creditExists, bytes memory creditData) =
+            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
 
-            if (creditExists) {
-                // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
-                if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
+        if (creditExists) {
+            // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
+            if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
 
-                (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
+            (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-                // Pull credits from the payer (requires payer to have granted TRANSFER_CREDITS to this contract).
-                TOKENS.transferCreditsFrom({
-                    holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
-                });
+            // Pull credits from the payer (requires payer to have granted TRANSFER_CREDITS to this contract).
+            TOKENS.transferCreditsFrom({
+                holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
+            });
 
-                return creditAmount;
-            }
+            return creditAmount;
         }
 
         // If native tokens are being paid in, return the `msg.value`.
@@ -673,6 +657,15 @@ contract JBRouterTerminal is
         IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
 
         return 0;
+    }
+
+    /// @notice Parse the optional `cashOutMinReclaimed` metadata.
+    /// @param metadata The metadata to inspect for a minimum reclaim amount.
+    /// @return minTokensReclaimed The minimum reclaim amount, or 0 if none is specified.
+    function _minReclaimedFrom(bytes calldata metadata) internal view returns (uint256 minTokensReclaimed) {
+        (bool exists, bytes memory minData) =
+            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
+        if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
     }
 
     /// @notice Parse the optional `cashOutSource` metadata.
@@ -739,12 +732,7 @@ contract JBRouterTerminal is
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
         // Check for a user-provided minimum cashout reclaim amount (slippage protection).
-        uint256 minTokensReclaimed;
-        {
-            (bool exists, bytes memory minData) =
-                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
-            if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
-        }
+        uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
         // Intermediate steps have no per-step slippage protection. The final output amount is
         // checked against the user's minReclaimed parameter, providing end-to-end slippage protection. Per-step
@@ -816,15 +804,7 @@ contract JBRouterTerminal is
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
         // Track the one-time minimum reclaim amount that the caller may require on the first hop.
-        uint256 minTokensReclaimed;
-        {
-            // Read the optional `cashOutMinReclaimed` payload from metadata.
-            (bool exists, bytes memory minData) =
-                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
-
-            // Decode the first-hop minimum reclaim amount if the payload is present.
-            if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
-        }
+        uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
@@ -1198,15 +1178,13 @@ contract JBRouterTerminal is
 
         for (uint256 i; i < terminals.length; i++) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
-            {
-                // slither-disable-next-line calls-loop
-                try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
-                    bool supported
-                ) {
-                    if (!supported) continue;
-                } catch {
-                    continue;
-                }
+            // slither-disable-next-line calls-loop
+            try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
+                bool supported
+            ) {
+                if (!supported) continue;
+            } catch {
+                continue;
             }
 
             IJBCashOutTerminal terminal = IJBCashOutTerminal(address(terminals[i]));
@@ -1217,12 +1195,10 @@ contract JBRouterTerminal is
                 address contextToken = contexts[j].token;
 
                 // Priority 1: Does the destination project directly accept this token?
-                {
-                    // slither-disable-next-line calls-loop
-                    IJBTerminal destTerminal =
-                        DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
-                    if (address(destTerminal) != address(0)) return (contextToken, terminal);
-                }
+                // slither-disable-next-line calls-loop
+                IJBTerminal destTerminal =
+                    DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
+                if (address(destTerminal) != address(0)) return (contextToken, terminal);
 
                 // Priority 2: Is this a JB project token (so we can recurse)?
                 if (address(fallbackTerminal) == address(0) && contextToken != JBConstants.NATIVE_TOKEN) {
@@ -1492,15 +1468,13 @@ contract JBRouterTerminal is
         returns (address tokenOut, IJBTerminal destTerminal)
     {
         // 1. Metadata override — payer specifies tokenOut explicitly.
-        {
-            (bool exists, bytes memory routeData) =
-                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
-            if (exists) {
-                (tokenOut) = abi.decode(routeData, (address));
-                destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
-                if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
-                return (tokenOut, destTerminal);
-            }
+        (bool exists, bytes memory routeData) =
+            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
+        if (exists) {
+            (tokenOut) = abi.decode(routeData, (address));
+            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
+            return (tokenOut, destTerminal);
         }
 
         // 2. Direct acceptance — project accepts tokenIn as-is.
@@ -1539,14 +1513,7 @@ contract JBRouterTerminal is
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
         // Check for credit source override.
-        uint256 sourceProjectIdOverride;
-        {
-            (bool creditExists, bytes memory creditData) =
-                JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
-            if (creditExists) {
-                (sourceProjectIdOverride,) = abi.decode(creditData, (uint256, uint256));
-            }
-        }
+        (uint256 sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
 
         // Check if input is a JB project token (credit or ERC-20).
         uint256 sourceProjectId = sourceProjectIdOverride;
