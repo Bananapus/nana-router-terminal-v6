@@ -37,7 +37,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `previewPayFor(projectId, token, amount, beneficiary, metadata)` | Resolves the terminal for the project (per-project or default) and forwards the payment preview. |
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same resolution and forwarding but for balance additions. |
 | `terminalOf(projectId) -> IJBTerminal` | Returns the terminal for the project, or `defaultTerminal` if none is set. |
-| `setTerminalFor(projectId, terminal)` | Route a project to a specific allowed router terminal. Requires `SET_ROUTER_TERMINAL` permission (ID 28). Reverts if locked or terminal not allowed. |
+| `setTerminalFor(projectId, terminal)` | Route a project to a specific allowed router terminal. Requires `SET_ROUTER_TERMINAL` permission (ID 29). Reverts if locked or terminal not allowed. |
 | `lockTerminalFor(projectId, expectedTerminal)` | Lock the terminal choice permanently. If no terminal is explicitly set, the current default is snapshotted. Reverts with `TerminalMismatch` if the resolved terminal does not match `expectedTerminal` (prevents race conditions). Requires `SET_ROUTER_TERMINAL` permission. |
 | `allowTerminal(terminal)` | Owner-only: add a terminal to the allowlist. |
 | `disallowTerminal(terminal)` | Owner-only: remove a terminal from the allowlist. Also clears `defaultTerminal` if it matches. |
@@ -70,7 +70,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 | `nana-core-v6` | `JBMetadataResolver` | Parsing `quoteForSwap`, `permit2`, `routeTokenOut`, `cashOutSource`, and `cashOutMinReclaimed` metadata from calldata |
 | `nana-core-v6` | `JBAccountingContext`, `JBSingleAllowance` | Token accounting and Permit2 allowance structs |
 | `nana-core-v6` | `IJBPermitTerminal` | Interface for Permit2 support and the `Permit2AllowanceFailed` event |
-| `nana-permission-ids-v6` | `JBPermissionIds` | Permission ID constants: `SET_ROUTER_TERMINAL` (28), `TRANSFER_CREDITS` (13, required by payer for credit cashouts) |
+| `nana-permission-ids-v6` | `JBPermissionIds` | Permission ID constants: `SET_ROUTER_TERMINAL` (29), `TRANSFER_CREDITS` (13, required by payer for credit cashouts) |
 | `@uniswap/v3-core` | `IUniswapV3Pool`, `IUniswapV3Factory`, `IUniswapV3SwapCallback`, `TickMath` | V3 pool swaps, factory pool discovery, tick math |
 | `@uniswap/v3-periphery` | `OracleLibrary` | TWAP oracle consultation (`consult`, `getQuoteAtTick`, `getOldestObservationSecondsAgo`) |
 | `@uniswap/v4-core` | `IPoolManager`, `IUnlockCallback`, `PoolKey`, `PoolId`, `Currency`, `BalanceDelta`, `SwapParams`, `StateLibrary` | V4 pool swaps, liquidity queries, settle/take flow |
@@ -103,7 +103,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `SET_ROUTER_TERMINAL` | `28` | Permission ID required by `setTerminalFor` and `lockTerminalFor` (from `JBPermissionIds`) |
+| `SET_ROUTER_TERMINAL` | `29` | Permission ID required by `setTerminalFor` and `lockTerminalFor` (from `JBPermissionIds`) |
 | `PROJECTS` | immutable | `IJBProjects` registry, used for `ownerOf` in permission checks |
 | `PERMIT2` | immutable | `IPermit2` instance for gasless ERC-20 approvals |
 
