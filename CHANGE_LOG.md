@@ -4,6 +4,16 @@ This document describes all changes between `nana-swap-terminal` (v5) and `nana-
 
 **Note:** This repo was renamed from `nana-swap-terminal` to `nana-router-terminal` in v6.
 
+## Summary
+
+This release represents a **philosophical shift from configured to automatic**: the swap terminal required manual pool registration and per-project TWAP configuration, while the router terminal automatically discovers the best route for any payment.
+
+- **Renamed `JBSwapTerminal` → `JBRouterTerminal`**: Reflects the broader scope — not just swapping, but full payment routing including JB token cashouts, credit transfers, and multi-hop resolution.
+- **Automatic pool discovery**: Pools are auto-discovered across both Uniswap V3 and V4 by scanning all fee tiers and selecting the highest-liquidity pool. No manual `addDefaultPool()` needed.
+- **Automatic token route discovery**: The terminal dynamically determines what token a destination project accepts by querying terminals and accounting contexts.
+- **JB token cashout routing**: Can recursively cash out JB project tokens (ERC-20 or credits) from source projects before routing the reclaimed tokens to the destination.
+- **Shared `JBSwapLib` library**: Swap math extracted for reuse with `nana-buyback-hook-v6` — includes continuous sigmoid slippage and V4 price limit computation.
+
 ---
 
 ## 1. Breaking Changes
@@ -295,3 +305,5 @@ v5 contained both `JBSwapTerminal.sol` and `JBSwapTerminal5_1.sol` (a minor revi
 | `src/interfaces/IWETH9.sol` | `src/interfaces/IWETH9.sol` | **Unchanged** (import path updated to OZ) |
 | *N/A* | `src/structs/PoolInfo.sol` | **New** |
 | *N/A* | `src/libraries/JBSwapLib.sol` | **New** |
+
+> **Cross-repo impact**: `nana-fee-project-deployer-v6` replaced `SwapTerminalDeploymentLib` with `RouterTerminalDeploymentLib`. `nana-permission-ids-v6` replaced `ADD_SWAP_TERMINAL_POOL`/`ADD_SWAP_TERMINAL_TWAP_PARAMS` with `SET_ROUTER_TERMINAL` (29). `nana-buyback-hook-v6` shares the `JBSwapLib` library for sigmoid slippage and V4 swap math.
