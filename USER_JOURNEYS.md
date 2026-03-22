@@ -15,6 +15,7 @@ A payer sends any token to a project. The router discovers what the project acce
 ### Entry Point
 
 ```solidity
+// On JBRouterTerminal:
 function pay(
     uint256 projectId,
     address token,
@@ -25,6 +26,10 @@ function pay(
     bytes calldata metadata
 ) external payable returns (uint256 beneficiaryTokenCount)
 ```
+
+### Who Can Call
+
+Anyone. No access control.
 
 ### Parameters
 
@@ -53,7 +58,7 @@ function pay(
 #### Path A: Direct Forwarding (project accepts tokenIn)
 
 1. `_acceptFundsFor()` -- transfers tokens from payer to router via ERC-20 `transferFrom`, Permit2, or accepts `msg.value`
-2. `_route()` calls `_resolveTokenOut()` -- finds `primaryTerminalOf(projectId, tokenIn)` returns a terminal
+2. `_route()` calls `_resolveTokenOut()` -- finds `DIRECTORY.primaryTerminalOf(projectId, tokenIn)` returns a terminal
 3. `_convert()` is a no-op (same token)
 4. `_beforeTransferFor()` -- sets ERC-20 allowance for destination terminal (or returns amount as `msg.value` for native)
 5. `destTerminal.pay()` -- forwards tokens, returns minted project tokens
@@ -74,7 +79,7 @@ State touched: WETH balance changes transiently. Router ends at zero.
 1. `_acceptFundsFor()` -- accepts funds
 2. `_route()` -> `_resolveTokenOut()` -> `_discoverAcceptedToken()` -- finds the accepted token with the best Uniswap pool liquidity
 3. `_convert()` -> `_handleSwap()` -> `_executeSwap()`:
-   - `_pickPoolAndQuote()` discovers the best pool and computes `minAmountOut`. For V4 pools, token addresses are normalized (WETH → `address(0)`) before querying OracleLibrary to match V4's native ETH convention.
+   - `_pickPoolAndQuote()` discovers the best pool and computes `minAmountOut`. For V4 pools, token addresses are normalized (WETH -> `address(0)`) before querying OracleLibrary to match V4's native ETH convention.
    - **V3:** `pool.swap()` with callback `uniswapV3SwapCallback()` to supply input tokens
    - **V4:** `POOL_MANAGER.unlock()` -> `unlockCallback()` -> `POOL_MANAGER.swap()` + settle/take. Settlement via `_settleV4` automatically unwraps WETH to native ETH when the pool uses `address(0)` for its native currency.
 4. Leftover input tokens from partial fills returned to payer
@@ -97,6 +102,12 @@ State touched: Uniswap pool state (tick, liquidity positions). Router ends at ze
 5. Forward final token to destination terminal
 
 State touched: Source project's token supply (burned), terminal balances. Potentially Uniswap pool state if a swap follows.
+
+### Events
+
+- `Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)` -- emitted if the Permit2 allowance call fails during `_acceptFundsFor()`. Payment continues using fallback transfer. Inherited from `IJBPermitTerminal`.
+
+No other events are emitted directly by the router terminal. The destination terminal emits its own payment events.
 
 ### Edge Cases
 
@@ -121,6 +132,7 @@ Identical to Journey 1 except the final call is `addToBalanceOf` instead of `pay
 ### Entry Point
 
 ```solidity
+// On JBRouterTerminal:
 function addToBalanceOf(
     uint256 projectId,
     address token,
@@ -130,6 +142,10 @@ function addToBalanceOf(
     bytes calldata metadata
 ) external payable
 ```
+
+### Who Can Call
+
+Anyone. No access control.
 
 ### Parameters
 
@@ -159,6 +175,12 @@ destTerminal.addToBalanceOf{value: payValue}({
 
 No project tokens are returned to the beneficiary. The destination project's balance increases.
 
+### Events
+
+- `Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)` -- same as Journey 1: emitted if the Permit2 allowance call fails. Payment continues via fallback transfer.
+
+No other events emitted directly by the router. The destination terminal emits its own `AddToBalance` event.
+
 ### Edge Cases
 
 Same as Journey 1. Additionally:
@@ -173,6 +195,7 @@ The caller asks what a payment would do without moving funds.
 ### Entry Point
 
 ```solidity
+// On JBRouterTerminal:
 function previewPayFor(
     uint256 projectId,
     address token,
@@ -189,6 +212,28 @@ function previewPayFor(
         JBPayHookSpecification[] memory hookSpecifications
     )
 ```
+
+### Who Can Call
+
+Anyone. This is a `view` function with no access control.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `projectId` | `uint256` | Destination project ID |
+| `token` | `address` | Token that would be paid in |
+| `amount` | `uint256` | Amount of tokens to preview |
+| `beneficiary` | `address` | Address that would receive minted project tokens |
+| `metadata` | `bytes` | JBMetadataResolver-encoded. Same keys as `pay()` except `permit2` (not applicable in view context). |
+
+### State Changes
+
+None. This is a read-only `view` function.
+
+### Events
+
+None. No state is modified.
 
 ### Behavior
 
@@ -225,12 +270,32 @@ function pay(
 ) external payable returns (uint256)
 ```
 
+### Who Can Call
+
+Anyone. No access control.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `projectId` | `uint256` | Destination project ID |
+| `token` | `address` | Token being paid. Use `JBConstants.NATIVE_TOKEN` for ETH. |
+| `amount` | `uint256` | Amount of tokens. Ignored for native token (uses `msg.value`). |
+| `beneficiary` | `address` | Receives project tokens minted by the downstream terminal |
+| `minReturnedTokens` | `uint256` | Minimum project tokens expected in return |
+| `memo` | `string` | Passed through to the downstream terminal's payment event |
+| `metadata` | `bytes` | JBMetadataResolver-encoded. Forwarded unchanged to the resolved router terminal. |
+
 ### State Changes
 
-1. Resolve terminal: `_terminalOf[projectId]`, falling back to `defaultTerminal`
+1. Resolve terminal: `JBRouterTerminalRegistry._terminalOf[projectId]`, falling back to `JBRouterTerminalRegistry.defaultTerminal`
 2. `_acceptFundsFor()` -- accepts tokens (native or ERC-20 via Permit2/transferFrom). NOTE: does NOT use balance-delta accounting.
-3. `_beforeTransferFor()` -- sets allowance for resolved terminal
+3. `_beforeTransferFor()` -- sets ERC-20 allowance for the resolved terminal (or returns amount as `msg.value` for native)
 4. `terminal.pay()` -- forwards to the resolved router terminal (which then does its own routing)
+
+### Events
+
+No events are emitted directly by the registry's `pay()`. The resolved router terminal and destination terminal emit their own events downstream.
 
 ### Edge Cases
 
@@ -265,9 +330,27 @@ function previewPayFor(
     )
 ```
 
+### Who Can Call
+
+Anyone. This is a `view` function with no access control.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `projectId` | `uint256` | Destination project ID |
+| `token` | `address` | Token that would be paid in |
+| `amount` | `uint256` | Amount of tokens to preview |
+| `beneficiary` | `address` | Address that would receive minted project tokens |
+| `metadata` | `bytes` | JBMetadataResolver-encoded. Forwarded unchanged to the resolved router terminal. |
+
 ### State Changes
 
-None. The registry resolves `_terminalOf[projectId]`, falling back to `defaultTerminal`, then forwards `previewPayFor()` to the resolved router terminal.
+None. This is a read-only `view` function. The registry resolves `JBRouterTerminalRegistry._terminalOf[projectId]`, falling back to `JBRouterTerminalRegistry.defaultTerminal`, then forwards `previewPayFor()` to the resolved router terminal.
+
+### Events
+
+None. No state is modified.
 
 ### Edge Cases
 
@@ -292,9 +375,37 @@ function addToBalanceOf(
 ) external payable
 ```
 
+### Who Can Call
+
+Anyone. No access control.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `projectId` | `uint256` | Destination project ID |
+| `token` | `address` | Token being paid. Use `JBConstants.NATIVE_TOKEN` for ETH. |
+| `amount` | `uint256` | Amount of tokens. Ignored for native token (uses `msg.value`). |
+| `shouldReturnHeldFees` | `bool` | Passed to destination terminal to return held fees proportionally |
+| `memo` | `string` | Passed through to the downstream terminal's event |
+| `metadata` | `bytes` | JBMetadataResolver-encoded. Forwarded unchanged to the resolved router terminal. |
+
 ### State Changes
 
-Same as Journey 3 but calls `terminal.addToBalanceOf()` instead of `terminal.pay()`.
+Same as Journey 3 but the final call is `terminal.addToBalanceOf()` instead of `terminal.pay()`.
+
+1. Resolve terminal: `JBRouterTerminalRegistry._terminalOf[projectId]`, falling back to `JBRouterTerminalRegistry.defaultTerminal`
+2. `_acceptFundsFor()` -- accepts tokens (native or ERC-20 via Permit2/transferFrom)
+3. `_beforeTransferFor()` -- sets ERC-20 allowance for the resolved terminal (or returns amount as `msg.value` for native)
+4. `terminal.addToBalanceOf()` -- forwards to the resolved router terminal
+
+### Events
+
+No events are emitted directly by the registry's `addToBalanceOf()`. The resolved router terminal and destination terminal emit their own events downstream.
+
+### Edge Cases
+
+Same as Journey 3.
 
 ---
 
@@ -309,6 +420,10 @@ A project owner assigns which router terminal instance handles their project's p
 function setTerminalFor(uint256 projectId, IJBTerminal terminal) external
 ```
 
+### Who Can Call
+
+Project owner (`PROJECTS.ownerOf(projectId)`) or any address with `JBPermissionIds.SET_ROUTER_TERMINAL` (28) permission for the project.
+
 ### Parameters
 
 | Parameter | Type | Description |
@@ -318,16 +433,19 @@ function setTerminalFor(uint256 projectId, IJBTerminal terminal) external
 
 ### Prerequisites
 
-- Caller must be the project owner (`PROJECTS.ownerOf(projectId)`) or have `JBPermissionIds.SET_ROUTER_TERMINAL` (28) permission.
-- Terminal must be in the allowlist (`isTerminalAllowed[terminal]` must be true).
-- Project must not be locked (`hasLockedTerminal[projectId]` must be false).
+- Terminal must be in the allowlist (`JBRouterTerminalRegistry.isTerminalAllowed[terminal]` must be true).
+- Project must not be locked (`JBRouterTerminalRegistry.hasLockedTerminal[projectId]` must be false).
 
 ### State Changes
 
-1. Permission check via `_requirePermissionFrom()`
-2. `isTerminalAllowed[terminal]` check
-3. `_terminalOf[projectId] = terminal`
-4. Emits `JBRouterTerminalRegistry_SetTerminal(projectId, terminal, caller)`
+1. `hasLockedTerminal[projectId]` check -- reverts with `JBRouterTerminalRegistry_TerminalLocked(projectId)` if locked
+2. `isTerminalAllowed[terminal]` check -- reverts with `JBRouterTerminalRegistry_TerminalNotAllowed(terminal)` if not allowed
+3. Permission check via `_requirePermissionFrom(PROJECTS.ownerOf(projectId), projectId, JBPermissionIds.SET_ROUTER_TERMINAL)`
+4. `JBRouterTerminalRegistry._terminalOf[projectId] = terminal`
+
+### Events
+
+- `JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller)`
 
 ### Edge Cases
 
@@ -349,6 +467,10 @@ Permanently freeze a project's router terminal assignment. Prevents the registry
 function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) external
 ```
 
+### Who Can Call
+
+Project owner (`PROJECTS.ownerOf(projectId)`) or any address with `JBPermissionIds.SET_ROUTER_TERMINAL` (28) permission for the project.
+
 ### Parameters
 
 | Parameter | Type | Description |
@@ -358,18 +480,20 @@ function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) extern
 
 ### Prerequisites
 
-- Caller must be the project owner or have `SET_ROUTER_TERMINAL` permission.
 - The resolved terminal (explicit or default) must not be `address(0)`.
 - The resolved terminal must match `expectedTerminal`.
 
 ### State Changes
 
-1. Permission check
-2. Resolve current terminal: `_terminalOf[projectId]` or `defaultTerminal`
-3. If using default, snapshot it: `_terminalOf[projectId] = defaultTerminal`
-4. Verify `terminal == expectedTerminal`
-5. `hasLockedTerminal[projectId] = true`
-6. Emits `JBRouterTerminalRegistry_LockTerminal(projectId, caller)`
+1. Permission check via `_requirePermissionFrom(PROJECTS.ownerOf(projectId), projectId, JBPermissionIds.SET_ROUTER_TERMINAL)`
+2. Resolve current terminal: `JBRouterTerminalRegistry._terminalOf[projectId]`, falling back to `JBRouterTerminalRegistry.defaultTerminal`
+3. If using default, snapshot it: `JBRouterTerminalRegistry._terminalOf[projectId] = defaultTerminal`
+4. Verify `terminal == expectedTerminal` -- reverts with `JBRouterTerminalRegistry_TerminalMismatch(currentTerminal, expectedTerminal)` on mismatch
+5. `JBRouterTerminalRegistry.hasLockedTerminal[projectId] = true`
+
+### Events
+
+- `JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller)`
 
 ### Edge Cases
 
@@ -384,31 +508,54 @@ function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) extern
 
 The registry owner manages the allowlist and default terminal.
 
+### Who Can Call
+
+Registry owner only (`onlyOwner` modifier on all three functions). The owner is set in the constructor and can be transferred via OpenZeppelin's `Ownable`.
+
 ### Allow a Terminal
 
 ```solidity
+// On JBRouterTerminalRegistry:
 function allowTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Sets `isTerminalAllowed[terminal] = true`. Emits `JBRouterTerminalRegistry_AllowTerminal(terminal, caller)`.
+**State Changes:**
+1. `JBRouterTerminalRegistry.isTerminalAllowed[terminal] = true`
+
+**Events:**
+- `JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal, address caller)`
 
 ### Disallow a Terminal
 
 ```solidity
+// On JBRouterTerminalRegistry:
 function disallowTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Sets `isTerminalAllowed[terminal] = false`. If the disallowed terminal is the current `defaultTerminal`, clears the default to `address(0)`. Emits `JBRouterTerminalRegistry_DisallowTerminal(terminal, caller)`.
+**State Changes:**
+1. `JBRouterTerminalRegistry.isTerminalAllowed[terminal] = false`
+2. If `JBRouterTerminalRegistry.defaultTerminal == terminal`, clears `JBRouterTerminalRegistry.defaultTerminal = IJBTerminal(address(0))`
+
+**Events:**
+- `JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal, address caller)`
 
 **Note:** Disallowing a terminal does NOT remove it from projects that have explicitly set it via `setTerminalFor()`. Those projects continue using the disallowed terminal until they change it (if not locked).
 
 ### Set Default Terminal
 
 ```solidity
+// On JBRouterTerminalRegistry:
 function setDefaultTerminal(IJBTerminal terminal) external onlyOwner
 ```
 
-Reverts if `terminal == address(0)`. Sets `defaultTerminal = terminal` and auto-allows it (`isTerminalAllowed[terminal] = true`). Emits `JBRouterTerminalRegistry_SetDefaultTerminal(terminal, caller)`.
+Reverts with `JBRouterTerminalRegistry_ZeroAddress()` if `terminal == address(0)`.
+
+**State Changes:**
+1. `JBRouterTerminalRegistry.defaultTerminal = terminal`
+2. `JBRouterTerminalRegistry.isTerminalAllowed[terminal] = true` (auto-allows)
+
+**Events:**
+- `JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal, address caller)`
 
 **Impact:** All projects without an explicit terminal assignment or lock are silently migrated to the new default. This is the highest-impact admin action.
 
@@ -436,6 +583,10 @@ A holder pays a destination project using credits (internal token balance) from 
 
 `JBRouterTerminal.pay()` with `cashOutSource` metadata.
 
+### Who Can Call
+
+Anyone, but the caller must have granted `TRANSFER_CREDITS` (13) permission to the router terminal for the source project.
+
 ### Metadata Required
 
 ```solidity
@@ -460,6 +611,12 @@ bytes memory metadata = JBMetadataResolver.addToMetadata({
 5. `_cashOutLoop()` cashes out the credits via source project's terminal
 6. Reclaimed tokens are converted and forwarded to destination project
 
+### Events
+
+- `Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)` -- only if a Permit2 call is attempted and fails (unlikely for credit-based payments).
+
+Downstream cashout and payment events are emitted by the source/destination terminals.
+
 ### Edge Cases
 
 - **ETH sent with credit payment:** Reverts with `JBRouterTerminal_NoMsgValueAllowed(value)` -- credits do not use `msg.value`.
@@ -476,6 +633,8 @@ Front-ends and integrators can query which Uniswap pools the router would use fo
 ### Entry Points
 
 ```solidity
+// On JBRouterTerminal:
+
 // Best pool across V3 and V4:
 function discoverBestPool(
     address normalizedTokenIn,
@@ -489,6 +648,10 @@ function discoverPool(
 ) external view returns (IUniswapV3Pool pool)
 ```
 
+### Who Can Call
+
+Anyone. Both are `view` functions with no access control.
+
 ### Parameters
 
 Both functions take **normalized** token addresses -- use the WETH address instead of `NATIVE_TOKEN` sentinel.
@@ -501,6 +664,14 @@ Both functions take **normalized** token addresses -- use the WETH address inste
 - `v4Key`: The V4 pool key (valid when `isV4 == true`)
 
 `discoverPool` returns only the V3 pool. If the best pool is V4, returns `address(0)`.
+
+### State Changes
+
+None. Both are read-only `view` functions.
+
+### Events
+
+None. No state is modified.
 
 ### Edge Cases
 
