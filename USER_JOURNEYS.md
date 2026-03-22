@@ -318,16 +318,17 @@ function setTerminalFor(uint256 projectId, IJBTerminal terminal) external
 
 ### Prerequisites
 
-- Caller must be the project owner (`PROJECTS.ownerOf(projectId)`) or have `JBPermissionIds.SET_ROUTER_TERMINAL` (28) permission.
+- Caller must be the project owner (`PROJECTS.ownerOf(projectId)`) or have `JBPermissionIds.SET_ROUTER_TERMINAL` (29) permission.
 - Terminal must be in the allowlist (`isTerminalAllowed[terminal]` must be true).
 - Project must not be locked (`hasLockedTerminal[projectId]` must be false).
 
 ### State Changes
 
-1. Permission check via `_requirePermissionFrom()`
-2. `isTerminalAllowed[terminal]` check
-3. `_terminalOf[projectId] = terminal`
-4. Emits `JBRouterTerminalRegistry_SetTerminal(projectId, terminal, caller)`
+1. `hasLockedTerminal[projectId]` check -- reverts if locked
+2. `isTerminalAllowed[terminal]` check -- reverts if not allowlisted
+3. Permission check via `_requirePermissionFrom()`
+4. `_terminalOf[projectId] = terminal`
+5. Emits `JBRouterTerminalRegistry_SetTerminal(projectId, terminal, caller)`
 
 ### Edge Cases
 

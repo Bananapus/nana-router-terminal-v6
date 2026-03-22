@@ -13,7 +13,7 @@ Admin privileges and their scope in nana-router-terminal-v6.
 ### 2. Project Owner / SET_ROUTER_TERMINAL Delegate
 
 **Contract**: `JBRouterTerminalRegistry`
-**Assigned via**: Ownership of the project's ERC-721 NFT (via `JBProjects.ownerOf(projectId)`), or delegation via `JBPermissions` with permission ID `SET_ROUTER_TERMINAL` (28).
+**Assigned via**: Ownership of the project's ERC-721 NFT (via `JBProjects.ownerOf(projectId)`), or delegation via `JBPermissions` with permission ID `SET_ROUTER_TERMINAL` (29).
 **Scope**: Per-project -- controls which router terminal a specific project uses, and can permanently lock that choice.
 
 ### 3. Router Terminal Owner (Ownable)
@@ -51,8 +51,8 @@ When a payment is forwarded through the registry, the terminal is resolved as fo
 | `allowTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Adds a terminal to the allowlist (`isTerminalAllowed[terminal] = true`). Projects can only use allowlisted terminals. |
 | `disallowTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Removes a terminal from the allowlist. Also clears `defaultTerminal` if it matches the disallowed terminal. Does NOT affect projects that have already locked their terminal. |
 | `setDefaultTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Sets the default terminal for all projects that have not set a project-specific terminal. Also auto-allows the terminal. |
-| `setTerminalFor(projectId, terminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (28) | Per-project | Routes a specific project to a specific allowed terminal. Reverts if the terminal is not allowlisted or if the project's terminal is locked. |
-| `lockTerminalFor(projectId, expectedTerminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (28) | Per-project | Permanently locks the terminal choice for a project. If no explicit terminal is set, snapshots the current default into `_terminalOf[projectId]`. Reverts with `TerminalMismatch` if the resolved terminal differs from `expectedTerminal` (race condition protection). **Irreversible.** |
+| `setTerminalFor(projectId, terminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (29) | Per-project | Routes a specific project to a specific allowed terminal. Reverts if the terminal is not allowlisted or if the project's terminal is locked. |
+| `lockTerminalFor(projectId, expectedTerminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (29) | Per-project | Permanently locks the terminal choice for a project. If no explicit terminal is set, snapshots the current default into `_terminalOf[projectId]`. Reverts with `TerminalMismatch` if the resolved terminal differs from `expectedTerminal` (race condition protection). **Irreversible.** |
 
 ### JBRouterTerminal
 
@@ -76,6 +76,8 @@ The following values are set at deploy time and cannot be changed:
 
 | Property | Set At | Mutable? | Description |
 |----------|--------|----------|-------------|
+| `PERMISSIONS` | Constructor | No | JB permissions registry for permission checks |
+| `Trusted forwarder` | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `DIRECTORY` | Constructor | No | JB directory for terminal/controller lookups |
 | `PROJECTS` | Constructor | No | JB project NFT registry |
 | `TOKENS` | Constructor | No | JB token manager for credit transfers and project token lookups |
@@ -93,6 +95,8 @@ The following values are set at deploy time and cannot be changed:
 
 | Property | Set At | Mutable? | Description |
 |----------|--------|----------|-------------|
+| `PERMISSIONS` | Constructor | No | JB permissions registry for permission checks |
+| `Trusted forwarder` | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `PROJECTS` | Constructor | No | JB project NFT registry |
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 
