@@ -281,3 +281,70 @@ forge test
 | Concurrent pay + addToBalance | NOT TESTED | Mitigated by stateless design but worth verifying |
 | Credit cashout path (fork) | NOT TESTED | Only unit-mocked, no fork test with real credits |
 | addToBalanceOf with cashout routing | PARTIALLY | Fork covers ETH->USDC, not cashout or credit paths |
+
+## Previous Audit Findings
+
+No prior formal audit with finding IDs has been conducted on this codebase. All risk analysis is internal. See [RISKS.md](./RISKS.md) for known risks.
+
+## Anti-Patterns to Hunt
+
+| Pattern | Where to Look | Why It's Dangerous |
+|---------|--------------|-------------------|
+| V4 spot price as TWAP fallback | `_getV4SpotQuote()` | V4 pools lack on-chain TWAP. Spot price is manipulable within a block. The sigmoid slippage mitigates but doesn't eliminate. |
+| Silent TWAP window degradation | `_getV3TwapQuote()` | If `oldestObservation < twapWindow`, the window is silently capped. A 10-second observation produces a near-spot quote labeled as "TWAP." |
+| Partial swap leftover refund | `_handleSwap()` | Leftover tokens are refunded to `_msgSender()`. If the caller is a contract, the refund must be receivable. Verify ETH refund doesn't fail silently. |
+| Stateless design assumption | All of `JBRouterTerminal` | No persistent balances. If any code path fails to forward or refund tokens, they're stuck permanently. No sweep function exists. |
+| Registry default terminal | `JBRouterTerminalRegistry` | Owner changing `defaultTerminal` redirects all unlocked projects. A compromised owner could redirect payments. |
+| `receive()` is empty | `JBRouterTerminal` | Accepts ETH but has no recovery mechanism. ETH sent directly (not through `pay()`) is permanently lost. |
+| Fee-on-transfer in registry | `JBRouterTerminalRegistry._acceptFundsFor()` | Returns user-supplied `amount`, not actual balance delta. Fee-on-transfer tokens cause downstream accounting mismatch. |
+
+## Error Reference
+
+| Error | Contract | Trigger |
+|-------|----------|---------|
+| `JBRouterTerminal_AmountOverflow(uint256)` | JBRouterTerminal | Amount exceeds `type(uint160).max` during Permit2 transfer, or exceeds `type(uint128).max` in V3 TWAP quote computation. |
+| `JBRouterTerminal_CallerNotPool(address)` | JBRouterTerminal | `uniswapV3SwapCallback()` called by an address that does not match the expected V3 pool computed via `FACTORY.getPool()`. |
+| `JBRouterTerminal_CallerNotPoolManager(address)` | JBRouterTerminal | `unlockCallback()` called by an address other than `POOL_MANAGER`. |
+| `JBRouterTerminal_CashOutLoopLimit()` | JBRouterTerminal | `_cashOutLoop()` or `_executeCashOutChain()` exceeds 20 iterations without resolving to an accepted token. |
+| `JBRouterTerminal_NoCashOutPath(uint256, uint256)` | JBRouterTerminal | `_findCashOutPath()` cannot find any terminal on the source project that reclaims a usable token for the destination. |
+| `JBRouterTerminal_NoLiquidity()` | JBRouterTerminal | V3 or V4 pool selected for quoting has zero in-range liquidity. |
+| `JBRouterTerminal_NoMsgValueAllowed(uint256)` | JBRouterTerminal | `msg.value != 0` when paying with ERC-20 tokens or credits (ETH not expected on these paths). |
+| `JBRouterTerminal_NoObservationHistory()` | JBRouterTerminal | V3 pool's oldest observation is 0 seconds old -- no TWAP data available. |
+| `JBRouterTerminal_NoPoolFound(address, address)` | JBRouterTerminal | `_discoverPool()` or `_pickPoolAndQuote()` found no V3 or V4 pool with non-zero liquidity for the given token pair. |
+| `JBRouterTerminal_NoRouteFound(uint256, address)` | JBRouterTerminal | `_resolveTokenOut()` cannot find any terminal on the destination project that accepts the input token or a swappable alternative. |
+| `JBRouterTerminal_PermitAllowanceNotEnough(uint256, uint256)` | JBRouterTerminal | The Permit2 single-use allowance provided in metadata is less than the payment amount. |
+| `JBRouterTerminal_SlippageExceeded(uint256, uint256)` | JBRouterTerminal | Swap output or cashout reclaim amount is below the required minimum (`minAmountOut` or `minTokensReclaimed`). |
+| `JBRouterTerminalRegistry_AmountOverflow()` | JBRouterTerminalRegistry | Amount exceeds `type(uint160).max` during Permit2 transfer. |
+| `JBRouterTerminalRegistry_NoMsgValueAllowed(uint256)` | JBRouterTerminalRegistry | `msg.value != 0` when paying with ERC-20 tokens through the registry. |
+| `JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256, uint256)` | JBRouterTerminalRegistry | Permit2 single-use allowance in metadata is less than the payment amount. |
+| `JBRouterTerminalRegistry_TerminalLocked(uint256)` | JBRouterTerminalRegistry | `setTerminalFor()` called for a project whose terminal has already been locked via `lockTerminalFor()`. |
+| `JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal, IJBTerminal)` | JBRouterTerminalRegistry | `lockTerminalFor()` called with an `expectedTerminal` that does not match the project's currently resolved terminal. |
+| `JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal)` | JBRouterTerminalRegistry | `setTerminalFor()` called with a terminal not on the owner's allowlist. |
+| `JBRouterTerminalRegistry_TerminalNotSet(uint256)` | JBRouterTerminalRegistry | `lockTerminalFor()` called for a project with no explicit terminal and no default terminal configured. |
+| `JBRouterTerminalRegistry_ZeroAddress()` | JBRouterTerminalRegistry | `setDefaultTerminal()` called with `address(0)`. |
+
+## Compiler and Version Info
+
+- **Solidity**: 0.8.26
+- **EVM target**: Cancun
+- **Optimizer**: via-IR, 200 runs
+- **Dependencies**: OpenZeppelin 5.x, Uniswap V3/V4, nana-core-v6
+- **Build**: `forge build` (Foundry)
+
+## How to Report Findings
+
+For each finding:
+
+1. **Title** -- one line, starts with severity (CRITICAL/HIGH/MEDIUM/LOW)
+2. **Affected contract(s)** -- exact file path and line numbers
+3. **Description** -- what is wrong, in plain language
+4. **Trigger sequence** -- step-by-step, minimal steps to reproduce
+5. **Impact** -- what an attacker gains, what a user loses (with numbers if possible)
+6. **Proof** -- code trace showing the exact execution path, or a Foundry test
+7. **Fix** -- minimal code change that resolves the issue
+
+**Severity guide:**
+- **CRITICAL**: Direct fund loss, tokens stuck permanently, or system insolvency.
+- **HIGH**: Conditional fund loss, routing bypass, or broken invariant.
+- **MEDIUM**: Value leakage, suboptimal routing, griefing.
+- **LOW**: Informational, edge-case-only with no material impact.
