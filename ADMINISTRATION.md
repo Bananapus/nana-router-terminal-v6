@@ -22,11 +22,25 @@ Admin privileges and their scope in nana-router-terminal-v6.
 **Assigned via**: Constructor parameter `owner`, transferable via `Ownable.transferOwnership()`.
 **Scope**: Currently unused. `JBRouterTerminal` inherits `Ownable` but does not gate any functions behind `onlyOwner`. The owner exists for potential future use or subclass extensions. The `Ownable.renounceOwnership()` and `Ownable.transferOwnership()` functions are inherited but have no practical effect on the terminal's operation.
 
+**Risk note:** While the owner has no current powers over the terminal's operation, the `Ownable` inheritance means a future code change or subclass could introduce `onlyOwner`-gated functions. If the terminal is deployed with a specific owner address, that address retains transfer rights indefinitely.
+
 ### 4. Credit Cashout Payer (Implicit)
 
 **Contract**: `JBRouterTerminal`
 **Required permission**: `TRANSFER_CREDITS` (permission ID 13) -- must be granted by the payer to the router terminal address for the source project via `JBPermissions`.
 **Scope**: Per-transaction. Required only when using the `cashOutSource` metadata key to route payments through credit cashouts.
+
+## Terminal Resolution
+
+When a payment is forwarded through the registry, the terminal is resolved as follows:
+
+1. If the project has called `setTerminalFor(projectId, terminal)`, that explicit terminal is used.
+2. If no explicit terminal is set, the registry's `defaultTerminal` is used.
+3. If neither exists, the forwarding reverts.
+
+**Lock semantics:** When `lockTerminalFor()` is called on a project with no explicit terminal, the current default is snapshot into `_terminalOf[projectId]` before locking. The project becomes independent of future default changes.
+
+**Disallow interaction:** If the registry owner calls `disallowTerminal()` on the current default terminal, the `defaultTerminal` is automatically cleared (set to `address(0)`). Projects relying on the default (without locking) would lose their terminal resolution until a new default is set. Projects should lock their terminal to avoid disruption.
 
 ## Privileged Functions
 
