@@ -196,17 +196,22 @@ If no `quoteForSwap` is provided, the terminal calculates one automatically:
 
 ## Supported Chains
 
-The deployment script supports:
+The deployment script (`script/Deploy.s.sol`) supports:
 
-| Chain | WETH | V3 Factory | V4 PoolManager |
-|-------|------|------------|----------------|
-| Ethereum Mainnet | `0xC02a...6Cc2` | `0x1F98...F984` | `0x0000...8A90` |
-| Optimism | `0x4200...0006` | `0x1F98...F984` | `0x0000...8A90` |
-| Base | `0x4200...0006` | `0x3312...FDfD` | `0x0000...8A90` |
-| Arbitrum | `0x82aF...b1DD` | `0x1F98...F984` | `0x0000...8A90` |
-| + Sepolia testnets for each | | | |
+- Ethereum Mainnet
+- Optimism
+- Base
+- Arbitrum
+- Sepolia testnets for each
 
-Permit2 is deployed at `0x000000000022D473030F116dDEE9F6B43aC78BA3` on all chains.
+Each chain is configured with the appropriate WETH, Uniswap V3 Factory, and V4 PoolManager addresses. Permit2 is deployed at `0x000000000022D473030F116dDEE9F6B43aC78BA3` on all chains. See `script/Deploy.s.sol` for the full address list.
+
+## Permissions
+
+| Permission | ID | Contract | Purpose |
+|------------|----|----------|---------|
+| `SET_ROUTER_TERMINAL` | 29 | `JBRouterTerminalRegistry` | Allows a project owner or delegate to call `setTerminalFor` (choose which router terminal a project uses) and `lockTerminalFor` (permanently lock that choice). |
+| `TRANSFER_CREDITS` | 13 | `JBRouterTerminal` | Must be granted by the payer to the router terminal address for the source project. Required when using `cashOutSource` metadata to cash out credits -- the router calls `TOKENS.transferCreditsFrom()` to pull credits from the payer. |
 
 ## Risks
 
