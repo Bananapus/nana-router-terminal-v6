@@ -94,7 +94,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `DEFAULT_TWAP_WINDOW` | `10 minutes` (600 seconds) | Default TWAP oracle window for V3 pool quotes |
-| `SLIPPAGE_DENOMINATOR` | `10,000` | Basis points denominator for slippage tolerance |
+| `_SLIPPAGE_DENOMINATOR` | `10,000` | Basis points denominator for slippage tolerance |
 | `_FEE_TIERS` | `[3000, 500, 10000, 100]` | V3 fee tiers to search (0.3%, 0.05%, 1%, 0.01%) |
 | `_V4_FEES` | `[3000, 500, 10000, 100]` | V4 fee tiers to search |
 | `_V4_TICK_SPACINGS` | `[60, 10, 200, 1]` | V4 tick spacings paired with fee tiers |
@@ -114,8 +114,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 | Error | When |
 |-------|------|
-| `JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn)` | No accepted token found for the project when iterating all terminals |
-| `JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn)` | No accepted token found for the project, or the `routeTokenOut` metadata override specifies a token the project does not accept |
+| `JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn)` | No accepted token found for the project when iterating all terminals, or the `routeTokenOut` metadata override specifies a token the project does not accept |
 | `JBRouterTerminal_CallerNotPool(address caller)` | V3 swap callback called by an address that is not a legitimate factory pool |
 | `JBRouterTerminal_CallerNotPoolManager(address caller)` | V4 unlock callback called by an address other than the PoolManager |
 | `JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut)` | Swap output is below the minimum acceptable amount |
@@ -132,12 +131,14 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 
 | Error | When |
 |-------|------|
+| `JBRouterTerminalRegistry_AmountOverflow()` | Amount exceeds `type(uint160).max` for Permit2 |
 | `JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value)` | `msg.value > 0` when paying with an ERC-20 |
 | `JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount)` | Permit2 allowance is less than the payment amount |
 | `JBRouterTerminalRegistry_TerminalLocked(uint256 projectId)` | Attempting to change terminal after it has been locked |
 | `JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal)` | Resolved terminal does not match the `expectedTerminal` passed to `lockTerminalFor` |
 | `JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal)` | Attempting to set a terminal that is not on the allowlist |
 | `JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId)` | Attempting to lock when no terminal is set and no default exists |
+| `JBRouterTerminalRegistry_ZeroAddress()` | `setDefaultTerminal` called with `address(0)` |
 
 ## Events
 
