@@ -47,21 +47,20 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `currentSurplusOf(...)` | Always returns 0 (empty implementation). |
 | `supportsInterface(interfaceId) -> bool` | Returns true for `IJBRouterTerminalRegistry`, `IJBTerminal`, `IERC165`. |
 
-## Internal Routing Functions (JBRouterTerminal)
+## Routing Priority
 
-| Function | What it does |
-|----------|--------------|
-| `_route(destProjectId, tokenIn, amount, metadata)` | Core routing logic. Detects JB project tokens, runs `_cashOutLoop` if needed, then resolves output token and converts. |
-| `_previewRoute(destProjectId, tokenIn, amount, metadata)` | View mirror of `_route`. Returns the terminal, token, and amount that the current payment route would use, estimating swap outputs from current quote data when needed. |
-| `_resolveTokenOut(projectId, tokenIn, metadata)` | Priority: 1) `routeTokenOut` metadata override, 2) direct acceptance, 3) NATIVE/WETH equivalence, 4) `_discoverAcceptedToken`. |
-| `_discoverAcceptedToken(projectId, tokenIn)` | Iterates all terminals and their accounting contexts for a project. Finds the accepted token with the deepest Uniswap pool. Falls back to the first accepted token if no pool exists. |
-| `_convert(tokenIn, tokenOut, amount, projectId, metadata)` | No-op if same token, wrap/unwrap for NATIVE/WETH, or swap via `_handleSwap`. |
-| `_handleSwap(projectId, tokenIn, tokenOut, amount, metadata)` | Discovers the best pool, gets a quote, executes the swap (V3 or V4), unwraps output if needed, returns leftover input to payer. |
-| `_pickPoolAndQuote(metadata, normalizedTokenIn, amount, normalizedTokenOut)` | Discovers pool, checks for user-provided `quoteForSwap`, otherwise computes TWAP quote (V3) or spot quote (V4) with dynamic slippage. |
-| `_cashOutLoop(destProjectId, token, amount, sourceProjectIdOverride, metadata)` | Recursively cashes out JB project tokens. At each step, checks if the destination accepts the reclaimed token. Continues until a non-JB base token is reached or the destination accepts. |
-| `_findCashOutPath(sourceProjectId, destProjectId)` | Priority: 1) tokens the destination directly accepts, 2) JB project tokens (recursable), 3) any base token. Only considers terminals that support `IJBCashOutTerminal`. |
-| `_getSlippageTolerance(amountIn, liquidity, tokenOut, tokenIn, tick, poolFeeBps)` | Computes sigmoid slippage from `JBSwapLib.calculateImpact` and `JBSwapLib.getSlippageTolerance`. |
-| `_bestPoolLiquidity(tokenA, tokenB)` | Scans all V3 fee tiers and V4 pools for the highest in-range liquidity. |
+When a payment arrives, `_resolveTokenOut` determines the output token in this order:
+
+1. **Metadata override** -- caller provides `routeTokenOut` in metadata, forcing a specific output token (must be accepted by the project).
+2. **Direct acceptance** -- the project's primary terminal already accepts `tokenIn`.
+3. **NATIVE/WETH equivalence** -- if `tokenIn` is NATIVE and the project accepts WETH (or vice versa), wrap/unwrap instead of swapping.
+4. **Pool discovery** -- iterate all terminals and accounting contexts for the project, find the accepted token with the deepest Uniswap pool across V3 and V4, and swap.
+
+If `tokenIn` is a JB project token, a cashout loop runs first (up to 20 iterations) to reclaim a base token before applying the priority above.
+
+## Routing Architecture
+
+The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level entry points. Both follow the same path: detect JB project tokens and `_cashOutLoop` if needed, then `_resolveTokenOut` to pick the output token, then `_convert` to execute the conversion (no-op, wrap/unwrap, or `_handleSwap`). Swap execution goes through `_pickPoolAndQuote` (discover pool, get TWAP or spot quote with sigmoid slippage), then dispatches to V3 (`uniswapV3SwapCallback`) or V4 (`unlockCallback`). Leftover input tokens from partial fills are returned to the payer.
 
 ## Integration Points
 
@@ -98,6 +97,15 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `_FEE_TIERS` | `[3000, 500, 10000, 100]` | V3 fee tiers to search (0.3%, 0.05%, 1%, 0.01%) |
 | `_V4_FEES` | `[3000, 500, 10000, 100]` | V4 fee tiers to search |
 | `_V4_TICK_SPACINGS` | `[60, 10, 200, 1]` | V4 tick spacings paired with fee tiers |
+| `_MAX_CASHOUT_ITERATIONS` | `20` | Maximum cashout loop depth before reverting with `CashOutLoopLimit` |
+
+### JBRouterTerminalRegistry
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SET_ROUTER_TERMINAL` | `28` | Permission ID required by `setTerminalFor` and `lockTerminalFor` (from `JBPermissionIds`) |
+| `PROJECTS` | immutable | `IJBProjects` registry, used for `ownerOf` in permission checks |
+| `PERMIT2` | immutable | `IPermit2` instance for gasless ERC-20 approvals |
 
 ### JBSwapLib
 
@@ -107,6 +115,14 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `MAX_SLIPPAGE` | `8,800` (88%) | Maximum slippage ceiling |
 | `IMPACT_PRECISION` | `1e18` | Precision multiplier for impact calculations |
 | `SIGMOID_K` | `5e16` | K parameter for sigmoid curve |
+
+### JBSwapLib Functions
+
+| Function | Signature | What it does |
+|----------|-----------|--------------|
+| `getSlippageTolerance` | `(uint256 impact, uint256 poolFeeBps) -> uint256` | Compute continuous sigmoid slippage tolerance in basis points. Returns `minSlippage` (pool fee + 1%, floor 2%) when impact is 0, scales toward `MAX_SLIPPAGE` (88%) as impact grows. |
+| `calculateImpact` | `(uint256 amountIn, uint128 liquidity, uint160 sqrtP, bool zeroForOne) -> uint256` | Estimate price impact of a swap scaled by `IMPACT_PRECISION` (1e18). Uses `amountIn / liquidity` adjusted by `sqrtPriceX96` direction. Returns 0 if liquidity or price is 0. |
+| `sqrtPriceLimitFromAmounts` | `(uint256 amountIn, uint256 minimumAmountOut, bool zeroForOne) -> uint160` | Compute a V3-compatible `sqrtPriceLimitX96` from input/output amounts so the swap stops if execution price exceeds the minimum acceptable rate. Returns extreme tick bounds when `minimumAmountOut == 0`. |
 
 ## Errors
 
