@@ -12,8 +12,8 @@ Two contracts. One library. One struct.
 
 | Contract | Lines | Role |
 |----------|-------|------|
-| `JBRouterTerminal` | ~1,437 | Core routing engine. Accepts any token, discovers destination project's accepted token, converts via wrap/unwrap, Uniswap V3 swap, Uniswap V4 swap, or JB token cashout chain, then forwards to destination terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`. |
-| `JBRouterTerminalRegistry` | ~481 | Maps projects to their preferred router terminal instance. Owner-managed allowlist of terminals. Default terminal fallback. Lock terminal pattern for immutability. Implements `IJBTerminal`. |
+| `JBRouterTerminal` | ~1,672 | Core routing engine. Accepts any token, discovers destination project's accepted token, converts via wrap/unwrap, Uniswap V3 swap, Uniswap V4 swap, or JB token cashout chain, then forwards to destination terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`. |
+| `JBRouterTerminalRegistry` | ~514 | Maps projects to their preferred router terminal instance. Owner-managed allowlist of terminals. Default terminal fallback. Lock terminal pattern for immutability. Implements `IJBTerminal`. |
 | `JBSwapLib` (library) | ~161 | Continuous sigmoid slippage tolerance calculation. Price impact estimation. `sqrtPriceLimitX96` computation from input/output amounts. |
 | `PoolInfo` (struct) | ~14 | Tagged union: `{isV4, v3Pool, v4Key}`. Carries the winning pool from discovery. |
 
@@ -143,9 +143,9 @@ The registry implements a two-phase terminal assignment:
 
 **JBRouterTerminal:** Uses balance-delta accounting in `_acceptFundsFor()` (lines 569-575). Measures `balanceBefore` and `balanceAfter` the transfer, returning the actual amount received. This correctly handles fee-on-transfer tokens at the acceptance stage. However, the amount forwarded to the destination terminal is the delta, which may differ from what the destination terminal expects if it also performs balance-delta checks.
 
-**JBRouterTerminalRegistry:** Does NOT use balance-delta accounting in `_acceptFundsFor()` (line 437). It returns the user-supplied `amount` directly. If a fee-on-transfer token is used through the registry, the forwarded amount will exceed actual tokens received, causing a downstream revert or incorrect accounting.
+**JBRouterTerminalRegistry:** Does NOT use balance-delta accounting in `_acceptFundsFor()` (line 432). It returns the user-supplied `amount` directly. If a fee-on-transfer token is used through the registry, the forwarded amount will exceed actual tokens received, causing a downstream revert or incorrect accounting.
 
-**Audit focus:** Verify that the registry's `_acceptFundsFor` cannot be exploited with fee-on-transfer tokens. The comment on lines 433-434 states these are "not supported by design" -- confirm this is documented clearly enough and that no path silently loses funds.
+**Audit focus:** Verify that the registry's `_acceptFundsFor` cannot be exploited with fee-on-transfer tokens. The comment on lines 466-468 states these are "not supported by design" -- confirm this is documented clearly enough and that no path silently loses funds.
 
 ## uint160 Permit2 Truncation Risk
 
