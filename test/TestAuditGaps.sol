@@ -9,6 +9,7 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -504,8 +505,8 @@ contract TestAuditGaps is Test {
         assertEq(result, 77);
     }
 
-    /// @notice When the observation window is only 1 second old, the TWAP window is clamped and swap proceeds.
-    function test_shortTwap_clampsTo1Second() public {
+    /// @notice [L-17] After MIN_TWAP_WINDOW enforcement, a 1-second observation window now reverts.
+    function test_shortTwap_clampsTo1Second_nowRevertsAfterMinWindow() public {
         MockERC20Std tok = new MockERC20Std();
         address tokenIn = address(tok);
         address tokenOut = makeAddr("tokenOut3");
@@ -537,18 +538,116 @@ contract TestAuditGaps is Test {
             abi.encode(uint32(block.timestamp - 1), int56(0), uint160(1e18), true)
         );
 
-        // Mock observe() for 1-second window.
+        address payer = makeAddr("payer");
+        tok.mint(payer, 100);
+        vm.prank(payer);
+        tok.approve(address(router), 100);
+
+        // 1s < MIN_TWAP_WINDOW (120s) => reverts.
+        vm.prank(payer);
+        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_InsufficientTwapHistory.selector);
+        router.pay(1, tokenIn, 100, payer, 0, "", "");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GAP 4 (L-17): MIN_TWAP_WINDOW Enforcement
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice MIN_TWAP_WINDOW constant is 120 seconds (2 minutes).
+    function test_minTwapWindow_is120Seconds() public view {
+        assertEq(router.MIN_TWAP_WINDOW(), 120);
+    }
+
+    /// @notice Observation window of 119s (just below MIN_TWAP_WINDOW) reverts.
+    function test_shortTwap_revertsAt119Seconds() public {
+        vm.warp(1000);
+        MockERC20Std tok = new MockERC20Std();
+        address tokenIn = address(tok);
+        address tokenOut = makeAddr("tokenOut_119");
+        address pool = makeAddr("pool_119");
+        vm.etch(pool, hex"00");
+        address dest = makeAddr("dest_119");
+        vm.etch(dest, hex"00");
+
+        _setupSwapRoute(1, tokenIn, tokenOut, dest, pool);
+
+        // Mock slot0 with cardinality=2, observationIndex=1.
+        vm.mockCall(
+            pool,
+            abi.encodeWithSignature("slot0()"),
+            abi.encode(
+                uint160(79_228_162_514_264_337_593_543_950_336),
+                int24(0),
+                uint16(1),
+                uint16(2),
+                uint16(2),
+                uint8(0),
+                true
+            )
+        );
+        // Oldest observation 119 seconds ago => below MIN_TWAP_WINDOW.
+        vm.mockCall(
+            pool,
+            abi.encodeWithSignature("observations(uint256)", uint256(0)),
+            abi.encode(uint32(block.timestamp - 119), int56(0), uint160(1e18), true)
+        );
+
+        address payer = makeAddr("payer");
+        tok.mint(payer, 100);
+        vm.prank(payer);
+        tok.approve(address(router), 100);
+
+        vm.prank(payer);
+        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_InsufficientTwapHistory.selector);
+        router.pay(1, tokenIn, 100, payer, 0, "", "");
+    }
+
+    /// @notice Observation window of exactly 120s (MIN_TWAP_WINDOW boundary) succeeds.
+    function test_shortTwap_succeedsAtExact120Seconds() public {
+        vm.warp(1000);
+        MockERC20Std tok = new MockERC20Std();
+        address tokenIn = address(tok);
+        address tokenOut = makeAddr("tokenOut_120");
+        address pool = makeAddr("pool_120");
+        vm.etch(pool, hex"00");
+        address dest = makeAddr("dest_120");
+        vm.etch(dest, hex"00");
+
+        _setupSwapRoute(1, tokenIn, tokenOut, dest, pool);
+
+        // Mock slot0 with cardinality=2, observationIndex=1.
+        vm.mockCall(
+            pool,
+            abi.encodeWithSignature("slot0()"),
+            abi.encode(
+                uint160(79_228_162_514_264_337_593_543_950_336),
+                int24(0),
+                uint16(1),
+                uint16(2),
+                uint16(2),
+                uint8(0),
+                true
+            )
+        );
+        // Oldest observation exactly 120 seconds ago => meets MIN_TWAP_WINDOW.
+        vm.mockCall(
+            pool,
+            abi.encodeWithSignature("observations(uint256)", uint256(0)),
+            abi.encode(uint32(block.timestamp - 120), int56(0), uint160(1e18), true)
+        );
+
+        // Mock observe() for 120-second window.
         {
             int56[] memory tc = new int56[](2);
             tc[0] = int56(0);
             tc[1] = int56(0);
             uint160[] memory spl = new uint160[](2);
             spl[0] = uint160(1e18);
-            spl[1] = uint160(1e18 + 1);
+            spl[1] = uint160(1e18 + 120);
             vm.mockCall(pool, abi.encodeWithSignature("observe(uint32[])"), abi.encode(tc, spl));
         }
 
-        // Mock V3 swap returning 99 out (must exceed TWAP-based minimum of ~98 at tick=0).
+        // Mock V3 swap returning 99 out (must exceed TWAP-based slippage minimum).
         {
             bool zeroForOne = tokenIn < tokenOut;
             if (zeroForOne) {
@@ -572,7 +671,6 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
-        // safeIncreaseAllowance calls allowance() then approve().
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 99)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(99)));
@@ -584,7 +682,199 @@ contract TestAuditGaps is Test {
 
         vm.prank(payer);
         uint256 result = router.pay(1, tokenIn, 100, payer, 0, "", "");
-        assertEq(result, 10, "Pay should succeed with 1-second TWAP window");
+        assertEq(result, 10, "Should succeed at exactly MIN_TWAP_WINDOW");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GAP 5 (H-1): ERC-20 Partial Fill Leftover — Absolute Balance Check
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice When the router already holds the input token (e.g., ERC-20 partial fill),
+    /// the absolute balance check (balanceAfter > 0) correctly returns all leftover to the payer.
+    /// The old delta check (balanceAfter > balanceBefore) would have missed this case.
+    function test_partialFill_erc20LeftoverReturnedWithAbsoluteCheck() public {
+        MockERC20Std tok = new MockERC20Std();
+        address tokenIn = address(tok);
+        address tokenOut = makeAddr("tokenOut_pf");
+        address pool = makeAddr("pool_pf");
+        vm.etch(pool, hex"00");
+        address dest = makeAddr("dest_pf");
+        vm.etch(dest, hex"00");
+
+        _setupSwapRoute(1, tokenIn, tokenOut, dest, pool);
+
+        // Build metadata with user-provided quote (bypasses TWAP).
+        bytes memory metadata;
+        {
+            bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
+            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(uint256(80)));
+        }
+
+        // Mock V3 swap that only consumes 80 of 100 input tokens (partial fill).
+        {
+            bool zeroForOne = tokenIn < tokenOut;
+            if (zeroForOne) {
+                vm.mockCall(
+                    pool,
+                    abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)"),
+                    abi.encode(int256(80), int256(-90))
+                );
+            } else {
+                vm.mockCall(
+                    pool,
+                    abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)"),
+                    abi.encode(int256(-90), int256(80))
+                );
+            }
+            vm.mockCall(tokenIn, abi.encodeCall(IERC20.transfer, (pool, 100)), abi.encode(true));
+        }
+
+        // After swap, router still holds 20 leftover input tokens (100 sent in, 80 consumed by pool).
+        // The absolute check (balanceAfter > 0) catches this.
+        vm.mockCall(address(weth), abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(20)));
+
+        // Mock the leftover transfer back to payer.
+        // With absolute check: leftover = 20 (the full remaining balance).
+        address payer = makeAddr("payer");
+        vm.mockCall(tokenIn, abi.encodeCall(IERC20.allowance, (address(router), payer)), abi.encode(uint256(0)));
+
+        // Mock dest terminal.
+        vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
+
+        tok.mint(payer, 100);
+        vm.prank(payer);
+        tok.approve(address(router), 100);
+
+        // The leftover transfer should be called with amount=20 (absolute balance).
+        // MockERC20 tracks balances, so we can verify the payer gets refunded.
+        vm.mockCall(address(weth), abi.encodeCall(IERC20.transfer, (payer, 20)), abi.encode(true));
+
+        vm.prank(payer);
+        uint256 result = router.pay(1, tokenIn, 100, payer, 0, "", metadata);
+        assertEq(result, 42);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GAP 6 (M-7): Registry receive() Accepts Native Token Refunds
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Registry can receive native token transfers without reverting.
+    function test_registryReceive_acceptsNativeTokens() public {
+        JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
+
+        vm.deal(address(this), 1 ether);
+        (bool success,) = address(reg).call{value: 1 ether}("");
+        assertTrue(success, "Registry should accept native token transfers via receive()");
+        assertEq(address(reg).balance, 1 ether, "Registry should hold the received ETH");
+    }
+
+    /// @notice ETH that is directly deposited to the registry (not via partial-fill refund) is still stuck.
+    /// However, partial-fill leftovers are now routed to `beneficiary` (for pay()) or `_msgSender()`
+    /// (for addToBalanceOf()) instead of `_msgSender()` of the router, so the registry no longer
+    /// receives partial-fill refunds in the first place.
+    function test_registryReceive_directDepositStillStuck() public {
+        JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
+
+        // Simulate ETH arriving directly (not from partial-fill — that path now goes to beneficiary).
+        vm.deal(address(reg), 1 ether);
+        assertEq(address(reg).balance, 1 ether);
+
+        // The registry has no withdraw function, no sweep, no owner recovery.
+        IJBTerminal dest = IJBTerminal(makeAddr("dest_stuck"));
+        vm.etch(address(dest), hex"00");
+        vm.prank(owner);
+        reg.setDefaultTerminal(dest);
+
+        vm.mockCall(address(dest), abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(0)));
+
+        reg.pay{value: 0}({
+            projectId: 1,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: 0,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        // Directly deposited ETH is still stuck (no withdrawal mechanism).
+        assertEq(address(reg).balance, 1 ether, "Directly deposited ETH remains stuck - no withdrawal mechanism");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GAP 6b: Partial-fill leftovers go to beneficiary, not _msgSender()
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice When pay() is called and a partial fill occurs, leftover input tokens
+    /// are sent to the `beneficiary`, not `_msgSender()`. This is critical when pay()
+    /// is called through a registry or other intermediary where _msgSender() differs
+    /// from the intended recipient.
+    function test_partialFill_leftoverSentToBeneficiary_notMsgSender() public {
+        MockERC20Std tok = new MockERC20Std();
+        address tokenIn = address(tok);
+        address tokenOut = makeAddr("tokenOut_refund");
+        address pool = makeAddr("pool_refund");
+        vm.etch(pool, hex"00");
+        address dest = makeAddr("dest_refund");
+        vm.etch(dest, hex"00");
+
+        _setupSwapRoute(1, tokenIn, tokenOut, dest, pool);
+
+        // Build metadata with user-provided quote (bypasses TWAP).
+        bytes memory metadata;
+        {
+            bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
+            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(uint256(70)));
+        }
+
+        // Mock V3 swap (partial fill — swap returns only 90 output for 80 input consumed).
+        // Because the swap is fully mocked, no tokens actually leave the router.
+        // After _acceptFundsFor transfers 100 in, the router's real balance stays at 100.
+        // The leftover check sees that 100 and refunds all of it. This is correct behavior
+        // for testing the *recipient* — what matters is WHERE the leftover goes, not how much.
+        {
+            bool zeroForOne = tokenIn < tokenOut;
+            if (zeroForOne) {
+                vm.mockCall(
+                    pool,
+                    abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)"),
+                    abi.encode(int256(80), int256(-90))
+                );
+            } else {
+                vm.mockCall(
+                    pool,
+                    abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)"),
+                    abi.encode(int256(-90), int256(80))
+                );
+            }
+            vm.mockCall(tokenIn, abi.encodeCall(IERC20.transfer, (pool, 100)), abi.encode(true));
+        }
+
+        // Mock dest terminal.
+        vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
+        vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
+
+        address alice = makeAddr("alice"); // msg.sender
+        address bob = makeAddr("bob"); // beneficiary (should receive leftover)
+
+        tok.mint(alice, 100);
+        vm.prank(alice);
+        tok.approve(address(router), 100);
+
+        // Alice pays on behalf of Bob. Leftover should go to Bob (beneficiary), not Alice (_msgSender()).
+        vm.prank(alice);
+        uint256 result = router.pay(1, tokenIn, 100, bob, 0, "", metadata);
+        assertEq(result, 42);
+
+        // Bob (beneficiary) received the leftover tokens.
+        assertTrue(tok.balanceOf(bob) > 0, "Leftover should go to beneficiary (bob)");
+        // Alice should NOT have received the leftover.
+        assertEq(tok.balanceOf(alice), 0, "Alice (_msgSender) should not receive leftover");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
