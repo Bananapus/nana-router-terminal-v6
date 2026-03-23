@@ -750,11 +750,7 @@ contract TestAuditGaps is Test {
 
         // The leftover transfer should be called with amount=20 (absolute balance).
         // MockERC20 tracks balances, so we can verify the payer gets refunded.
-        vm.mockCall(
-            address(weth),
-            abi.encodeCall(IERC20.transfer, (payer, 20)),
-            abi.encode(true)
-        );
+        vm.mockCall(address(weth), abi.encodeCall(IERC20.transfer, (payer, 20)), abi.encode(true));
 
         vm.prank(payer);
         uint256 result = router.pay(1, tokenIn, 100, payer, 0, "", metadata);

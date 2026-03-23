@@ -702,10 +702,14 @@ contract JBRouterTerminal is
         }
 
         // Different tokens — swap via Uniswap (V3 or V4).
-        return
-            _handleSwap({
-                projectId: projectId, tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata, refundTo: refundTo
-            });
+        return _handleSwap({
+            projectId: projectId,
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            amount: amount,
+            metadata: metadata,
+            refundTo: refundTo
+        });
     }
 
     /// @notice Discover a pool, get a quote, and execute the swap (dispatches to V3 or V4).
@@ -903,7 +907,12 @@ contract JBRouterTerminal is
 
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
         amountOut = _convert({
-            tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata, refundTo: refundTo
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            amount: amount,
+            projectId: destProjectId,
+            metadata: metadata,
+            refundTo: refundTo
         });
     }
 
