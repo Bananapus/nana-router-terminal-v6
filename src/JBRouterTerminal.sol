@@ -73,6 +73,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_CallerNotPool(address caller);
     error JBRouterTerminal_CallerNotPoolManager(address caller);
     error JBRouterTerminal_CashOutLoopLimit();
+    error JBRouterTerminal_InsufficientTwapHistory();
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
     error JBRouterTerminal_NoLiquidity();
     error JBRouterTerminal_NoMsgValueAllowed(uint256 value);
@@ -81,7 +82,6 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
-    error JBRouterTerminal_InsufficientTwapHistory();
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
