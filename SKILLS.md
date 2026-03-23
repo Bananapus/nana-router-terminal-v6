@@ -20,7 +20,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | `pay(projectId, token, amount, beneficiary, minReturnedTokens, memo, metadata)` | Accept any token, route to the destination project's accepted token (cashout, swap, wrap/unwrap, or direct), forward to the project's primary terminal. Returns project token count. |
 | `previewPayFor(projectId, token, amount, beneficiary, metadata)` | Preview the terminal and mint result that the current payment route would produce. Swap routes return best-effort estimates using the router's quote-selection logic. |
 | `addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata)` | Same routing flow as `pay` but calls `terminal.addToBalanceOf(...)` instead of `terminal.pay(...)`. |
-| `discoverPool(normalizedTokenIn, normalizedTokenOut) -> IUniswapV3Pool` | Search V3 factory for highest-liquidity pool across 4 fee tiers. Returns the V3 pool (or zero address if V4 was better). |
+| `discoverPool(normalizedTokenIn, normalizedTokenOut) -> IUniswapV3Pool` | Search V3 factory for highest-liquidity pool across 4 fee tiers. Returns the V3 pool (or zero address if no V3 pool exists). |
 | `discoverBestPool(normalizedTokenIn, normalizedTokenOut) -> PoolInfo` | Discover best pool across both V3 and V4, comparing in-range liquidity. Returns `PoolInfo` indicating protocol version and pool details. |
 | `accountingContextForTokenOf(projectId, token) -> JBAccountingContext` | Returns a dynamically constructed context with 18 decimals and currency = `uint32(uint160(token))`. Does not read from storage. |
 | `accountingContextsOf(projectId) -> JBAccountingContext[]` | Always returns an empty array (this terminal accepts any token dynamically). |
