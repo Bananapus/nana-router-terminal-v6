@@ -85,8 +85,6 @@ The following values are set at deploy time and cannot be changed:
 | `POOL_MANAGER` | Constructor | No | Uniswap V4 PoolManager (can be `address(0)` to disable V4) |
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 | `WETH` | Constructor | No | Wrapped ETH contract |
-| `PERMISSIONS` | Constructor | No | JB permissions contract (inherited from `JBPermissioned`) |
-| Trusted forwarder | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `DEFAULT_TWAP_WINDOW` | Compile-time constant | No | 10 minutes (600 seconds) |
 | `SLIPPAGE_DENOMINATOR` | Compile-time constant | No | 10,000 (basis points) |
 | `_FEE_TIERS` | Storage (initialized) | No | `[3000, 500, 10000, 100]` -- V3 fee tiers |
@@ -100,8 +98,6 @@ The following values are set at deploy time and cannot be changed:
 | `PERMISSIONS` | Constructor | No | JB permissions registry for permission checks |
 | `Trusted forwarder` | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `PROJECTS` | Constructor | No | JB project NFT registry |
-| `PERMISSIONS` | Constructor | No | JB permissions contract (inherited from `JBPermissioned`) |
-| Trusted forwarder | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 
 ### JBSwapLib
