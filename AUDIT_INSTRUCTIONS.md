@@ -261,14 +261,22 @@ forge test
 
 | Test File | Type | Coverage Area | Count |
 |-----------|------|---------------|-------|
-| `RouterTerminal.t.sol` | Unit (mocked) | Core routing, swap paths, cashout, V4, pool discovery, TWAP, errors | ~35 |
-| `RouterTerminalRegistry.t.sol` | Unit (mocked) | Allow/disallow, set/lock, forwarding, permissions | ~12 |
+| `RouterTerminal.t.sol` | Unit (mocked) | Core routing, swap paths, cashout, V4, pool discovery, TWAP, errors | ~39 |
+| `RouterTerminalRegistry.t.sol` | Unit (mocked) | Allow/disallow, set/lock, forwarding, permissions | ~18 |
 | `RouterTerminalFork.t.sol` | Fork (mainnet) | End-to-end swaps: ETH->USDC, USDC->ETH, ETH->DAI, addToBalance, quote metadata | ~12 |
+| `RouterTerminalCashOutFork.t.sol` | Fork (mainnet) | Cashout routing through terminals | ~5 |
+| `RouterTerminalCreditCashout.t.sol` | Unit (mocked) | Credit cashout path | ~6 |
+| `RouterTerminalERC2771.t.sol` | Unit (mocked) | ERC-2771 meta-transaction forwarding | ~3 |
 | `RouterTerminalFeeCashOutFork.t.sol` | Fork (mainnet) | Fee routing through cashout: project 3 payouts -> fee -> cashout -> project 1 | 1 |
+| `RouterTerminalMultihopFork.t.sol` | Fork (mainnet) | Multi-hop cashout chains across projects | ~3 |
+| `RouterTerminalPreviewFork.t.sol` | Fork (mainnet) | Preview functions for pay and cashout routing | ~4 |
+| `RouterTerminalReentrancy.t.sol` | Unit (mocked) | Reentrancy scenarios through callbacks | ~3 |
 | `RouterTerminalSandwichFork.t.sol` | Fork (mainnet) | MEV/sandwich: V3 TWAP resistance, V4 spot manipulation, user quote | 4 |
+| `fork/V4QuoteAndSettlementFork.t.sol` | Fork (mainnet) | V4 quote computation and settlement | ~4 |
+| `invariant/RouterTerminalInvariant.t.sol` | Invariant | Zero-balance, callback verification, loop termination (9 invariants) | 9 |
 | `regression/LockTerminalRace.t.sol` | Unit | Race condition in `lockTerminalFor` with `expectedTerminal` | 3 |
 | `regression/CashOutLoopLimit.t.sol` | Unit | Circular cashout loop cap at 20 iterations | 2 |
-| `regression/V4SpotPriceSlippage.t.sol` | Unit + fuzz | Sigmoid math: floor, ceiling, monotonicity, bounded range, user quote | 14 |
+| `regression/V4SpotPriceSlippage.t.sol` | Unit + fuzz | Sigmoid math: floor, ceiling, monotonicity, bounded range, user quote | ~17 |
 
 ### Coverage Gaps Worth Investigating
 
@@ -276,7 +284,7 @@ forge test
 |------|--------|----------------|
 | Fee-on-transfer tokens | NOT TESTED | Registry `_acceptFundsFor` does not use balance-delta |
 | Short TWAP windows (<60s) | NOT TESTED | Silently degrades to near-spot-price |
-| Multi-hop cashout chains (>1 step) | NOT TESTED | Only the circular case and single-step are tested |
+| Multi-hop cashout chains (>1 step) | TESTED | `RouterTerminalMultihopFork.t.sol` covers multi-hop cashout chains (~3 tests) |
 | V4 pools with custom hooks | NOT TESTED | All V4 tests use `hooks: IHooks(address(0))` |
 | Concurrent pay + addToBalance | NOT TESTED | Mitigated by stateless design but worth verifying |
 | Credit cashout path (fork) | NOT TESTED | Only unit-mocked, no fork test with real credits |
@@ -305,7 +313,7 @@ No prior formal audit with finding IDs has been conducted on this codebase. All 
 | `JBRouterTerminal_AmountOverflow(uint256)` | JBRouterTerminal | Amount exceeds `type(uint160).max` during Permit2 transfer, or exceeds `type(uint128).max` in V3 TWAP quote computation. |
 | `JBRouterTerminal_CallerNotPool(address)` | JBRouterTerminal | `uniswapV3SwapCallback()` called by an address that does not match the expected V3 pool computed via `FACTORY.getPool()`. |
 | `JBRouterTerminal_CallerNotPoolManager(address)` | JBRouterTerminal | `unlockCallback()` called by an address other than `POOL_MANAGER`. |
-| `JBRouterTerminal_CashOutLoopLimit()` | JBRouterTerminal | `_cashOutLoop()` or `_executeCashOutChain()` exceeds 20 iterations without resolving to an accepted token. |
+| `JBRouterTerminal_CashOutLoopLimit()` | JBRouterTerminal | `_cashOutLoop()` or `_previewCashOutLoop()` exceeds 20 iterations without resolving to an accepted token. |
 | `JBRouterTerminal_NoCashOutPath(uint256, uint256)` | JBRouterTerminal | `_findCashOutPath()` cannot find any terminal on the source project that reclaims a usable token for the destination. |
 | `JBRouterTerminal_NoLiquidity()` | JBRouterTerminal | V3 or V4 pool selected for quoting has zero in-range liquidity. |
 | `JBRouterTerminal_NoMsgValueAllowed(uint256)` | JBRouterTerminal | `msg.value != 0` when paying with ERC-20 tokens or credits (ETH not expected on these paths). |
