@@ -60,7 +60,7 @@ If `tokenIn` is a JB project token, a cashout loop runs first (up to 20 iteratio
 
 ## Routing Architecture
 
-The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level entry points. Both follow the same path: detect JB project tokens and `_cashOutLoop` if needed, then `_resolveTokenOut` to pick the output token, then `_convert` to execute the conversion (no-op, wrap/unwrap, or `_handleSwap`). Swap execution goes through `_pickPoolAndQuote` (discover pool, get TWAP or spot quote with sigmoid slippage), then dispatches to V3 (`uniswapV3SwapCallback`) or V4 (`unlockCallback`). Leftover input tokens from partial fills are returned to the payer.
+The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level entry points. Both follow the same path: detect JB project tokens and `_cashOutLoop` if needed, then `_resolveTokenOut` to pick the output token, then `_convert` to execute the conversion (no-op, wrap/unwrap, or `_handleSwap`). Swap execution goes through `_pickPoolAndQuote` (discover pool, get TWAP or spot quote with sigmoid slippage), then dispatches to V3 (`uniswapV3SwapCallback`) or V4 (`unlockCallback`). Leftover input tokens from partial fills are returned to the `beneficiary` (for `pay()`) or `_msgSender()` (for `addToBalanceOf()`).
 
 ## Integration Points
 
@@ -93,6 +93,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `DEFAULT_TWAP_WINDOW` | `10 minutes` (600 seconds) | Default TWAP oracle window for V3 pool quotes |
+| `MIN_TWAP_WINDOW` | `2 minutes` (120 seconds) | Minimum acceptable observation history for V3 TWAP quotes |
 | `_SLIPPAGE_DENOMINATOR` | `10,000` | Basis points denominator for slippage tolerance |
 | `_FEE_TIERS` | `[3000, 500, 10000, 100]` | V3 fee tiers to search (0.3%, 0.05%, 1%, 0.01%) |
 | `_V4_FEES` | `[3000, 500, 10000, 100]` | V4 fee tiers to search |
@@ -142,6 +143,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 | `JBRouterTerminal_NoObservationHistory()` | V3 pool has no TWAP observation history (`oldestObservation == 0`) |
 | `JBRouterTerminal_AmountOverflow(uint256 amount)` | Amount exceeds `type(uint128).max` (required by `OracleLibrary.getQuoteAtTick`) |
 | `JBRouterTerminal_CashOutLoopLimit()` | Cashout loop exceeded 20 iterations (circular token dependency) |
+| `JBRouterTerminal_InsufficientTwapHistory()` | V3 pool's oldest observation is less than `MIN_TWAP_WINDOW` (120 seconds) |
 
 ### JBRouterTerminalRegistry
 
@@ -192,14 +194,14 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 - Pool discovery runs at call time -- it searches V3 and V4 pools across 4 fee tiers each (8 pools total). The best pool (by in-range liquidity) wins. This is gas-intensive but ensures optimal routing.
 - When `tokenIn == NATIVE_TOKEN`, the terminal wraps ETH to WETH before swapping. When the output is `NATIVE_TOKEN`, it unwraps WETH after swapping.
 - The `receive()` function accepts ETH from any sender. This is necessary because ETH arrives from WETH unwraps, cashout reclaims from project terminals, and V4 PoolManager takes. The terminal handles all ETH within the same transaction.
-- **V3 TWAP**: Reverts with `JBRouterTerminal_NoObservationHistory()` when a V3 pool has no observation history. The TWAP window is capped by the pool's oldest observation if shorter than 10 minutes.
+- **V3 TWAP**: Reverts with `JBRouterTerminal_NoObservationHistory()` when a V3 pool has no observation history, or with `JBRouterTerminal_InsufficientTwapHistory()` when the oldest observation is less than `MIN_TWAP_WINDOW` (120 seconds). The TWAP window is capped by the pool's oldest observation if shorter than 10 minutes.
 - **V4 spot price**: V4 vanilla pools have no built-in TWAP oracle. The terminal uses the current spot tick with the same sigmoid slippage formula.
 - **V4 requires cancun EVM**: Chains without EIP-1153 (transient storage) cannot use V4 routing. If `POOL_MANAGER` is `address(0)`, V4 discovery is skipped entirely.
 - **Preview estimates**: `previewPayFor()` returns exact values for direct and wrap-unwrap routes, and best-effort estimates for swap routes using current pool state or caller-provided quotes.
 - The `JBRouterTerminalRegistry` handles token custody during delegation -- it transfers tokens from the payer to itself, then approves and forwards to the underlying terminal.
 - `_msgSender()` (ERC-2771) is used instead of `msg.sender` for meta-transaction compatibility in both contracts.
 - The `JBSwapLib` library contains slippage tolerance math (sigmoid formula), price impact estimation, and V3-compatible `sqrtPriceLimitX96` calculation. It does not contain swap execution logic.
-- **Leftover handling**: After a swap, leftover input tokens (from partial fills where the price limit was hit) are returned to the payer. For native token inputs, any remaining raw ETH is wrapped to WETH first so the leftover check catches it.
+- **Leftover handling**: After a swap, leftover input tokens (from partial fills where the price limit was hit) are returned to the `beneficiary` (for `pay()`) or `_msgSender()` (for `addToBalanceOf()`). For native token inputs, any remaining raw ETH is wrapped to WETH first so the leftover check catches it.
 - **Credit cashouts**: When using `cashOutSource` metadata, the payer must have granted `TRANSFER_CREDITS` permission (ID 13) to the router terminal for the source project. The router calls `TOKENS.transferCreditsFrom()` to pull credits.
 - **Cashout loop depth**: The `_cashOutLoop` iterates through JB project token chains with a cap of 20 iterations (`_MAX_CASHOUT_ITERATIONS`). Exceeding this limit reverts with `JBRouterTerminal_CashOutLoopLimit()`.
 - **V3 callback verification**: The `uniswapV3SwapCallback` verifies the caller by reading the pool's `fee()` and checking `FACTORY.getPool()`. This is standard V3 security.
