@@ -222,7 +222,8 @@ contract JBRouterTerminal is
             destProjectId: projectId,
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
-            metadata: metadata
+            metadata: metadata,
+            refundTo: payable(_msgSender())
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -272,7 +273,8 @@ contract JBRouterTerminal is
             destProjectId: projectId,
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
-            metadata: metadata
+            metadata: metadata,
+            refundTo: payable(beneficiary)
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -673,13 +675,15 @@ contract JBRouterTerminal is
     /// @param amount The amount to convert.
     /// @param projectId The project ID (passed through to swap callback data).
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
+    /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return The amount of tokenOut produced.
     function _convert(
         address tokenIn,
         address tokenOut,
         uint256 amount,
         uint256 projectId,
-        bytes calldata metadata
+        bytes calldata metadata,
+        address payable refundTo
     )
         internal
         returns (uint256)
@@ -700,7 +704,7 @@ contract JBRouterTerminal is
         // Different tokens — swap via Uniswap (V3 or V4).
         return
             _handleSwap({
-                projectId: projectId, tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata
+                projectId: projectId, tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata, refundTo: refundTo
             });
     }
 
@@ -801,13 +805,15 @@ contract JBRouterTerminal is
     /// @param tokenOut The output token.
     /// @param amount The amount of tokenIn to swap.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
+    /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return amountOut The amount of tokenOut received.
     function _handleSwap(
         uint256 projectId,
         address tokenIn,
         address tokenOut,
         uint256 amount,
-        bytes calldata metadata
+        bytes calldata metadata,
+        address payable refundTo
     )
         internal
         returns (uint256 amountOut)
@@ -841,7 +847,7 @@ contract JBRouterTerminal is
         uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
         if (balanceAfter > 0) {
             if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(balanceAfter);
-            _transferFrom({from: address(this), to: payable(_msgSender()), token: tokenIn, amount: balanceAfter});
+            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: balanceAfter});
         }
     }
 
@@ -851,6 +857,7 @@ contract JBRouterTerminal is
     /// @param tokenIn The address of the token being routed.
     /// @param amount The amount of tokens being routed.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return destTerminal The terminal to forward funds to.
     /// @return tokenOut The token the destination project accepts.
     /// @return amountOut The amount of tokenOut to forward.
@@ -858,7 +865,8 @@ contract JBRouterTerminal is
         uint256 destProjectId,
         address tokenIn,
         uint256 amount,
-        bytes calldata metadata
+        bytes calldata metadata,
+        address payable refundTo
     )
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
@@ -895,7 +903,7 @@ contract JBRouterTerminal is
 
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
         amountOut = _convert({
-            tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata
+            tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, projectId: destProjectId, metadata: metadata, refundTo: refundTo
         });
     }
 
