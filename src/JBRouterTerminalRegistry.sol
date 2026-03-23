@@ -99,6 +99,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     //*********************************************************************//
+    // ------------------------- receive -------------------------------- //
+    //*********************************************************************//
+
+    /// @notice Accept native token refunds from the router on partial swap fills.
+    receive() external payable {}
+
+    //*********************************************************************//
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
 
@@ -425,6 +432,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice Accepts a token being paid in.
+    /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
     /// @param metadata The metadata in which `permit2` context is provided.

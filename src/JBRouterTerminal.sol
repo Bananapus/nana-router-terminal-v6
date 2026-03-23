@@ -81,6 +81,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+    error JBRouterTerminal_InsufficientTwapHistory();
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
@@ -88,6 +89,10 @@ contract JBRouterTerminal is
 
     /// @notice The default TWAP window used for auto-discovered pools.
     uint256 public constant DEFAULT_TWAP_WINDOW = 10 minutes;
+
+    /// @notice The minimum acceptable TWAP window (2 minutes). Reverts if the pool's oldest observation is below this
+    /// floor.
+    uint32 public constant MIN_TWAP_WINDOW = 120;
 
     //*********************************************************************//
     // ------------------------ internal constants ----------------------- //
@@ -809,9 +814,6 @@ contract JBRouterTerminal is
     {
         address normalizedTokenIn = _normalize(tokenIn);
 
-        // Snapshot the input token balance before the swap to compute the leftover delta accurately.
-        uint256 balanceBefore = IERC20(normalizedTokenIn).balanceOf(address(this));
-
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
@@ -833,12 +835,13 @@ contract JBRouterTerminal is
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
 
-        // Return leftover input tokens to payer using balance delta rather than global balance.
+        // Return leftover input tokens to payer. The router is stateless — any remaining balance after a swap is
+        // leftover from a partial fill. Using an absolute balance check (rather than a balance delta) correctly
+        // handles ERC-20 partial fills where the router already held the full input amount before the swap.
         uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
-        if (balanceAfter > balanceBefore) {
-            uint256 leftover = balanceAfter - balanceBefore;
-            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(leftover);
-            _transferFrom({from: address(this), to: payable(_msgSender()), token: tokenIn, amount: leftover});
+        if (balanceAfter > 0) {
+            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(balanceAfter);
+            _transferFrom({from: address(this), to: payable(_msgSender()), token: tokenIn, amount: balanceAfter});
         }
     }
 
@@ -1240,6 +1243,9 @@ contract JBRouterTerminal is
 
         uint256 twapWindow = DEFAULT_TWAP_WINDOW;
         if (oldestObservation < twapWindow) twapWindow = oldestObservation;
+
+        // Enforce a minimum TWAP window to prevent manipulation of short-history pools.
+        if (twapWindow < MIN_TWAP_WINDOW) revert JBRouterTerminal_InsufficientTwapHistory();
 
         (
             int24 arithmeticMeanTick,
