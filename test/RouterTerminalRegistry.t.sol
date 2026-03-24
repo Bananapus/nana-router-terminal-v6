@@ -76,13 +76,17 @@ contract RouterTerminalRegistryTest is Test {
         assertFalse(registry.isTerminalAllowed(terminalA));
     }
 
-    function test_disallowTerminal_clearsDefault() public {
+    function test_disallowTerminal_revertsIfDefault() public {
         vm.startPrank(owner);
         registry.setDefaultTerminal(terminalA);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_CannotDisallowDefaultTerminal.selector, terminalA
+            )
+        );
         registry.disallowTerminal(terminalA);
         vm.stopPrank();
-
-        assertEq(address(registry.defaultTerminal()), address(0));
     }
 
     // ──────────────────────────────────────────────────────────────────────

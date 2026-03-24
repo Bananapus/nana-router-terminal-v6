@@ -47,6 +47,12 @@ interface IJBRouterTerminalRegistry is IJBTerminal {
     /// @return Whether the terminal is allowed.
     function isTerminalAllowed(IJBTerminal terminal) external view returns (bool);
 
+    /// @notice The original payer of the current transaction, if one is in progress.
+    /// @dev Set in transient storage during `pay()` and `addToBalanceOf()` so downstream router terminals can
+    /// refund partial-fill leftovers to the true payer rather than to this registry.
+    /// @return The original payer address, or `address(0)` if no forwarding is in progress.
+    function originalPayer() external view returns (address);
+
     /// @notice The permit2 utility used for token approvals.
     /// @return The permit2 contract.
     function PERMIT2() external view returns (IPermit2);
