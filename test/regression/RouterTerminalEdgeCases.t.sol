@@ -393,13 +393,13 @@ contract RouterTerminalEdgeCasesTest is Test {
         vm.prank(user);
         registry.pay(projectId, address(tokenIn), 1000 ether, user, 0, "", metadata);
 
-        assertEq(tokenIn.balanceOf(user), 0, "user should have transferred the full input to the flow");
+        assertEq(tokenIn.balanceOf(user), 400 ether, "user should receive the partial-fill refund");
         assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain the unused ERC20 input");
-        assertEq(tokenIn.balanceOf(address(router)), 400 ether, "router trapped the partial-fill leftover");
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router should not retain tokens after refunding leftover");
         assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal received only the filled output");
     }
 
-    function test_registryNativeInput_partialFillRevertsOnRefundToRegistry() public {
+    function test_registryNativeInput_partialFillRefundsToUser() public {
         MockERC20 tokenOut = new MockERC20("Out", "OUT");
         MockDestTerminal destTerminal = new MockDestTerminal();
         address normalizedTokenIn = address(weth);
@@ -455,7 +455,11 @@ contract RouterTerminalEdgeCasesTest is Test {
 
         vm.deal(user, 1000 ether);
         vm.prank(user);
-        vm.expectRevert();
         registry.pay{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, user, 0, "", metadata);
+
+        assertEq(user.balance, 400 ether, "user should receive the native token partial-fill refund");
+        assertEq(address(registry).balance, 0, "registry should not retain native token leftovers");
+        assertEq(address(router).balance, 0, "router should not retain native token leftovers");
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal received only the filled output");
     }
 }
