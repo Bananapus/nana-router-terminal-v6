@@ -166,7 +166,7 @@ contract MockDestTerminal is IJBTerminal {
 
     function previewPayFor(
         uint256,
-        address token,
+        address, /* token — unused in mock, required by IJBTerminal interface */
         uint256 amount,
         address,
         bytes calldata

@@ -84,7 +84,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev Stored via EIP-1153 (`tstore`/`tload`) so downstream router terminals can refund partial-fill
     /// leftovers to the true payer rather than to this registry.
     /// Value: `keccak256("JBRouterTerminalRegistry.originalPayer")`.
-    // forge-lint: disable-next-line(state-visibility)
     uint256 constant _ORIGINAL_PAYER_SLOT = 0x155c0739b54b7ceb57c5ab5abc9432c295a1b33327cffe6957245a060adadfb6;
 
     //*********************************************************************//
