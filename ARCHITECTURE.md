@@ -62,7 +62,7 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
   │         │
   │         ├─ If native ETH input: wrap any remaining raw ETH (partial fills)
   │         ├─ If native ETH output: unwrap WETH → ETH (WETH.withdraw)
-  │         └─ Return leftover input tokens to beneficiary (pay) or _msgSender() (addToBalanceOf)
+  │         └─ Return leftover input tokens via _resolveRefundTo (checks registry's originalPayer() transient storage, falls back to beneficiary/msgSender)
   │
   ├─ Approve destination terminal for output tokens (or set msg.value for native)
   └─ Forward to destTerminal.pay() → return beneficiary token count

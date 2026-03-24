@@ -22,7 +22,7 @@
 - **No access control on `pay` / `addToBalanceOf`.** Anyone can route payments. This is by design but means the contract processes arbitrary token types and amounts.
 - **Fee-on-transfer tokens unsupported.** `_acceptFundsFor` in the terminal uses balance-delta, but the registry does NOT. Fee-on-transfer tokens through the registry will mismatch.
 - **Credit cashout path.** `_acceptFundsFor` processes `cashOutSource` metadata to transfer credits from `_msgSender()`. Requires `TRANSFER_CREDITS` permission. If a user has this permission set broadly, any caller through the trusted forwarder could drain their credits.
-- **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing a terminal clears the default if it matches but does NOT clear per-project terminal settings already set to the disallowed terminal.
+- **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing the current default terminal now reverts with `CannotDisallowDefaultTerminal` instead of silently clearing it. Per-project terminal settings already set to a disallowed terminal are NOT cleared.
 - **Synthetic accounting contexts.** `JBRouterTerminal.accountingContextForTokenOf()` uses best-effort decimals for
   routing discovery: native tokens use `18`, ERC-20s probe `IERC20Metadata.decimals()` when available, and broken or
   non-standard tokens fall back to `18`. `JBRouterTerminalRegistry` simply forwards that context. This is safe for
