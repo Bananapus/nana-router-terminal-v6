@@ -124,7 +124,10 @@ contract MockDestTerminal is IJBTerminal {
         lastAmount = amount;
     }
 
-    function accountingContextForTokenOf(uint256, address token)
+    function accountingContextForTokenOf(
+        uint256,
+        address token
+    )
         external
         pure
         override
@@ -138,12 +141,7 @@ contract MockDestTerminal is IJBTerminal {
         contexts[0] = JBAccountingContext({token: address(1), decimals: 18, currency: 1});
     }
 
-    function currentSurplusOf(uint256, address[] calldata, uint256, uint256)
-        external
-        pure
-        override
-        returns (uint256)
-    {}
+    function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {}
 
     function migrateBalanceOf(uint256, address, IJBTerminal) external pure override returns (uint256) {}
 
@@ -166,7 +164,13 @@ contract MockDestTerminal is IJBTerminal {
         return amount;
     }
 
-    function previewPayFor(uint256, address token, uint256 amount, address, bytes calldata)
+    function previewPayFor(
+        uint256,
+        address token,
+        uint256 amount,
+        address,
+        bytes calldata
+    )
         external
         pure
         override
@@ -208,13 +212,20 @@ contract PartialFillPool is IUniswapV3Pool {
         amountOutGiven = amountOutGiven_;
     }
 
-    function swap(address recipient, bool zeroForOne, int256, uint160, bytes calldata data)
+    function swap(
+        address recipient,
+        bool zeroForOne,
+        int256,
+        uint160,
+        bytes calldata data
+    )
         external
         override
         returns (int256 amount0, int256 amount1)
     {
         if (zeroForOne) {
-            JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
+            JBRouterTerminal(payable(msg.sender))
+                .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
             _zeroForOneOutputToken.mint(recipient, amountOutGiven);
             return (int256(amountInUsed), -int256(amountOutGiven));
         }
@@ -232,14 +243,11 @@ contract PartialFillPool is IUniswapV3Pool {
         return address(_token1);
     }
 
-    function tickSpacing() external pure override returns (int24) { return 1; }
+    function tickSpacing() external pure override returns (int24) {
+        return 1;
+    }
 
-    function slot0()
-        external
-        pure
-        override
-        returns (uint160, int24, uint16, uint16, uint16, uint8, bool)
-    {
+    function slot0() external pure override returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
         return (0, 0, 0, 0, 0, 0, false);
     }
 
@@ -254,12 +262,7 @@ contract PartialFillPool is IUniswapV3Pool {
     {}
     function tickBitmap(int16) external pure override returns (uint256) {}
     function positions(bytes32) external pure override returns (uint128, uint256, uint256, uint128, uint128) {}
-    function observations(uint256)
-        external
-        pure
-        override
-        returns (uint32, int56, uint160, bool)
-    {}
+    function observations(uint256) external pure override returns (uint32, int56, uint160, bool) {}
     function observe(uint32[] calldata) external pure override returns (int56[] memory, uint160[] memory) {}
     function snapshotCumulativesInside(int24, int24) external pure override returns (int56, uint160, uint32) {}
     function increaseObservationCardinalityNext(uint16) external override {}
@@ -270,8 +273,14 @@ contract PartialFillPool is IUniswapV3Pool {
     function initialize(uint160) external override {}
     function setFeeProtocol(uint8, uint8) external override {}
     function collectProtocol(address, uint128, uint128) external pure override returns (uint128, uint128) {}
-    function factory() external pure override returns (address) { return address(0); }
-    function maxLiquidityPerTick() external pure override returns (uint128) { return type(uint128).max; }
+
+    function factory() external pure override returns (address) {
+        return address(0);
+    }
+
+    function maxLiquidityPerTick() external pure override returns (uint128) {
+        return type(uint128).max;
+    }
 }
 
 contract RouterTerminalEdgeCasesTest is Test {
@@ -370,18 +379,19 @@ contract RouterTerminalEdgeCasesTest is Test {
         vm.prank(owner);
         registry.setDefaultTerminal(IJBTerminal(address(router)));
 
-        tokenIn.mint(user, 1_000 ether);
+        tokenIn.mint(user, 1000 ether);
         vm.prank(user);
         tokenIn.approve(address(registry), type(uint256).max);
 
         bytes memory metadata = JBMetadataResolver.addToMetadata(
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
-        metadata =
-            JBMetadataResolver.addToMetadata(metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether));
+        metadata = JBMetadataResolver.addToMetadata(
+            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether)
+        );
 
         vm.prank(user);
-        registry.pay(projectId, address(tokenIn), 1_000 ether, user, 0, "", metadata);
+        registry.pay(projectId, address(tokenIn), 1000 ether, user, 0, "", metadata);
 
         assertEq(tokenIn.balanceOf(user), 0, "user should have transferred the full input to the flow");
         assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain the unused ERC20 input");
@@ -439,12 +449,13 @@ contract RouterTerminalEdgeCasesTest is Test {
         bytes memory metadata = JBMetadataResolver.addToMetadata(
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
-        metadata =
-            JBMetadataResolver.addToMetadata(metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether));
+        metadata = JBMetadataResolver.addToMetadata(
+            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether)
+        );
 
-        vm.deal(user, 1_000 ether);
+        vm.deal(user, 1000 ether);
         vm.prank(user);
         vm.expectRevert();
-        registry.pay{value: 1_000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1_000 ether, user, 0, "", metadata);
+        registry.pay{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, user, 0, "", metadata);
     }
 }
