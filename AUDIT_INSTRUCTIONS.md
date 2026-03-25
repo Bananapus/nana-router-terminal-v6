@@ -252,7 +252,7 @@ forge test
 
 ### Foundry Configuration
 
-- Solidity ^0.8.26 (^0.8.28 for JBRouterTerminalRegistry), EVM target `cancun`, optimizer 200 runs
+- Solidity 0.8.28 (0.8.28 for JBRouterTerminalRegistry), EVM target `cancun`, optimizer 200 runs
 - Fuzz runs: 4,096 per test
 - Invariant runs: 1,024 with depth 100
 - Fork tests pinned to Ethereum mainnet block 21,700,000 (post-V4 deployment)
@@ -333,7 +333,7 @@ No prior formal audit with finding IDs has been conducted on this codebase. All 
 
 ## Compiler and Version Info
 
-- **Solidity**: ^0.8.26 (^0.8.28 for JBRouterTerminalRegistry)
+- **Solidity**: 0.8.28 (0.8.28 for JBRouterTerminalRegistry)
 - **EVM target**: Cancun
 - **Optimizer**: via-IR, 200 runs
 - **Dependencies**: OpenZeppelin 5.x, Uniswap V3/V4, nana-core-v6
