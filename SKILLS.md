@@ -9,7 +9,7 @@ Accept payments in any ERC-20 token (or native ETH), dynamically discover what t
 | Contract | Role |
 |----------|------|
 | `JBRouterTerminal` | Core terminal: accepts any token, previews payment routes with `previewPayFor`, discovers the best route to the destination project's accepted token, swaps via Uniswap V3 or V4, cashes out JB project tokens, and forwards to the primary terminal. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` via `IJBRouterTerminalRegistry`. |
+| `JBRouterTerminalRegistry` | Proxy terminal routing `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal`. Project owners can set and lock their terminal choice. Implements `IJBTerminal` and `IJBPayerTracker` via `IJBRouterTerminalRegistry`. |
 
 ## Key Functions
 
@@ -201,7 +201,8 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 - The `JBRouterTerminalRegistry` handles token custody during delegation -- it transfers tokens from the payer to itself, then approves and forwards to the underlying terminal.
 - `_msgSender()` (ERC-2771) is used instead of `msg.sender` for meta-transaction compatibility in both contracts.
 - The `JBSwapLib` library contains slippage tolerance math (sigmoid formula), price impact estimation, and V3-compatible `sqrtPriceLimitX96` calculation. It does not contain swap execution logic.
-- **Leftover handling**: After a swap, leftover input tokens (from partial fills where the price limit was hit) are returned to the `beneficiary` (for `pay()`) or `_msgSender()` (for `addToBalanceOf()`). For native token inputs, any remaining raw ETH is wrapped to WETH first so the leftover check catches it.
+- **Leftover handling**: After a swap, leftover input tokens (from partial fills where the price limit was hit) are returned via `_resolveRefundTo`. When the caller (`msg.sender`) implements `IJBPayerTracker` and `originalPayer()` returns a non-zero address, leftovers go to that address. Otherwise they go to the `beneficiary` (for `pay()`) or `_msgSender()` (for `addToBalanceOf()`). For native token inputs, any remaining raw ETH is wrapped to WETH first so the leftover check catches it.
+- **`IJBPayerTracker` decoupling**: The router terminal does not import or depend on `IJBRouterTerminalRegistry` for refund resolution. It queries `IJBPayerTracker(msg.sender).originalPayer()` via try-catch. Any intermediary contract that implements `IJBPayerTracker` can forward calls to the router and have leftovers returned to the original payer.
 - **Credit cashouts**: When using `cashOutSource` metadata, the payer must have granted `TRANSFER_CREDITS` permission (ID 13) to the router terminal for the source project. The router calls `TOKENS.transferCreditsFrom()` to pull credits.
 - **Cashout loop depth**: The `_cashOutLoop` iterates through JB project token chains with a cap of 20 iterations (`_MAX_CASHOUT_ITERATIONS`). Exceeding this limit reverts with `JBRouterTerminal_CashOutLoopLimit()`.
 - **V3 callback verification**: The `uniswapV3SwapCallback` verifies the caller by reading the pool's `fee()` and checking `FACTORY.getPool()`. This is standard V3 security.

@@ -42,7 +42,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
-import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
@@ -513,15 +513,16 @@ contract JBRouterTerminal is
     //*********************************************************************//
 
     /// @notice Resolve the refund target for partial-fill leftovers.
-    /// @dev When called via a `JBRouterTerminalRegistry`, the registry stores the original payer in transient
-    /// storage. This function reads it so that refunds go to the true payer rather than the registry.
-    /// @param fallback_ The default refund address to use when no registry original payer is available.
+    /// @dev When called via an intermediary that implements `IJBPayerTracker` (e.g. `JBRouterTerminalRegistry`),
+    /// the intermediary stores the original payer in transient storage. This function reads it so that refunds
+    /// go to the true payer rather than the intermediary.
+    /// @param fallback_ The default refund address to use when no original payer is available.
     /// @return The address to refund partial-fill leftovers to.
     function _resolveRefundTo(address payable fallback_) internal view returns (address payable) {
         // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
         if (msg.sender.code.length > 0) {
-            // Check if the caller is a registry that exposes an original payer.
-            try IJBRouterTerminalRegistry(msg.sender).originalPayer() returns (address payer) {
+            // Check if the caller implements IJBPayerTracker and has an original payer set.
+            try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
                 if (payer != address(0)) return payable(payer);
             } catch {}
         }

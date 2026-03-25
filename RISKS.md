@@ -7,6 +7,7 @@
 - **JBDirectory.** Terminal resolution trusts `DIRECTORY.primaryTerminalOf()` and `DIRECTORY.terminalsOf()`. A compromised directory can redirect funds.
 - **PERMIT2.** Used as fallback for token transfers. Permit2 approvals can be exploited if users have stale allowances.
 - **Owner (Ownable).** Contract owner has no fund access but controls the registry terminal allowlist and default.
+- **`IJBPayerTracker` implementers.** `_resolveRefundTo` in the router terminal queries `IJBPayerTracker(msg.sender).originalPayer()` via try-catch. Any contract that is the `msg.sender` and implements `IJBPayerTracker` can direct leftover refunds to an arbitrary address. This is safe when the caller is a trusted intermediary (e.g. the registry), but a malicious `msg.sender` implementing `IJBPayerTracker` could redirect refunds. The risk is bounded: the caller must have already supplied the funds being routed, so it can only redirect leftovers from its own payment.
 
 ## 2. Economic / Manipulation Risks
 
@@ -75,6 +76,10 @@ The router terminal has no `ReentrancyGuard` or `_routing` flag. This is a consc
 
 Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` and `addToBalanceOf()` succeed without corrupting the outer call's ETH forwarding. The invariant suite (`RouterTerminalInvariant.t.sol`) further confirms that the router holds zero tokens and zero ETH after every operation — including operations that exercise the cashout recursion loop (`_cashOutLoop`, up to `_MAX_CASHOUT_ITERATIONS = 20`).
 
-### 8.2 Cashout loop slippage is first-hop only (accepted trade-off)
+### 8.2 Router trusts `originalPayer()` from any `msg.sender` that implements it
+
+`_resolveRefundTo` calls `IJBPayerTracker(msg.sender).originalPayer()` in a try-catch. If the call succeeds and returns a non-zero address, leftover tokens from partial swap fills are sent to that address instead of the beneficiary or `_msgSender()`. The router does not verify that `msg.sender` is the registry or any specific contract -- it trusts any caller that implements the interface. This is accepted because: (1) the caller (`msg.sender`) is the entity that supplied the funds, so redirecting its own leftovers is a legitimate operation, (2) if the call reverts or returns `address(0)`, the router falls back to the normal beneficiary/`_msgSender()` logic, and (3) decoupling from the registry allows other intermediary contracts (e.g. batch payers, aggregators) to participate in refund routing without requiring changes to the router terminal.
+
+### 8.3 Cashout loop slippage is first-hop only (accepted trade-off)
 
 `_cashOutLoop` applies `minTokensReclaimed` only to the first cashout step. Subsequent recursive cashouts (steps 2-20) have zero explicit slippage protection. This is accepted because: (1) adding per-step slippage would require the caller to predict intermediate token amounts across an unknown chain of cashouts, which is impractical, (2) the first-hop slippage check ensures the initial conversion meets the user's expectation, and (3) the recursive path is deterministic — intermediate projects' bonding curves and rulesets are on-chain state that cannot be manipulated between steps within a single transaction. The risk is limited to scenarios where intermediate projects have very low liquidity, causing high bonding-curve slippage on small amounts.

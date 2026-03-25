@@ -11,6 +11,7 @@ src/
 ├── JBRouterTerminal.sol         — Payment routing: swap + forward to destination terminal
 ├── JBRouterTerminalRegistry.sol — Registry mapping projects to router terminal configs
 ├── interfaces/
+│   ├── IJBPayerTracker.sol
 │   ├── IJBRouterTerminal.sol
 │   ├── IJBRouterTerminalRegistry.sol
 │   └── IWETH9.sol
@@ -62,7 +63,7 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
   │         │
   │         ├─ If native ETH input: wrap any remaining raw ETH (partial fills)
   │         ├─ If native ETH output: unwrap WETH → ETH (WETH.withdraw)
-  │         └─ Return leftover input tokens via _resolveRefundTo (checks registry's originalPayer() transient storage, falls back to beneficiary/msgSender)
+  │         └─ Return leftover input tokens via _resolveRefundTo (checks msg.sender's IJBPayerTracker.originalPayer() via try-catch, falls back to beneficiary/msgSender)
   │
   ├─ Approve destination terminal for output tokens (or set msg.value for native)
   └─ Forward to destTerminal.pay() → return beneficiary token count
@@ -82,6 +83,7 @@ Caller → JBRouterTerminal.previewPayFor(projectId, token, amount)
 |-------|-----------|---------|
 | Terminal | `IJBTerminal` | Acts as a terminal that routes payments |
 | Registry | `IJBRouterTerminalRegistry` | Maps projects to routing configs |
+| Payer tracker | `IJBPayerTracker` | Exposes the original payer of a forwarded call for refund resolution |
 | Permit | `IJBPermitTerminal` | Permit2 token approval support |
 
 ## Composition Boundary
@@ -101,6 +103,8 @@ terminal source for loan sizing, debt normalization, or any other decimals-depen
 **Why synthetic accounting contexts.** The router accepts any token and converts it before forwarding. It never holds balances between transactions, so it has no meaningful accounting of its own. `accountingContextForTokenOf()` returns a best-effort context (probing `decimals()` with an 18-decimal fallback) purely so the directory can register it. The real accounting happens at the destination terminal.
 
 **Why the registry pattern.** `JBRouterTerminalRegistry` lets project owners lock a specific `JBRouterTerminal` instance for their project and manage Permit2 approvals in one place. This provides a stable entry point: if the router implementation is upgraded, the registry can be pointed to the new instance without changing the project's directory entry. It also gates which router terminals are allowed, preventing untrusted implementations from being set.
+
+**Why `IJBPayerTracker` is a separate interface.** The router terminal needs to know the original payer when called through an intermediary so it can return leftover tokens from partial swap fills to the right address. Rather than coupling the router to `IJBRouterTerminalRegistry` specifically, the refund resolution logic (`_resolveRefundTo`) queries `IJBPayerTracker(msg.sender).originalPayer()` via a try-catch. This means any contract that implements `IJBPayerTracker` -- not just the registry -- can act as a forwarding intermediary. The registry inherits `IJBPayerTracker` through `IJBRouterTerminalRegistry`, keeping backward compatibility while opening the door for other intermediary patterns.
 
 **Why liquidity-based pool selection instead of quote comparison.** Comparing actual output quotes across V3 and V4 would require executing (or simulating) swaps on both — expensive on-chain and complex for V4 where swaps must go through `PoolManager.unlock()`. Comparing in-range liquidity is a single `liquidity()` or `getLiquidity()` read per pool, is gas-cheap, and strongly correlates with execution quality for typical swap sizes.
 

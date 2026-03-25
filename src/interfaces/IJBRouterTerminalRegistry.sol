@@ -5,8 +5,10 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
+import {IJBPayerTracker} from "./IJBPayerTracker.sol";
+
 /// @notice A registry that maps projects to their preferred router terminal.
-interface IJBRouterTerminalRegistry is IJBTerminal {
+interface IJBRouterTerminalRegistry is IJBTerminal, IJBPayerTracker {
     /// @notice Emitted when a terminal is allowed for use by projects.
     /// @param terminal The terminal that was allowed.
     /// @param caller The address that called the function.
@@ -46,12 +48,6 @@ interface IJBRouterTerminalRegistry is IJBTerminal {
     /// @param terminal The terminal to check.
     /// @return Whether the terminal is allowed.
     function isTerminalAllowed(IJBTerminal terminal) external view returns (bool);
-
-    /// @notice The original payer of the current transaction, if one is in progress.
-    /// @dev Set in transient storage during `pay()` and `addToBalanceOf()` so downstream router terminals can
-    /// refund partial-fill leftovers to the true payer rather than to this registry.
-    /// @return The original payer address, or `address(0)` if no forwarding is in progress.
-    function originalPayer() external view returns (address);
 
     /// @notice The permit2 utility used for token approvals.
     /// @return The permit2 contract.
