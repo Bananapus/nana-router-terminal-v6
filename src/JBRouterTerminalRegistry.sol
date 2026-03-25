@@ -388,7 +388,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param minReturnedTokens The minimum number of project tokens expected in return.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    /// @return The number of tokens received.
+    /// @return result The number of tokens received.
     function pay(
         uint256 projectId,
         address token,
@@ -402,7 +402,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         virtual
         override
-        returns (uint256)
+        returns (uint256 result)
     {
         // Get the terminal for the project (falls back to default).
         IJBTerminal terminal = _terminalOf[projectId];
@@ -419,7 +419,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         _setOriginalPayer(_msgSender());
 
         // Forward the payment to the terminal.
-        uint256 result = terminal.pay{value: payValue}({
+        result = terminal.pay{value: payValue}({
             projectId: projectId,
             token: token,
             amount: amount,
@@ -431,8 +431,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Clear transient storage.
         _setOriginalPayer(address(0));
-
-        return result;
     }
 
     /// @notice Set the default terminal.
