@@ -23,6 +23,7 @@ import {JBPermissionIds} from "@bananapus/permission-ids-v6/src/JBPermissionIds.
 
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
@@ -80,11 +81,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------- transient stored properties ------------------ //
     //*********************************************************************//
 
-    /// @notice The transient storage slot for the original payer address.
-    /// @dev Stored via EIP-1153 (`tstore`/`tload`) so downstream router terminals can refund partial-fill
-    /// leftovers to the true payer rather than to this registry.
-    /// Value: `keccak256("JBRouterTerminalRegistry.originalPayer")`.
-    uint256 constant _ORIGINAL_PAYER_SLOT = 0x155c0739b54b7ceb57c5ab5abc9432c295a1b33327cffe6957245a060adadfb6;
+    /// @inheritdoc IJBPayerTracker
+    address public transient override originalPayer;
 
     //*********************************************************************//
     // ---------------------------- constructor -------------------------- //
@@ -120,19 +118,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
-
-    /// @notice The original payer of the current transaction, if one is in progress.
-    /// @dev Set in transient storage during `pay()` and `addToBalanceOf()` so downstream router terminals can refund
-    /// partial-fill leftovers to the true payer rather than to this registry.
-    /// @return payer The original payer address, or `address(0)` if no forwarding is in progress.
-    function originalPayer() external view override returns (address payer) {
-        // Cache the transient storage slot.
-        uint256 slot = _ORIGINAL_PAYER_SLOT;
-        assembly ("memory-safe") {
-            // Load the original payer from transient storage.
-            payer := tload(slot)
-        }
-    }
 
     /// @notice Get the accounting context for the specified project ID and token.
     /// @param projectId The ID of the project to get the accounting context for.
@@ -476,12 +461,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Write the original payer to transient storage.
     /// @param payer The address to store, or `address(0)` to clear.
     function _setOriginalPayer(address payer) internal {
-        // Cache the transient storage slot.
-        uint256 slot = _ORIGINAL_PAYER_SLOT;
-        assembly ("memory-safe") {
-            // Store the payer in transient storage.
-            tstore(slot, payer)
-        }
+        originalPayer = payer;
     }
 
     /// @notice Accepts a token being paid in.
