@@ -70,7 +70,7 @@ The `SLIPPAGE_DENOMINATOR` constant was kept but changed from `uint160` to `uint
 
 ### 1.11 Solidity Version
 - **v5:** `pragma solidity 0.8.23`
-- **v6:** `pragma solidity 0.8.26`
+- **v6:** `pragma solidity ^0.8.28`
 
 ---
 

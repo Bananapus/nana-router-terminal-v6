@@ -116,7 +116,7 @@ npm ci && forge install
 
 Key `foundry.toml` settings:
 
-- `solc = '0.8.26'`
+- `solc = '0.8.28'`
 - `evm_version = 'cancun'` (required for Uniswap V4's transient storage)
 - `optimizer_runs = 200`
 - `via_ir = true` (required for `JBRouterTerminal` to fit under EIP-170)
