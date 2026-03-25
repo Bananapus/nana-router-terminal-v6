@@ -283,7 +283,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
-        _setOriginalPayer(_msgSender());
+        originalPayer = _msgSender();
 
         // Forward to the resolved terminal.
         terminal.addToBalanceOf{value: payValue}({
@@ -296,7 +296,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         });
 
         // Clear transient storage.
-        _setOriginalPayer(address(0));
+        originalPayer = address(0);
     }
 
     /// @notice Allow a terminal.
@@ -401,7 +401,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
-        _setOriginalPayer(_msgSender());
+        originalPayer = _msgSender();
 
         // Forward the payment to the terminal.
         result = terminal.pay{value: payValue}({
@@ -415,7 +415,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         });
 
         // Clear transient storage.
-        _setOriginalPayer(address(0));
+        originalPayer = address(0);
     }
 
     /// @notice Set the default terminal.
@@ -457,12 +457,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
-
-    /// @notice Write the original payer to transient storage.
-    /// @param payer The address to store, or `address(0)` to clear.
-    function _setOriginalPayer(address payer) internal {
-        originalPayer = payer;
-    }
 
     /// @notice Accepts a token being paid in.
     /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
