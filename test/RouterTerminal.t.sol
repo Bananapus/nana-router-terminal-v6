@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 
@@ -65,6 +65,7 @@ contract MockERC20 {
 }
 
 contract MockERC20WithDecimals is MockERC20 {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint8 internal immutable _decimals;
 
     constructor(uint8 decimals_) {
@@ -140,7 +141,9 @@ contract MockPoolManagerForSettle {
 }
 
 contract MockPreviewDestTerminal {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address public immutable acceptedToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable previewedTokenCount;
     uint256 public totalReceived;
 
@@ -163,6 +166,7 @@ contract MockPreviewDestTerminal {
         returns (uint256)
     {
         if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "MockPreviewDestTerminal: ETH mismatch");
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         else IERC20(token).transferFrom(msg.sender, address(this), amount);
 
         totalReceived += amount;
@@ -198,7 +202,8 @@ contract MockPreviewDestTerminal {
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
         contexts[0] =
-            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -209,7 +214,9 @@ contract MockPreviewDestTerminal {
 }
 
 contract MockPreviewCashOutTerminal {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable reclaimAmount;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     MockERC20 public immutable token;
 
     constructor(MockERC20 token_, uint256 reclaimAmount_) payable {
@@ -836,6 +843,7 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
@@ -980,6 +988,7 @@ contract RouterTerminalTest is Test {
                 )
             ),
             abi.encode(
+                // forge-lint: disable-next-line(named-struct-fields)
                 JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
                 uint256(60),
                 uint256(0),
@@ -1166,6 +1175,7 @@ contract RouterTerminalTest is Test {
                 )
             ),
             abi.encode(
+                // forge-lint: disable-next-line(named-struct-fields)
                 JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
                 uint256(60),
                 uint256(0),
@@ -1277,6 +1287,7 @@ contract RouterTerminalTest is Test {
             destTerminal,
             abi.encodeCall(IJBTerminal.previewPayFor, (projectId, tokenOut, quotedAmountOut, beneficiary, metadata)),
             abi.encode(
+                // forge-lint: disable-next-line(named-struct-fields)
                 JBRuleset(0, 1, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
                 quotedAmountOut,
                 uint256(0),

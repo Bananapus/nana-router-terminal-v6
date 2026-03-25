@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 
@@ -151,7 +151,8 @@ contract RouterTerminalRegistryTest is Test {
     function test_accountingContext_passthroughDoesNotCorrectTerminalDecimals() public {
         address usdcLike = makeAddr("usdcLike");
         JBAccountingContext memory expected =
-            JBAccountingContext({token: usdcLike, decimals: 18, currency: uint32(uint160(usdcLike))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: usdcLike, decimals: 18, currency: uint32(uint160(usdcLike))});
 
         vm.mockCall(
             address(terminalA),
