@@ -12,6 +12,7 @@ import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTran
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -33,6 +34,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     error JBRouterTerminalRegistry_AmountOverflow();
+    error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
@@ -75,6 +77,16 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
     //*********************************************************************//
+    // -------------------- transient stored properties ------------------ //
+    //*********************************************************************//
+
+    /// @notice The transient storage slot for the original payer address.
+    /// @dev Stored via EIP-1153 (`tstore`/`tload`) so downstream router terminals can refund partial-fill
+    /// leftovers to the true payer rather than to this registry.
+    /// Value: `keccak256("JBRouterTerminalRegistry.originalPayer")`.
+    uint256 constant _ORIGINAL_PAYER_SLOT = 0x155c0739b54b7ceb57c5ab5abc9432c295a1b33327cffe6957245a060adadfb6;
+
+    //*********************************************************************//
     // ---------------------------- constructor -------------------------- //
     //*********************************************************************//
 
@@ -108,6 +120,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
+
+    /// @notice The original payer of the current transaction, if one is in progress.
+    /// @dev Set in transient storage during `pay()` and `addToBalanceOf()` so downstream router terminals can refund
+    /// partial-fill leftovers to the true payer rather than to this registry.
+    /// @return payer The original payer address, or `address(0)` if no forwarding is in progress.
+    function originalPayer() external view override returns (address payer) {
+        // Cache the transient storage slot.
+        uint256 slot = _ORIGINAL_PAYER_SLOT;
+        assembly ("memory-safe") {
+            // Load the original payer from transient storage.
+            payer := tload(slot)
+        }
+    }
 
     /// @notice Get the accounting context for the specified project ID and token.
     /// @param projectId The ID of the project to get the accounting context for.
@@ -271,6 +296,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
+        // Store the original payer in transient storage so downstream router terminals can refund partial-fill
+        // leftovers to the true payer.
+        _setOriginalPayer(_msgSender());
+
         // Forward to the resolved terminal.
         terminal.addToBalanceOf{value: payValue}({
             projectId: projectId,
@@ -280,6 +309,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             memo: memo,
             metadata: metadata
         });
+
+        // Clear transient storage.
+        _setOriginalPayer(address(0));
     }
 
     /// @notice Allow a terminal.
@@ -292,13 +324,16 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Disallow a terminal.
-    /// @dev Only the owner can disallow a terminal.
+    /// @dev Only the owner can disallow a terminal. Cannot disallow the current default terminal — call
+    /// `setDefaultTerminal` to change the default first.
     /// @param terminal The terminal to disallow.
     function disallowTerminal(IJBTerminal terminal) external onlyOwner {
-        isTerminalAllowed[terminal] = false;
+        // Prevent disallowing the current default terminal to avoid leaving the registry in a broken state.
+        if (terminal == defaultTerminal) {
+            revert JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(terminal);
+        }
 
-        // Clear default terminal if it matches the terminal being disallowed.
-        if (defaultTerminal == terminal) defaultTerminal = IJBTerminal(address(0));
+        isTerminalAllowed[terminal] = false;
 
         emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
@@ -353,7 +388,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param minReturnedTokens The minimum number of project tokens expected in return.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    /// @return The number of tokens received.
+    /// @return result The number of tokens received.
     function pay(
         uint256 projectId,
         address token,
@@ -367,7 +402,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         virtual
         override
-        returns (uint256)
+        returns (uint256 result)
     {
         // Get the terminal for the project (falls back to default).
         IJBTerminal terminal = _terminalOf[projectId];
@@ -379,8 +414,12 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
+        // Store the original payer in transient storage so downstream router terminals can refund partial-fill
+        // leftovers to the true payer.
+        _setOriginalPayer(_msgSender());
+
         // Forward the payment to the terminal.
-        return terminal.pay{value: payValue}({
+        result = terminal.pay{value: payValue}({
             projectId: projectId,
             token: token,
             amount: amount,
@@ -389,6 +428,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             memo: memo,
             metadata: metadata
         });
+
+        // Clear transient storage.
+        _setOriginalPayer(address(0));
     }
 
     /// @notice Set the default terminal.
@@ -431,6 +473,17 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
 
+    /// @notice Write the original payer to transient storage.
+    /// @param payer The address to store, or `address(0)` to clear.
+    function _setOriginalPayer(address payer) internal {
+        // Cache the transient storage slot.
+        uint256 slot = _ORIGINAL_PAYER_SLOT;
+        assembly ("memory-safe") {
+            // Store the payer in transient storage.
+            tstore(slot, payer)
+        }
+    }
+
     /// @notice Accepts a token being paid in.
     /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
     /// @param token The address of the token being paid in.
@@ -468,7 +521,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             });
 
             try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
-                catch {}
+            catch (bytes memory reason) {
+                // Emit a failure event so callers can surface the permit2 error reason.
+                emit IJBPermitTerminal.Permit2AllowanceFailed(token, _msgSender(), reason);
+            }
         }
 
         // Fee-on-transfer tokens are not supported by design. The router uses balance-delta

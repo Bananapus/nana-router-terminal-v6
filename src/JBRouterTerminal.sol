@@ -42,6 +42,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
@@ -223,7 +224,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: payable(_msgSender())
+            refundTo: _resolveRefundTo(payable(_msgSender()))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -274,7 +275,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: payable(beneficiary)
+            refundTo: _resolveRefundTo(payable(beneficiary))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -510,6 +511,23 @@ contract JBRouterTerminal is
     //*********************************************************************//
     // ------------------------- internal helpers ------------------------ //
     //*********************************************************************//
+
+    /// @notice Resolve the refund target for partial-fill leftovers.
+    /// @dev When called via an intermediary that implements `IJBPayerTracker` (e.g. `JBRouterTerminalRegistry`),
+    /// the intermediary stores the original payer in transient storage. This function reads it so that refunds
+    /// go to the true payer rather than the intermediary.
+    /// @param fallback_ The default refund address to use when no original payer is available.
+    /// @return The address to refund partial-fill leftovers to.
+    function _resolveRefundTo(address payable fallback_) internal view returns (address payable) {
+        // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
+        if (msg.sender.code.length > 0) {
+            // Check if the caller implements IJBPayerTracker and has an original payer set.
+            try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
+                if (payer != address(0)) return payable(payer);
+            } catch {}
+        }
+        return fallback_;
+    }
 
     /// @notice Accepts a token being paid in.
     /// @param token The address of the token being paid in.

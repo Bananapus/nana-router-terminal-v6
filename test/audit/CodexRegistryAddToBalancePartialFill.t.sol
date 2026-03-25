@@ -14,6 +14,7 @@ import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataRes
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
@@ -23,17 +24,17 @@ import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract MockERC20 {
+contract AuditMockERC20 {
     string public name;
     string public symbol;
-    uint8 public immutable decimals = 18;
+    uint8 public constant decimals = 18;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    constructor(string memory _name, string memory _symbol) {
-        name = _name;
-        symbol = _symbol;
+    constructor(string memory name_, string memory symbol_) {
+        name = name_;
+        symbol = symbol_;
     }
 
     function mint(address to, uint256 amount) external {
@@ -60,7 +61,7 @@ contract MockERC20 {
     }
 }
 
-contract MockWETH is IWETH9 {
+contract AuditMockWETH is IWETH9 {
     string public constant name = "Wrapped Ether";
     string public constant symbol = "WETH";
     uint8 public constant decimals = 18;
@@ -102,7 +103,7 @@ contract MockWETH is IWETH9 {
     receive() external payable {}
 }
 
-contract MockDestTerminal is IJBTerminal {
+contract AuditMockDestTerminal is IJBTerminal {
     address public lastToken;
     uint256 public lastAmount;
 
@@ -133,6 +134,7 @@ contract MockDestTerminal is IJBTerminal {
         override
         returns (JBAccountingContext memory)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -185,11 +187,11 @@ contract MockDestTerminal is IJBTerminal {
     }
 }
 
-contract PartialFillPool is IUniswapV3Pool {
+contract AuditPartialFillPool is IUniswapV3Pool {
     address internal immutable _token0;
     address internal immutable _token1;
-    MockERC20 internal immutable _zeroForOneOutputToken;
-    MockERC20 internal immutable _oneForZeroOutputToken;
+    AuditMockERC20 internal immutable _zeroForOneOutputToken;
+    AuditMockERC20 internal immutable _oneForZeroOutputToken;
     uint24 public immutable override fee = 3000;
     uint128 public immutable override liquidity = 1_000_000;
 
@@ -199,8 +201,8 @@ contract PartialFillPool is IUniswapV3Pool {
     constructor(
         address token0_,
         address token1_,
-        MockERC20 zeroForOneOutputToken_,
-        MockERC20 oneForZeroOutputToken_,
+        AuditMockERC20 zeroForOneOutputToken_,
+        AuditMockERC20 oneForZeroOutputToken_,
         uint256 amountInUsed_,
         uint256 amountOutGiven_
     ) {
@@ -236,11 +238,11 @@ contract PartialFillPool is IUniswapV3Pool {
     }
 
     function token0() external view override returns (address) {
-        return address(_token0);
+        return _token0;
     }
 
     function token1() external view override returns (address) {
-        return address(_token1);
+        return _token1;
     }
 
     function tickSpacing() external pure override returns (int24) {
@@ -283,14 +285,13 @@ contract PartialFillPool is IUniswapV3Pool {
     }
 }
 
-contract RouterTerminalEdgeCasesTest is Test {
+contract CodexRegistryAddToBalancePartialFillTest is Test {
     IJBDirectory directory;
     IJBPermissions permissions;
     IJBProjects projects;
     IJBTokens tokens;
     IPermit2 permit2;
     IUniswapV3Factory factory;
-    IPoolManager poolManager;
     IWETH9 weth;
 
     JBRouterTerminal router;
@@ -307,8 +308,7 @@ contract RouterTerminalEdgeCasesTest is Test {
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         factory = IUniswapV3Factory(makeAddr("factory"));
-        poolManager = IPoolManager(address(0));
-        weth = IWETH9(address(new MockWETH()));
+        weth = IWETH9(address(new AuditMockWETH()));
 
         vm.etch(address(directory), hex"00");
         vm.etch(address(permissions), hex"00");
@@ -318,24 +318,28 @@ contract RouterTerminalEdgeCasesTest is Test {
         vm.etch(address(factory), hex"00");
 
         router = new JBRouterTerminal(
-            directory, permissions, projects, tokens, permit2, owner, weth, factory, poolManager, address(0)
+            directory,
+            permissions,
+            projects,
+            tokens,
+            permit2,
+            owner,
+            weth,
+            factory,
+            IPoolManager(address(0)),
+            address(0)
         );
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
+
+        vm.prank(owner);
+        registry.setDefaultTerminal(IJBTerminal(address(router)));
     }
 
-    function test_registryAddToBalanceOf_withoutResolvedTerminal_reverts() public {
-        vm.deal(user, 1 ether);
-
-        vm.prank(user);
-        vm.expectRevert();
-        registry.addToBalanceOf{value: 1 ether}(projectId, JBConstants.NATIVE_TOKEN, 1 ether, false, "", "");
-    }
-
-    function test_routerPartialFill_trapsUnusedErc20Input() public {
-        MockERC20 tokenIn = new MockERC20("In", "IN");
-        MockERC20 tokenOut = new MockERC20("Out", "OUT");
-        MockDestTerminal destTerminal = new MockDestTerminal();
-        PartialFillPool pool = new PartialFillPool(
+    function test_registryAddToBalance_partialFillRefundsErc20ToOriginalPayer() public {
+        AuditMockERC20 tokenIn = new AuditMockERC20("In", "IN");
+        AuditMockERC20 tokenOut = new AuditMockERC20("Out", "OUT");
+        AuditMockDestTerminal destTerminal = new AuditMockDestTerminal();
+        AuditPartialFillPool pool = new AuditPartialFillPool(
             address(tokenIn) < address(tokenOut) ? address(tokenIn) : address(tokenOut),
             address(tokenIn) < address(tokenOut) ? address(tokenOut) : address(tokenIn),
             tokenOut,
@@ -376,9 +380,6 @@ contract RouterTerminalEdgeCasesTest is Test {
             abi.encode(address(0))
         );
 
-        vm.prank(owner);
-        registry.setDefaultTerminal(IJBTerminal(address(router)));
-
         tokenIn.mint(user, 1000 ether);
         vm.prank(user);
         tokenIn.approve(address(registry), type(uint256).max);
@@ -391,19 +392,19 @@ contract RouterTerminalEdgeCasesTest is Test {
         );
 
         vm.prank(user);
-        registry.pay(projectId, address(tokenIn), 1000 ether, user, 0, "", metadata);
+        registry.addToBalanceOf(projectId, address(tokenIn), 1000 ether, false, "", metadata);
 
-        assertEq(tokenIn.balanceOf(user), 400 ether, "user should receive the partial-fill refund");
-        assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain the unused ERC20 input");
-        assertEq(tokenIn.balanceOf(address(router)), 0, "router should not retain tokens after refunding leftover");
-        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal received only the filled output");
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
+        assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain leftover after fix");
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router should not retain the leftover");
+        assertEq(tokenIn.balanceOf(user), 400 ether, "payer receives the leftover back via transient storage fix");
     }
 
-    function test_registryNativeInput_partialFillRefundsToUser() public {
-        MockERC20 tokenOut = new MockERC20("Out", "OUT");
-        MockDestTerminal destTerminal = new MockDestTerminal();
+    function test_registryAddToBalance_partialFillRefundsNativeToOriginalPayer() public {
+        AuditMockERC20 tokenOut = new AuditMockERC20("Out", "OUT");
+        AuditMockDestTerminal destTerminal = new AuditMockDestTerminal();
         address normalizedTokenIn = address(weth);
-        PartialFillPool pool = new PartialFillPool(
+        AuditPartialFillPool pool = new AuditPartialFillPool(
             normalizedTokenIn < address(tokenOut) ? normalizedTokenIn : address(tokenOut),
             normalizedTokenIn < address(tokenOut) ? address(tokenOut) : normalizedTokenIn,
             tokenOut,
@@ -443,9 +444,6 @@ contract RouterTerminalEdgeCasesTest is Test {
             abi.encode(address(0))
         );
 
-        vm.prank(owner);
-        registry.setDefaultTerminal(IJBTerminal(address(router)));
-
         bytes memory metadata = JBMetadataResolver.addToMetadata(
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
@@ -455,11 +453,11 @@ contract RouterTerminalEdgeCasesTest is Test {
 
         vm.deal(user, 1000 ether);
         vm.prank(user);
-        registry.pay{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, user, 0, "", metadata);
+        registry.addToBalanceOf{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, false, "", metadata);
 
-        assertEq(user.balance, 400 ether, "user should receive the native token partial-fill refund");
-        assertEq(address(registry).balance, 0, "registry should not retain native token leftovers");
-        assertEq(address(router).balance, 0, "router should not retain native token leftovers");
-        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal received only the filled output");
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
+        assertEq(address(registry).balance, 0, "registry should not retain leftover after fix");
+        assertEq(address(router).balance, 0, "router should not retain raw ETH after refunding leftovers");
+        assertEq(user.balance, 400 ether, "payer receives the native leftover back via transient storage fix");
     }
 }

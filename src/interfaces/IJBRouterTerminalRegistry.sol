@@ -5,8 +5,10 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
+import {IJBPayerTracker} from "./IJBPayerTracker.sol";
+
 /// @notice A registry that maps projects to their preferred router terminal.
-interface IJBRouterTerminalRegistry is IJBTerminal {
+interface IJBRouterTerminalRegistry is IJBTerminal, IJBPayerTracker {
     /// @notice Emitted when a terminal is allowed for use by projects.
     /// @param terminal The terminal that was allowed.
     /// @param caller The address that called the function.

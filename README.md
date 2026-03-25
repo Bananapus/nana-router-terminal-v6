@@ -15,7 +15,7 @@ _If you're having trouble understanding this contract, take a look at the [core 
 | Contract | Description |
 |----------|-------------|
 | `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews payment routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal` and the extra registry management surface via `IJBRouterTerminalRegistry`. |
+| `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal`, `IJBPayerTracker`, and the extra registry management surface via `IJBRouterTerminalRegistry`. |
 
 ## How It Works
 
@@ -131,8 +131,9 @@ nana-router-terminal-v6/
 │   ├── JBRouterTerminal.sol              # Core router terminal
 │   ├── JBRouterTerminalRegistry.sol      # Per-project terminal routing
 │   ├── interfaces/
+│   │   ├── IJBPayerTracker.sol           # Original-payer tracking for refund resolution
 │   │   ├── IJBRouterTerminal.sol         # Router terminal interface
-│   │   ├── IJBRouterTerminalRegistry.sol # Registry interface (extends IJBTerminal)
+│   │   ├── IJBRouterTerminalRegistry.sol # Registry interface (extends IJBTerminal, IJBPayerTracker)
 │   │   └── IWETH9.sol                    # WETH wrapper interface
 │   ├── libraries/
 │   │   └── JBSwapLib.sol                 # Slippage tolerance, impact, and price limit math
