@@ -7,7 +7,7 @@
 - **JBDirectory.** Terminal resolution trusts `DIRECTORY.primaryTerminalOf()` and `DIRECTORY.terminalsOf()`. A compromised directory can redirect funds.
 - **PERMIT2.** Used as fallback for token transfers. Permit2 approvals can be exploited if users have stale allowances.
 - **Owner (Ownable).** Contract owner has no fund access but controls the registry terminal allowlist and default.
-- **`IJBPayerTracker` implementers.** `_resolveRefundTo` in the router terminal queries `IJBPayerTracker(msg.sender).originalPayer()` via try-catch. Any contract that is the `msg.sender` and implements `IJBPayerTracker` can direct leftover refunds to an arbitrary address. This is safe when the caller is a trusted intermediary (e.g. the registry), but a malicious `msg.sender` implementing `IJBPayerTracker` could redirect refunds. The risk is bounded: the caller must have already supplied the funds being routed, so it can only redirect leftovers from its own payment.
+- **`IJBPayerTracker` implementers.** `_resolveRefundWithBackupRecipient` in the router terminal queries `IJBPayerTracker(msg.sender).originalPayer()` via try-catch. Any contract that is the `msg.sender` and implements `IJBPayerTracker` can direct leftover refunds to an arbitrary address. This is safe when the caller is a trusted intermediary (e.g. the registry), but a malicious `msg.sender` implementing `IJBPayerTracker` could redirect refunds. The risk is bounded: the caller must have already supplied the funds being routed, so it can only redirect leftovers from its own payment.
 
 ## 2. Economic / Manipulation Risks
 
@@ -78,7 +78,7 @@ Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` 
 
 ### 8.2 Router trusts `originalPayer()` from any `msg.sender` that implements it
 
-`_resolveRefundTo` calls `IJBPayerTracker(msg.sender).originalPayer()` in a try-catch. If the call succeeds and returns a non-zero address, leftover tokens from partial swap fills are sent to that address instead of the beneficiary or `_msgSender()`. The router does not verify that `msg.sender` is the registry or any specific contract -- it trusts any caller that implements the interface. This is accepted because: (1) the caller (`msg.sender`) is the entity that supplied the funds, so redirecting its own leftovers is a legitimate operation, (2) if the call reverts or returns `address(0)`, the router falls back to the normal beneficiary/`_msgSender()` logic, and (3) decoupling from the registry allows other intermediary contracts (e.g. batch payers, aggregators) to participate in refund routing without requiring changes to the router terminal.
+`_resolveRefundWithBackupRecipient` calls `IJBPayerTracker(msg.sender).originalPayer()` in a try-catch. If the call succeeds and returns a non-zero address, leftover tokens from partial swap fills are sent to that address instead of the beneficiary or `_msgSender()`. The router does not verify that `msg.sender` is the registry or any specific contract -- it trusts any caller that implements the interface. This is accepted because: (1) the caller (`msg.sender`) is the entity that supplied the funds, so redirecting its own leftovers is a legitimate operation, (2) if the call reverts or returns `address(0)`, the router falls back to the normal beneficiary/`_msgSender()` logic, and (3) decoupling from the registry allows other intermediary contracts (e.g. batch payers, aggregators) to participate in refund routing without requiring changes to the router terminal.
 
 ### 8.3 Cashout loop slippage is first-hop only (accepted trade-off)
 

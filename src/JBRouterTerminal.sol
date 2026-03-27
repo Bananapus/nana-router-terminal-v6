@@ -224,7 +224,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: _resolveRefundTo(payable(_msgSender()))
+            refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -275,7 +275,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: _resolveRefundTo(payable(beneficiary))
+            refundTo: _resolveRefundWithBackupRecipient(payable(beneficiary))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -518,7 +518,7 @@ contract JBRouterTerminal is
     /// go to the true payer rather than the intermediary.
     /// @param fallback_ The default refund address to use when no original payer is available.
     /// @return The address to refund partial-fill leftovers to.
-    function _resolveRefundTo(address payable fallback_) internal view returns (address payable) {
+    function _resolveRefundWithBackupRecipient(address payable fallback_) internal view returns (address payable) {
         // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
         if (msg.sender.code.length > 0) {
             // Check if the caller implements IJBPayerTracker and has an original payer set.

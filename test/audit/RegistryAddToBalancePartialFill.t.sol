@@ -285,7 +285,7 @@ contract AuditPartialFillPool is IUniswapV3Pool {
     }
 }
 
-contract CodexRegistryAddToBalancePartialFillTest is Test {
+contract RegistryAddToBalancePartialFillTest is Test {
     IJBDirectory directory;
     IJBPermissions permissions;
     IJBProjects projects;
