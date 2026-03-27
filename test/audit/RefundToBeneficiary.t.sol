@@ -17,7 +17,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
-contract CodexRefundToBeneficiaryTest is Test {
+contract RefundToBeneficiaryTest is Test {
     uint256 internal constant LEFTOVER = 40 ether;
 
     HarnessRouterTerminal internal router;

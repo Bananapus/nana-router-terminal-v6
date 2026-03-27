@@ -9,33 +9,21 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
-import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract AuditMockERC20 {
-    string public name;
-    string public symbol;
-    uint8 public constant decimals = 18;
-
+contract AuditLeftoverMockERC20 {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
-
-    constructor(string memory name_, string memory symbol_) {
-        name = name_;
-        symbol = symbol_;
-    }
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
@@ -61,12 +49,8 @@ contract AuditMockERC20 {
     }
 }
 
-contract AuditMockWETH is IWETH9 {
-    string public constant name = "Wrapped Ether";
-    string public constant symbol = "WETH";
-    uint8 public constant decimals = 18;
+contract AuditLeftoverMockWETH is IWETH9 {
     uint256 public totalSupply;
-
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -103,15 +87,14 @@ contract AuditMockWETH is IWETH9 {
     receive() external payable {}
 }
 
-contract AuditMockDestTerminal is IJBTerminal {
-    address public lastToken;
+contract AuditLeftoverDestTerminal is IJBTerminal {
     uint256 public lastAmount;
 
     function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
 
     function addToBalanceOf(
         uint256,
-        address token,
+        address,
         uint256 amount,
         bool,
         string calldata,
@@ -121,7 +104,6 @@ contract AuditMockDestTerminal is IJBTerminal {
         payable
         override
     {
-        lastToken = token;
         lastAmount = amount;
     }
 
@@ -134,7 +116,6 @@ contract AuditMockDestTerminal is IJBTerminal {
         override
         returns (JBAccountingContext memory)
     {
-        // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -149,7 +130,7 @@ contract AuditMockDestTerminal is IJBTerminal {
 
     function pay(
         uint256,
-        address token,
+        address,
         uint256 amount,
         address,
         uint256,
@@ -161,14 +142,13 @@ contract AuditMockDestTerminal is IJBTerminal {
         override
         returns (uint256)
     {
-        lastToken = token;
         lastAmount = amount;
         return amount;
     }
 
     function previewPayFor(
         uint256,
-        address, /* token — unused in mock, required by IJBTerminal interface */
+        address,
         uint256 amount,
         address,
         bytes calldata
@@ -187,11 +167,10 @@ contract AuditMockDestTerminal is IJBTerminal {
     }
 }
 
-contract AuditPartialFillPool is IUniswapV3Pool {
+contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
     address internal immutable _token0;
     address internal immutable _token1;
-    AuditMockERC20 internal immutable _zeroForOneOutputToken;
-    AuditMockERC20 internal immutable _oneForZeroOutputToken;
+    AuditLeftoverMockERC20 internal immutable _outputToken;
     uint24 public immutable override fee = 3000;
     uint128 public immutable override liquidity = 1_000_000;
 
@@ -201,15 +180,13 @@ contract AuditPartialFillPool is IUniswapV3Pool {
     constructor(
         address token0_,
         address token1_,
-        AuditMockERC20 zeroForOneOutputToken_,
-        AuditMockERC20 oneForZeroOutputToken_,
+        AuditLeftoverMockERC20 outputToken_,
         uint256 amountInUsed_,
         uint256 amountOutGiven_
     ) {
         _token0 = token0_;
         _token1 = token1_;
-        _zeroForOneOutputToken = zeroForOneOutputToken_;
-        _oneForZeroOutputToken = oneForZeroOutputToken_;
+        _outputToken = outputToken_;
         amountInUsed = amountInUsed_;
         amountOutGiven = amountOutGiven_;
     }
@@ -228,12 +205,12 @@ contract AuditPartialFillPool is IUniswapV3Pool {
         if (zeroForOne) {
             JBRouterTerminal(payable(msg.sender))
                 .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
-            _zeroForOneOutputToken.mint(recipient, amountOutGiven);
+            _outputToken.mint(recipient, amountOutGiven);
             return (int256(amountInUsed), -int256(amountOutGiven));
         }
 
         JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-int256(amountOutGiven), int256(amountInUsed), data);
-        _oneForZeroOutputToken.mint(recipient, amountOutGiven);
+        _outputToken.mint(recipient, amountOutGiven);
         return (-int256(amountOutGiven), int256(amountInUsed));
     }
 
@@ -285,21 +262,17 @@ contract AuditPartialFillPool is IUniswapV3Pool {
     }
 }
 
-contract CodexRegistryAddToBalancePartialFillTest is Test {
-    IJBDirectory directory;
-    IJBPermissions permissions;
-    IJBProjects projects;
-    IJBTokens tokens;
-    IPermit2 permit2;
-    IUniswapV3Factory factory;
-    IWETH9 weth;
+contract LeftoverRefundTest is Test {
+    JBRouterTerminal internal router;
+    IJBDirectory internal directory;
+    IJBPermissions internal permissions;
+    IJBProjects internal projects;
+    IJBTokens internal tokens;
+    IPermit2 internal permit2;
+    IUniswapV3Factory internal factory;
+    IWETH9 internal weth;
 
-    JBRouterTerminal router;
-    JBRouterTerminalRegistry registry;
-
-    address owner = makeAddr("owner");
-    address user = makeAddr("user");
-    uint256 projectId = 1;
+    uint256 internal constant PROJECT_ID = 1;
 
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
@@ -308,7 +281,7 @@ contract CodexRegistryAddToBalancePartialFillTest is Test {
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         factory = IUniswapV3Factory(makeAddr("factory"));
-        weth = IWETH9(address(new AuditMockWETH()));
+        weth = IWETH9(address(new AuditLeftoverMockWETH()));
 
         vm.etch(address(directory), hex"00");
         vm.etch(address(permissions), hex"00");
@@ -323,40 +296,108 @@ contract CodexRegistryAddToBalancePartialFillTest is Test {
             projects,
             tokens,
             permit2,
-            owner,
+            makeAddr("owner"),
             weth,
             factory,
             IPoolManager(address(0)),
             address(0)
         );
-        registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
-
-        vm.prank(owner);
-        registry.setDefaultTerminal(IJBTerminal(address(router)));
     }
 
-    function test_registryAddToBalance_partialFillRefundsErc20ToOriginalPayer() public {
-        AuditMockERC20 tokenIn = new AuditMockERC20("In", "IN");
-        AuditMockERC20 tokenOut = new AuditMockERC20("Out", "OUT");
-        AuditMockDestTerminal destTerminal = new AuditMockDestTerminal();
-        AuditPartialFillPool pool = new AuditPartialFillPool(
-            address(tokenIn) < address(tokenOut) ? address(tokenIn) : address(tokenOut),
-            address(tokenIn) < address(tokenOut) ? address(tokenOut) : address(tokenIn),
-            tokenOut,
-            tokenOut,
-            600 ether,
-            100 ether
-        );
+    /// @notice Regression: partial-fill leftovers are refunded to the payer, not the beneficiary.
+    function test_payPartialFillRefundsPayer() public {
+        AuditLeftoverMockERC20 tokenIn = new AuditLeftoverMockERC20();
+        AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
+        AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
+        AuditLeftoverPartialFillPool pool = _deployPool(tokenIn, tokenOut, 600 ether, 100 ether);
 
+        _mockSimpleSwapRoute(tokenIn, tokenOut, destTerminal, pool);
+
+        address alice = makeAddr("alice");
+        address bob = makeAddr("bob");
+
+        tokenIn.mint(alice, 1000 ether);
+        vm.prank(alice);
+        tokenIn.approve(address(router), type(uint256).max);
+
+        vm.prank(alice);
+        router.pay(PROJECT_ID, address(tokenIn), 1000 ether, bob, 0, "", _metadata(tokenOut));
+
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
+        assertEq(tokenIn.balanceOf(alice), 400 ether, "payer receives leftover input");
+        assertEq(tokenIn.balanceOf(bob), 0, "beneficiary receives nothing extra");
+    }
+
+    function test_addToBalanceRefundAlsoLeaksPreexistingRouterBalance() public {
+        AuditLeftoverMockERC20 tokenIn = new AuditLeftoverMockERC20();
+        AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
+        AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
+        AuditLeftoverPartialFillPool pool = _deployPool(tokenIn, tokenOut, 600 ether, 100 ether);
+
+        _mockSimpleSwapRoute(tokenIn, tokenOut, destTerminal, pool);
+
+        address donor = makeAddr("donor");
+        address attacker = makeAddr("attacker");
+
+        tokenIn.mint(donor, 50 ether);
+        vm.prank(donor);
+        tokenIn.transfer(address(router), 50 ether);
+
+        tokenIn.mint(attacker, 1000 ether);
+        vm.prank(attacker);
+        tokenIn.approve(address(router), type(uint256).max);
+
+        vm.prank(attacker);
+        router.addToBalanceOf(PROJECT_ID, address(tokenIn), 1000 ether, false, "", _metadata(tokenOut));
+
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
+        assertEq(
+            tokenIn.balanceOf(attacker), 450 ether, "attacker captures both leftover and preexisting router balance"
+        );
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router balance is fully drained by the refund");
+    }
+
+    function _deployPool(
+        AuditLeftoverMockERC20 tokenIn,
+        AuditLeftoverMockERC20 tokenOut,
+        uint256 amountInUsed,
+        uint256 amountOutGiven
+    )
+        internal
+        returns (AuditLeftoverPartialFillPool pool)
+    {
+        (address token0, address token1) = address(tokenIn) < address(tokenOut)
+            ? (address(tokenIn), address(tokenOut))
+            : (address(tokenOut), address(tokenIn));
+        pool = new AuditLeftoverPartialFillPool(token0, token1, tokenOut, amountInUsed, amountOutGiven);
+    }
+
+    function _metadata(AuditLeftoverMockERC20 tokenOut) internal view returns (bytes memory metadata) {
+        metadata = JBMetadataResolver.addToMetadata(
+            "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
+        );
+        metadata = JBMetadataResolver.addToMetadata(
+            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether)
+        );
+    }
+
+    function _mockSimpleSwapRoute(
+        AuditLeftoverMockERC20 tokenIn,
+        AuditLeftoverMockERC20 tokenOut,
+        AuditLeftoverDestTerminal destTerminal,
+        AuditLeftoverPartialFillPool pool
+    )
+        internal
+    {
         vm.mockCall(address(tokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
         vm.mockCall(
             address(directory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, address(tokenIn))),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(tokenIn))),
             abi.encode(address(0))
         );
         vm.mockCall(
             address(directory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, address(tokenOut))),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(tokenOut))),
             abi.encode(address(destTerminal))
         );
         vm.mockCall(
@@ -379,85 +420,5 @@ contract CodexRegistryAddToBalancePartialFillTest is Test {
             abi.encodeCall(IUniswapV3Factory.getPool, (address(tokenIn), address(tokenOut), uint24(100))),
             abi.encode(address(0))
         );
-
-        tokenIn.mint(user, 1000 ether);
-        vm.prank(user);
-        tokenIn.approve(address(registry), type(uint256).max);
-
-        bytes memory metadata = JBMetadataResolver.addToMetadata(
-            "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
-        );
-        metadata = JBMetadataResolver.addToMetadata(
-            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether)
-        );
-
-        vm.prank(user);
-        registry.addToBalanceOf(projectId, address(tokenIn), 1000 ether, false, "", metadata);
-
-        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
-        assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain leftover after fix");
-        assertEq(tokenIn.balanceOf(address(router)), 0, "router should not retain the leftover");
-        assertEq(tokenIn.balanceOf(user), 400 ether, "payer receives the leftover back via transient storage fix");
-    }
-
-    function test_registryAddToBalance_partialFillRefundsNativeToOriginalPayer() public {
-        AuditMockERC20 tokenOut = new AuditMockERC20("Out", "OUT");
-        AuditMockDestTerminal destTerminal = new AuditMockDestTerminal();
-        address normalizedTokenIn = address(weth);
-        AuditPartialFillPool pool = new AuditPartialFillPool(
-            normalizedTokenIn < address(tokenOut) ? normalizedTokenIn : address(tokenOut),
-            normalizedTokenIn < address(tokenOut) ? address(tokenOut) : normalizedTokenIn,
-            tokenOut,
-            tokenOut,
-            600 ether,
-            100 ether
-        );
-
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, JBConstants.NATIVE_TOKEN)),
-            abi.encode(address(0))
-        );
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, address(tokenOut))),
-            abi.encode(address(destTerminal))
-        );
-        vm.mockCall(
-            address(factory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (normalizedTokenIn, address(tokenOut), uint24(3000))),
-            abi.encode(address(pool))
-        );
-        vm.mockCall(
-            address(factory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (normalizedTokenIn, address(tokenOut), uint24(500))),
-            abi.encode(address(0))
-        );
-        vm.mockCall(
-            address(factory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (normalizedTokenIn, address(tokenOut), uint24(10_000))),
-            abi.encode(address(0))
-        );
-        vm.mockCall(
-            address(factory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (normalizedTokenIn, address(tokenOut), uint24(100))),
-            abi.encode(address(0))
-        );
-
-        bytes memory metadata = JBMetadataResolver.addToMetadata(
-            "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
-        );
-        metadata = JBMetadataResolver.addToMetadata(
-            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(100 ether)
-        );
-
-        vm.deal(user, 1000 ether);
-        vm.prank(user);
-        registry.addToBalanceOf{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, false, "", metadata);
-
-        assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
-        assertEq(address(registry).balance, 0, "registry should not retain leftover after fix");
-        assertEq(address(router).balance, 0, "router should not retain raw ETH after refunding leftovers");
-        assertEq(user.balance, 400 ether, "payer receives the native leftover back via transient storage fix");
     }
 }
