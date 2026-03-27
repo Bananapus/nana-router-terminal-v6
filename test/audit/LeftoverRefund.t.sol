@@ -304,8 +304,8 @@ contract LeftoverRefundTest is Test {
         );
     }
 
-    /// @notice Regression: partial-fill leftovers are refunded to the payer, not the beneficiary.
-    function test_payPartialFillRefundsPayer() public {
+    /// @notice Partial-fill leftovers from pay() are refunded to the beneficiary.
+    function test_payPartialFillRefundsBeneficiary() public {
         AuditLeftoverMockERC20 tokenIn = new AuditLeftoverMockERC20();
         AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
         AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
@@ -324,8 +324,8 @@ contract LeftoverRefundTest is Test {
         router.pay(PROJECT_ID, address(tokenIn), 1000 ether, bob, 0, "", _metadata(tokenOut));
 
         assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
-        assertEq(tokenIn.balanceOf(alice), 400 ether, "payer receives leftover input");
-        assertEq(tokenIn.balanceOf(bob), 0, "beneficiary receives nothing extra");
+        assertEq(tokenIn.balanceOf(bob), 400 ether, "beneficiary receives leftover input");
+        assertEq(tokenIn.balanceOf(alice), 0, "payer receives nothing extra");
     }
 
     function test_addToBalanceRefundAlsoLeaksPreexistingRouterBalance() public {

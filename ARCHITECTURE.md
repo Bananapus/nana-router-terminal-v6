@@ -63,7 +63,7 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
   │         │
   │         ├─ If native ETH input: wrap any remaining raw ETH (partial fills)
   │         ├─ If native ETH output: unwrap WETH → ETH (WETH.withdraw)
-  │         └─ Return leftover input tokens via _resolveRefundTo (checks msg.sender's IJBPayerTracker.originalPayer() via try-catch, falls back to _msgSender() for both pay() and addToBalanceOf())
+  │         └─ Return leftover input tokens via _resolveRefundWithBackupRecipient (checks msg.sender's IJBPayerTracker.originalPayer() via try-catch, falls back to beneficiary for pay() or _msgSender() for addToBalanceOf())
   │
   ├─ Approve destination terminal for output tokens (or set msg.value for native)
   └─ Forward to destTerminal.pay() → return beneficiary token count
@@ -104,7 +104,7 @@ terminal source for loan sizing, debt normalization, or any other decimals-depen
 
 **Why the registry pattern.** `JBRouterTerminalRegistry` lets project owners lock a specific `JBRouterTerminal` instance for their project and manage Permit2 approvals in one place. This provides a stable entry point: if the router implementation is upgraded, the registry can be pointed to the new instance without changing the project's directory entry. It also gates which router terminals are allowed, preventing untrusted implementations from being set.
 
-**Why `IJBPayerTracker` is a separate interface.** The router terminal needs to know the original payer when called through an intermediary so it can return leftover tokens from partial swap fills to the right address. Rather than coupling the router to `IJBRouterTerminalRegistry` specifically, the refund resolution logic (`_resolveRefundTo`) queries `IJBPayerTracker(msg.sender).originalPayer()` via a try-catch. This means any contract that implements `IJBPayerTracker` -- not just the registry -- can act as a forwarding intermediary. The registry inherits `IJBPayerTracker` through `IJBRouterTerminalRegistry`, keeping backward compatibility while opening the door for other intermediary patterns.
+**Why `IJBPayerTracker` is a separate interface.** The router terminal needs to know the original payer when called through an intermediary so it can return leftover tokens from partial swap fills to the right address. Rather than coupling the router to `IJBRouterTerminalRegistry` specifically, the refund resolution logic (`_resolveRefundWithBackupRecipient`) queries `IJBPayerTracker(msg.sender).originalPayer()` via a try-catch. This means any contract that implements `IJBPayerTracker` -- not just the registry -- can act as a forwarding intermediary. The registry inherits `IJBPayerTracker` through `IJBRouterTerminalRegistry`, keeping backward compatibility while opening the door for other intermediary patterns.
 
 **Why liquidity-based pool selection instead of quote comparison.** Comparing actual output quotes across V3 and V4 would require executing (or simulating) swaps on both — expensive on-chain and complex for V4 where swaps must go through `PoolManager.unlock()`. Comparing in-range liquidity is a single `liquidity()` or `getLiquidity()` read per pool, is gas-cheap, and strongly correlates with execution quality for typical swap sizes.
 
