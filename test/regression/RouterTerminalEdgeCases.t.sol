@@ -26,6 +26,7 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 contract MockERC20 {
     string public name;
     string public symbol;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint8 public immutable decimals = 18;
 
     mapping(address => uint256) public balanceOf;
@@ -61,8 +62,11 @@ contract MockERC20 {
 }
 
 contract MockWETH is IWETH9 {
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant name = "Wrapped Ether";
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant symbol = "WETH";
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     uint8 public constant decimals = 18;
     uint256 public totalSupply;
 
@@ -133,6 +137,7 @@ contract MockDestTerminal is IJBTerminal {
         override
         returns (JBAccountingContext memory)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -177,7 +182,7 @@ contract MockDestTerminal is IJBTerminal {
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory hookSpecifications)
     {
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0), amount, 0, hookSpecifications);
+        return (JBRuleset({ cycleNumber: 0, id: 0, basedOnId: 0, start: 0, duration: 0, weight: 0, weightCutPercent: 0, approvalHook: IJBRulesetApprovalHook(address(0)), metadata: 0 }), amount, 0, hookSpecifications);
     }
 
     function supportsInterface(bytes4) external pure override returns (bool) {
@@ -186,14 +191,22 @@ contract MockDestTerminal is IJBTerminal {
 }
 
 contract PartialFillPool is IUniswapV3Pool {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token0;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token1;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     MockERC20 internal immutable _zeroForOneOutputToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     MockERC20 internal immutable _oneForZeroOutputToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint24 public immutable override fee = 3000;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint128 public immutable override liquidity = 1_000_000;
 
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountInUsed;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountOutGiven;
 
     constructor(
@@ -224,14 +237,17 @@ contract PartialFillPool is IUniswapV3Pool {
         returns (int256 amount0, int256 amount1)
     {
         if (zeroForOne) {
-            JBRouterTerminal(payable(msg.sender))
-                .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
             _zeroForOneOutputToken.mint(recipient, amountOutGiven);
+            // forge-lint: disable-next-line(unsafe-typecast)
             return (int256(amountInUsed), -int256(amountOutGiven));
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-int256(amountOutGiven), int256(amountInUsed), data);
         _oneForZeroOutputToken.mint(recipient, amountOutGiven);
+        // forge-lint: disable-next-line(unsafe-typecast)
         return (-int256(amountOutGiven), int256(amountInUsed));
     }
 

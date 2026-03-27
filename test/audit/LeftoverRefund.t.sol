@@ -116,6 +116,7 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         override
         returns (JBAccountingContext memory)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -159,7 +160,7 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory hookSpecifications)
     {
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0), amount, 0, hookSpecifications);
+        return (JBRuleset({ cycleNumber: 0, id: 0, basedOnId: 0, start: 0, duration: 0, weight: 0, weightCutPercent: 0, approvalHook: IJBRulesetApprovalHook(address(0)), metadata: 0 }), amount, 0, hookSpecifications);
     }
 
     function supportsInterface(bytes4) external pure override returns (bool) {
@@ -168,13 +169,20 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
 }
 
 contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token0;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token1;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     AuditLeftoverMockERC20 internal immutable _outputToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint24 public immutable override fee = 3000;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint128 public immutable override liquidity = 1_000_000;
 
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountInUsed;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountOutGiven;
 
     constructor(
@@ -204,13 +212,17 @@ contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
     {
         if (zeroForOne) {
             JBRouterTerminal(payable(msg.sender))
+            // forge-lint: disable-next-line(unsafe-typecast)
                 .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
             _outputToken.mint(recipient, amountOutGiven);
+            // forge-lint: disable-next-line(unsafe-typecast)
             return (int256(amountInUsed), -int256(amountOutGiven));
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-int256(amountOutGiven), int256(amountInUsed), data);
         _outputToken.mint(recipient, amountOutGiven);
+        // forge-lint: disable-next-line(unsafe-typecast)
         return (-int256(amountOutGiven), int256(amountInUsed));
     }
 
@@ -341,6 +353,7 @@ contract LeftoverRefundTest is Test {
 
         tokenIn.mint(donor, 50 ether);
         vm.prank(donor);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         tokenIn.transfer(address(router), 50 ether);
 
         tokenIn.mint(attacker, 1000 ether);

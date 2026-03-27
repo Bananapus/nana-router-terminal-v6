@@ -14,7 +14,6 @@ import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataRes
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
@@ -27,6 +26,7 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 contract AuditMockERC20 {
     string public name;
     string public symbol;
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     uint8 public constant decimals = 18;
 
     mapping(address => uint256) public balanceOf;
@@ -62,8 +62,11 @@ contract AuditMockERC20 {
 }
 
 contract AuditMockWETH is IWETH9 {
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant name = "Wrapped Ether";
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     string public constant symbol = "WETH";
+    // forge-lint: disable-next-line(screaming-snake-case-const)
     uint8 public constant decimals = 18;
     uint256 public totalSupply;
 
@@ -179,7 +182,22 @@ contract AuditMockDestTerminal is IJBTerminal {
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory hookSpecifications)
     {
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0), amount, 0, hookSpecifications);
+        return (
+            JBRuleset({
+                cycleNumber: 0,
+                id: 0,
+                basedOnId: 0,
+                start: 0,
+                duration: 0,
+                weight: 0,
+                weightCutPercent: 0,
+                approvalHook: IJBRulesetApprovalHook(address(0)),
+                metadata: 0
+            }),
+            amount,
+            0,
+            hookSpecifications
+        );
     }
 
     function supportsInterface(bytes4) external pure override returns (bool) {
@@ -188,14 +206,22 @@ contract AuditMockDestTerminal is IJBTerminal {
 }
 
 contract AuditPartialFillPool is IUniswapV3Pool {
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token0;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address internal immutable _token1;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     AuditMockERC20 internal immutable _zeroForOneOutputToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     AuditMockERC20 internal immutable _oneForZeroOutputToken;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint24 public immutable override fee = 3000;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint128 public immutable override liquidity = 1_000_000;
 
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountInUsed;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint256 public immutable amountOutGiven;
 
     constructor(
@@ -226,14 +252,17 @@ contract AuditPartialFillPool is IUniswapV3Pool {
         returns (int256 amount0, int256 amount1)
     {
         if (zeroForOne) {
-            JBRouterTerminal(payable(msg.sender))
-                .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
             _zeroForOneOutputToken.mint(recipient, amountOutGiven);
+            // forge-lint: disable-next-line(unsafe-typecast)
             return (int256(amountInUsed), -int256(amountOutGiven));
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-int256(amountOutGiven), int256(amountInUsed), data);
         _oneForZeroOutputToken.mint(recipient, amountOutGiven);
+        // forge-lint: disable-next-line(unsafe-typecast)
         return (-int256(amountOutGiven), int256(amountInUsed));
     }
 
