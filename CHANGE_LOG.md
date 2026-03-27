@@ -157,6 +157,13 @@ In v6, when a Permit2 allowance call fails during `_acceptFundsFor()`, an event 
 
 ## 3. Event Changes
 
+### 3.0 Indexer Notes
+
+This repo is the direct replacement for v5 swap-terminal indexing:
+- all registry event families moved from `JBSwapTerminalRegistry_*` to `JBRouterTerminalRegistry_*`;
+- registry events now include `caller`;
+- route discovery is dynamic, so do not assume one fixed output token or one manually-registered default pool per project.
+
 ### 3.1 Registry Events Renamed
 All events were renamed from `JBSwapTerminalRegistry_*` to `JBRouterTerminalRegistry_*`.
 

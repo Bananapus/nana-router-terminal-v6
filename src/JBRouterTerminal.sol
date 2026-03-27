@@ -275,7 +275,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: _resolveRefundTo(payable(beneficiary))
+            refundTo: _resolveRefundTo(payable(_msgSender()))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
