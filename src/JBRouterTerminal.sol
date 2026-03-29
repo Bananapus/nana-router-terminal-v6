@@ -852,12 +852,6 @@ contract JBRouterTerminal is
     {
         address normalizedTokenIn = _normalize(tokenIn);
 
-        // Snapshot the input token balance before the swap so we only refund the delta from THIS operation,
-        // not any pre-existing balance that may belong to other callers or unrelated deposits.
-        uint256 inputBalanceBefore = (tokenIn == JBConstants.NATIVE_TOKEN)
-            ? address(this).balance + IERC20(normalizedTokenIn).balanceOf(address(this))
-            : IERC20(normalizedTokenIn).balanceOf(address(this));
-
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
@@ -876,23 +870,13 @@ contract JBRouterTerminal is
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
 
-        // Compute leftover as the delta between post-swap and pre-swap balances for the input token.
-        // Only refund what THIS swap operation left behind, not any pre-existing contract balance.
-        uint256 inputBalanceAfter = (tokenIn == JBConstants.NATIVE_TOKEN)
-            ? address(this).balance + IERC20(normalizedTokenIn).balanceOf(address(this))
-            : IERC20(normalizedTokenIn).balanceOf(address(this));
-        uint256 leftover = inputBalanceAfter > inputBalanceBefore ? inputBalanceAfter - inputBalanceBefore : 0;
-        if (leftover > 0) {
-            if (tokenIn == JBConstants.NATIVE_TOKEN) {
-                // Unwrap WETH portion if needed (raw ETH was already wrapped above).
-                uint256 wethBalance = IERC20(normalizedTokenIn).balanceOf(address(this));
-                if (wethBalance > 0 && wethBalance >= leftover) {
-                    WETH.withdraw(leftover);
-                } else if (wethBalance > 0) {
-                    WETH.withdraw(wethBalance);
-                }
-            }
-            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: leftover});
+        // Return leftover input tokens to payer. The router is stateless — it should never hold funds between
+        // transactions. The full remaining balance is refunded (not a delta) so that any accidentally-sent tokens
+        // are recovered rather than permanently stuck. This is intentional: recovery > lockup.
+        uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
+        if (balanceAfter > 0) {
+            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(balanceAfter);
+            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: balanceAfter});
         }
     }
 

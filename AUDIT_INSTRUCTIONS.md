@@ -187,7 +187,7 @@ The most complex and highest-value code path. Follow a payment from `pay()` thro
 7. `_beforeTransferFor()` -- allowance setup before forwarding
 8. `destTerminal.pay()` -- final forwarding
 
-**Key question:** Can any combination of inputs cause tokens to be stuck in the router? The contract has no sweep/rescue function and an empty `receive()`.
+**Key question:** Can any combination of inputs cause tokens to be stuck in the router? The contract has no sweep/rescue function. This is intentional — the router is stateless by design. After each swap, the full remaining input token balance is refunded to the caller. If tokens are accidentally sent to the contract (e.g., via `receive()` or direct ERC-20 transfers), they are absorbed into the next caller's refund. This is a deliberate design choice: recovering accidentally-sent funds is preferable to locking them permanently, and there should never be a persistent balance to protect.
 
 ### Callback Verification
 
