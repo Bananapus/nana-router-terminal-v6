@@ -192,7 +192,7 @@ routerTerminal.pay(projectId, usdc, 1000e6, beneficiary, 0, "swap with quote", m
 
 If no `quoteForSwap` is provided, the terminal calculates one automatically:
 - **V3 pools**: TWAP oracle with a configurable window (default 10 minutes, capped by oldest observation). Reverts if no observation history exists.
-- **V4 pools**: Spot tick price (V4 vanilla pools have no built-in TWAP oracle).
+- **V4 pools**: The terminal first attempts a 30-second TWAP via the pool's oracle hook. If no oracle hook exists or the call fails, it falls back to the instantaneous spot tick. Both use the sigmoid slippage formula.
 - **Both**: Dynamic sigmoid slippage tolerance based on estimated price impact and pool fee. Range: 2% minimum to 88% maximum ceiling.
 
 ## Supported Chains
@@ -219,7 +219,7 @@ Each chain is configured with the appropriate WETH, Uniswap V3 Factory, and V4 P
 - The terminal never holds a token balance between transactions. After every swap, all output tokens are forwarded to the destination terminal, and leftover input tokens from partial fills are returned to the payer.
 - Pool discovery is dynamic -- the terminal searches V3 and V4 pools at runtime. If pool liquidity changes between discovery and execution, slippage protection prevents excessive losses.
 - The `receive()` function accepts ETH from any sender. This is required because ETH arrives from multiple sources: WETH unwraps, cash out reclaims from project terminals, and V4 PoolManager takes. The terminal processes all received ETH within the same transaction.
-- TWAP fallback: V3 pools with no TWAP observation history (`oldestObservation == 0`) will cause the transaction to revert with `JBRouterTerminal_NoObservationHistory()`. V4 uses spot price and does not require observations.
+- TWAP fallback: V3 pools with no TWAP observation history (`oldestObservation == 0`) will cause the transaction to revert with `JBRouterTerminal_NoObservationHistory()`. V4 attempts a TWAP via the pool's oracle hook first, falling back to spot price if unavailable.
 - Uniswap V4 requires `cancun` EVM version (transient storage opcodes). On chains without EIP-1153 support, the terminal falls back to V3-only routing.
 - Credit cashouts require the payer to grant `TRANSFER_CREDITS` permission (ID 13) to the router terminal address. Without this, credit-based routing will revert.
 - The `_cashOutLoop` recursively cashes out JB project tokens. Deeply nested project token chains (project A's token backed by project B's token backed by project C's token, etc.) will consume more gas per level of recursion.

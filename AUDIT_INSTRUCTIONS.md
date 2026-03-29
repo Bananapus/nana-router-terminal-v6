@@ -83,7 +83,7 @@ Quote priority in `_pickPoolAndQuote()`:
 
 1. **User-provided quote** -- If `quoteForSwap` metadata key is present, its value is used as `minAmountOut` directly. This is the recommended path for all swaps, especially V4.
 2. **V3 TWAP** -- `_getV3TwapQuote()` uses `OracleLibrary.consult()` with a 10-minute window (capped to oldest available observation). Computes `minAmountOut = twapQuote * (1 - sigmoidSlippage)`.
-3. **V4 spot price** -- `_getV4SpotQuote()` reads instantaneous tick from `getSlot0()`. Same sigmoid slippage formula applied. This is manipulable within a single block.
+3. **V4 TWAP-then-spot** -- `_getV4Quote()` first attempts a 30-second TWAP from the pool's oracle hook (e.g., `IGeomeanOracle.observe()`). If no oracle hook exists or the call fails, it falls back to the instantaneous tick from `getSlot0()`. Same sigmoid slippage formula applied to both paths. The spot fallback is manipulable within a single block.
 
 ### Sigmoid Slippage Formula
 
@@ -123,7 +123,7 @@ When the input token is a JB project token (detected via `TOKENS.projectIdOf()` 
 
 **Iteration cap:** `_MAX_CASHOUT_ITERATIONS = 20`. Exceeding this reverts with `JBRouterTerminal_CashOutLoopLimit()`.
 
-**Slippage:** The `cashOutMinReclaimed` metadata value is applied only to the first cashout step. Subsequent steps have zero per-step minimum. The final output amount is validated by the destination terminal's `minReturnedTokens` parameter.
+**Slippage:** The `cashOutMinReclaimed` metadata value is applied to the first cashout step. Subsequent steps use proportionally scaled slippage protection based on the first step's ratio. The final output amount is also validated by the destination terminal's `minReturnedTokens` parameter.
 
 **Circular dependency:** If token A cashes out to token B and token B cashes out to token A, the loop hits the 20-iteration cap and reverts cleanly (no fund loss, only gas wasted).
 
@@ -298,7 +298,7 @@ No prior formal audit with finding IDs has been conducted on this codebase. All 
 
 | Pattern | Where to Look | Why It's Dangerous |
 |---------|--------------|-------------------|
-| V4 spot price as TWAP fallback | `_getV4SpotQuote()` | V4 pools lack on-chain TWAP. Spot price is manipulable within a block. The sigmoid slippage mitigates but doesn't eliminate. |
+| V4 oracle-then-spot fallback | `_getV4Quote()` | V4 pools attempt a 30-second TWAP via the oracle hook first. If unavailable, the spot price fallback is manipulable within a block. The sigmoid slippage mitigates but doesn't eliminate. |
 | Silent TWAP window degradation | `_getV3TwapQuote()` | If `oldestObservation < twapWindow`, the window is silently capped. A 10-second observation produces a near-spot quote labeled as "TWAP." |
 | Partial swap leftover refund | `_handleSwap()` | Leftover tokens are refunded to `_msgSender()`. If the caller is a contract, the refund must be receivable. Verify ETH refund doesn't fail silently. |
 | Stateless design assumption | All of `JBRouterTerminal` | No persistent balances. If any code path fails to forward or refund tokens, they're stuck permanently. No sweep function exists. |

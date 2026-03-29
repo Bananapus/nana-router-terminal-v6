@@ -116,6 +116,7 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         override
         returns (JBAccountingContext memory)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
@@ -159,7 +160,22 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory hookSpecifications)
     {
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0), amount, 0, hookSpecifications);
+        return (
+            JBRuleset({
+                cycleNumber: 0,
+                id: 0,
+                basedOnId: 0,
+                start: 0,
+                duration: 0,
+                weight: 0,
+                weightCutPercent: 0,
+                approvalHook: IJBRulesetApprovalHook(address(0)),
+                metadata: 0
+            }),
+            amount,
+            0,
+            hookSpecifications
+        );
     }
 
     function supportsInterface(bytes4) external pure override returns (bool) {
@@ -168,14 +184,16 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
 }
 
 contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
-    address internal immutable _token0;
-    address internal immutable _token1;
-    AuditLeftoverMockERC20 internal immutable _outputToken;
+    address internal immutable _TOKEN0;
+    address internal immutable _TOKEN1;
+    AuditLeftoverMockERC20 internal immutable _OUTPUT_TOKEN;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint24 public immutable override fee = 3000;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint128 public immutable override liquidity = 1_000_000;
 
-    uint256 public immutable amountInUsed;
-    uint256 public immutable amountOutGiven;
+    uint256 public immutable AMOUNT_IN_USED;
+    uint256 public immutable AMOUNT_OUT_GIVEN;
 
     constructor(
         address token0_,
@@ -184,11 +202,11 @@ contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
         uint256 amountInUsed_,
         uint256 amountOutGiven_
     ) {
-        _token0 = token0_;
-        _token1 = token1_;
-        _outputToken = outputToken_;
-        amountInUsed = amountInUsed_;
-        amountOutGiven = amountOutGiven_;
+        _TOKEN0 = token0_;
+        _TOKEN1 = token1_;
+        _OUTPUT_TOKEN = outputToken_;
+        AMOUNT_IN_USED = amountInUsed_;
+        AMOUNT_OUT_GIVEN = amountOutGiven_;
     }
 
     function swap(
@@ -202,24 +220,28 @@ contract AuditLeftoverPartialFillPool is IUniswapV3Pool {
         override
         returns (int256 amount0, int256 amount1)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 signedIn = int256(AMOUNT_IN_USED);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 signedOut = int256(AMOUNT_OUT_GIVEN);
+
         if (zeroForOne) {
-            JBRouterTerminal(payable(msg.sender))
-                .uniswapV3SwapCallback(int256(amountInUsed), -int256(amountOutGiven), data);
-            _outputToken.mint(recipient, amountOutGiven);
-            return (int256(amountInUsed), -int256(amountOutGiven));
+            JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(signedIn, -signedOut, data);
+            _OUTPUT_TOKEN.mint(recipient, AMOUNT_OUT_GIVEN);
+            return (signedIn, -signedOut);
         }
 
-        JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-int256(amountOutGiven), int256(amountInUsed), data);
-        _outputToken.mint(recipient, amountOutGiven);
-        return (-int256(amountOutGiven), int256(amountInUsed));
+        JBRouterTerminal(payable(msg.sender)).uniswapV3SwapCallback(-signedOut, signedIn, data);
+        _OUTPUT_TOKEN.mint(recipient, AMOUNT_OUT_GIVEN);
+        return (-signedOut, signedIn);
     }
 
     function token0() external view override returns (address) {
-        return _token0;
+        return _TOKEN0;
     }
 
     function token1() external view override returns (address) {
-        return _token1;
+        return _TOKEN1;
     }
 
     function tickSpacing() external pure override returns (int24) {
@@ -341,6 +363,7 @@ contract LeftoverRefundTest is Test {
 
         tokenIn.mint(donor, 50 ether);
         vm.prank(donor);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         tokenIn.transfer(address(router), 50 ether);
 
         tokenIn.mint(attacker, 1000 ether);

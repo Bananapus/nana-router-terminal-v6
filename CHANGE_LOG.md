@@ -83,7 +83,7 @@ New V4-specific components:
 - `IPoolManager POOL_MANAGER` immutable (can be `address(0)` if V4 is unavailable).
 - `IUnlockCallback` interface implemented via `unlockCallback()`.
 - `_executeV4Swap()`, `_settleV4()`, `_takeV4()`, `_discoverV4Pool()` internal functions.
-- `_getV4SpotQuote()` — uses instantaneous spot price with sigmoid slippage (security note: not MEV-resistant; users should provide `quoteForSwap` metadata).
+- `_getV4Quote()` — first attempts a 30-second TWAP from the pool's oracle hook (e.g., `IGeomeanOracle.observe()`); falls back to instantaneous spot price if no oracle hook exists or the call fails. Both paths apply sigmoid slippage (security note: spot fallback is not MEV-resistant; users should provide `quoteForSwap` metadata).
 - `_V4_FEES` and `_V4_TICK_SPACINGS` arrays for vanilla V4 pool search.
 
 ### 2.2 Automatic Pool Discovery
@@ -289,7 +289,7 @@ v5 contained both `JBSwapTerminal.sol` and `JBSwapTerminal5_1.sol` (a minor revi
 
 ### 6.14 `_pickPoolAndQuote` Redesigned
 - **v5:** Looked up stored pools from `_poolFor` mappings. If no user quote was provided, used project-specific TWAP windows with fallback to slot0 for pools with no observations.
-- **v6:** Auto-discovers pools via `_discoverPool()`. If no user quote is provided, dispatches to `_getV3TwapQuote()` (for V3 pools, using a fixed 10-minute TWAP window) or `_getV4SpotQuote()` (for V4 pools, using spot price). Reverts with `JBRouterTerminal_NoPoolFound` if no pool exists (v5 reverted with `JBSwapTerminal_NoDefaultPoolDefined`).
+- **v6:** Auto-discovers pools via `_discoverPool()`. If no user quote is provided, dispatches to `_getV3TwapQuote()` (for V3 pools, using a fixed 10-minute TWAP window) or `_getV4Quote()` (for V4 pools, attempting oracle TWAP first then falling back to spot price). Reverts with `JBRouterTerminal_NoPoolFound` if no pool exists (v5 reverted with `JBSwapTerminal_NoDefaultPoolDefined`).
 
 ### 6.15 New Metadata Keys
 - `cashOutSource` — specifies a source project ID and credit amount for credit-based cashouts.

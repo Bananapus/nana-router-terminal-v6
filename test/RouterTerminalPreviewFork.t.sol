@@ -286,10 +286,12 @@ contract RouterTerminalPreviewForkTest is Test {
         internal
         returns (uint256 projectId)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 baseCurrency = uint32(uint160(acceptedToken));
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: cashOutTaxRate,
-            baseCurrency: uint32(uint160(acceptedToken)),
+            baseCurrency: baseCurrency,
             pausePay: false,
             pauseCreditTransfers: false,
             allowOwnerMinting: false,
@@ -319,8 +321,9 @@ contract RouterTerminalPreviewForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = new JBFundAccessLimitGroup[](0);
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
-        tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 tokenCurrency = uint32(uint160(acceptedToken));
+        tokensToAccept[0] = JBAccountingContext({token: acceptedToken, decimals: decimals, currency: tokenCurrency});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});

@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
-import "../../src/JBRouterTerminal.sol";
-import "../../src/interfaces/IJBPayerTracker.sol";
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
+import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+
+import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
+import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
+import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 // ---------------------------------------------------------------------------
 // Harness – exposes the internal `_resolveRefundTo` for direct testing.

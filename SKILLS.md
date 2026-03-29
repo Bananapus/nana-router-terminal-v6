@@ -195,7 +195,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 - When `tokenIn == NATIVE_TOKEN`, the terminal wraps ETH to WETH before swapping. When the output is `NATIVE_TOKEN`, it unwraps WETH after swapping.
 - The `receive()` function accepts ETH from any sender. This is necessary because ETH arrives from WETH unwraps, cashout reclaims from project terminals, and V4 PoolManager takes. The terminal handles all ETH within the same transaction.
 - **V3 TWAP**: Reverts with `JBRouterTerminal_NoObservationHistory()` when a V3 pool has no observation history, or with `JBRouterTerminal_InsufficientTwapHistory()` when the oldest observation is less than `MIN_TWAP_WINDOW` (120 seconds). The TWAP window is capped by the pool's oldest observation if shorter than 10 minutes.
-- **V4 spot price**: V4 vanilla pools have no built-in TWAP oracle. The terminal uses the current spot tick with the same sigmoid slippage formula.
+- **V4 price**: V4 pools: the terminal first attempts to read a 30-second TWAP from the pool's oracle hook (e.g., `IGeomeanOracle.observe()`). If no oracle hook exists or the call fails, it falls back to the instantaneous spot tick. Both use the sigmoid slippage formula.
 - **V4 requires cancun EVM**: Chains without EIP-1153 (transient storage) cannot use V4 routing. If `POOL_MANAGER` is `address(0)`, V4 discovery is skipped entirely.
 - **Preview estimates**: `previewPayFor()` returns exact values for direct and wrap-unwrap routes, and best-effort estimates for swap routes using current pool state or caller-provided quotes.
 - The `JBRouterTerminalRegistry` handles token custody during delegation -- it transfers tokens from the payer to itself, then approves and forwards to the underlying terminal.
@@ -206,7 +206,7 @@ The router uses `_route` (mutative) and `_previewRoute` (view) as the top-level 
 - **Credit cashouts**: When using `cashOutSource` metadata, the payer must have granted `TRANSFER_CREDITS` permission (ID 13) to the router terminal for the source project. The router calls `TOKENS.transferCreditsFrom()` to pull credits.
 - **Cashout loop depth**: The `_cashOutLoop` iterates through JB project token chains with a cap of 20 iterations (`_MAX_CASHOUT_ITERATIONS`). Exceeding this limit reverts with `JBRouterTerminal_CashOutLoopLimit()`.
 - **V3 callback verification**: The `uniswapV3SwapCallback` verifies the caller by reading the pool's `fee()` and checking `FACTORY.getPool()`. This is standard V3 security.
-- **V4 amount overflow**: Both `_getV3TwapQuote` and `_getV4SpotQuote` revert if `amount > type(uint128).max` because `OracleLibrary.getQuoteAtTick` requires `uint128`.
+- **V4 amount overflow**: Both `_getV3TwapQuote` and `_getV4Quote` revert if `amount > type(uint128).max` because `OracleLibrary.getQuoteAtTick` requires `uint128`.
 - **Disallowing the default terminal**: `disallowTerminal()` clears `defaultTerminal` if it matches the terminal being disallowed.
 - **Locking snapshots default**: `lockTerminalFor(projectId, expectedTerminal)` snapshots the current `defaultTerminal` into `_terminalOf[projectId]` if no explicit terminal was set, preventing future default changes from affecting locked projects. The `expectedTerminal` parameter prevents race conditions where the default changes between transaction submission and execution.
 - **Cashout loop limit**: `_cashOutLoop` is capped at 20 iterations. Circular JB token dependencies (A -> B -> A) will revert with `CashOutLoopLimit` instead of consuming all gas.

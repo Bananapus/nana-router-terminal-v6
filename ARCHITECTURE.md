@@ -56,7 +56,7 @@ Payer → JBRouterTerminal.pay(projectId, token, amount)
   │         ├─ Quote & slippage (_pickPoolAndQuote):
   │         │   1. User-provided quote (metadata "quoteForSwap") — used as-is
   │         │   2. V3 fallback: 10-min TWAP via OracleLibrary.consult()
-  │         │   3. V4 fallback: spot price from getSlot0() (no built-in TWAP)
+  │         │   3. V4 fallback: TWAP from oracle hook if available, else spot price from getSlot0()
   │         │   Apply sigmoid slippage: minSlippage + range * impact/(impact+K)
   │         │
   │         ├─ Execute swap via V3 pool.swap() or V4 POOL_MANAGER.unlock()

@@ -17,6 +17,7 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -41,6 +42,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
+import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -105,6 +107,9 @@ contract JBRouterTerminal is
 
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
+
+    /// @notice The TWAP window (in seconds) used when querying a V4 oracle hook.
+    uint32 private constant _TWAP_WINDOW = 30;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -638,9 +643,8 @@ contract JBRouterTerminal is
         // Check for a user-provided minimum cashout reclaim amount (slippage protection).
         uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
-        // Intermediate steps have no per-step slippage protection. The final output amount is
-        // checked against the user's minReclaimed parameter, providing end-to-end slippage protection. Per-step
-        // checks would add gas and complexity without improving the overall guarantee.
+        // Propagate proportional slippage protection across multi-hop cashouts. Each intermediate step scales the
+        // minimum by the ratio of actual output to expected input, maintaining end-to-end slippage guarantees.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
@@ -663,20 +667,26 @@ contract JBRouterTerminal is
             (address tokenToReclaim, IJBCashOutTerminal cashOutTerminal) =
                 _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
+            // Track the expected amount before cashout so we can scale the minimum proportionally.
+            uint256 previousExpectedAmount = amount;
+
             // Cash out the source project's tokens.
             // slither-disable-next-line calls-loop
             amount = cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
-                cashOutCount: amount,
+                cashOutCount: previousExpectedAmount,
                 tokenToReclaim: tokenToReclaim,
                 minTokensReclaimed: minTokensReclaimed,
                 beneficiary: payable(address(this)),
                 metadata: ""
             });
 
-            // Only apply the minimum to the first cashout step.
-            minTokensReclaimed = 0;
+            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
+            // This propagates slippage protection through multi-hop cashouts instead of dropping it.
+            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
+                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+            }
 
             // Update for next iteration.
             token = tokenToReclaim;
@@ -842,6 +852,12 @@ contract JBRouterTerminal is
     {
         address normalizedTokenIn = _normalize(tokenIn);
 
+        // Snapshot the input token balance before the swap so we only refund the delta from THIS operation,
+        // not any pre-existing balance that may belong to other callers or unrelated deposits.
+        uint256 inputBalanceBefore = (tokenIn == JBConstants.NATIVE_TOKEN)
+            ? address(this).balance + IERC20(normalizedTokenIn).balanceOf(address(this))
+            : IERC20(normalizedTokenIn).balanceOf(address(this));
+
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
@@ -851,9 +867,6 @@ contract JBRouterTerminal is
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
         });
 
-        // Any pre-existing ETH in the contract is absorbed into swap leftovers and routed to
-        // the project. This is acceptable because the contract should not hold ETH between transactions. The
-        // receive() function or any direct ETH sends are treated as donations.
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
         // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
         if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance != 0) {
@@ -863,13 +876,23 @@ contract JBRouterTerminal is
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
 
-        // Return leftover input tokens to payer. The router is stateless — any remaining balance after a swap is
-        // leftover from a partial fill. Using an absolute balance check (rather than a balance delta) correctly
-        // handles ERC-20 partial fills where the router already held the full input amount before the swap.
-        uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
-        if (balanceAfter > 0) {
-            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(balanceAfter);
-            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: balanceAfter});
+        // Compute leftover as the delta between post-swap and pre-swap balances for the input token.
+        // Only refund what THIS swap operation left behind, not any pre-existing contract balance.
+        uint256 inputBalanceAfter = (tokenIn == JBConstants.NATIVE_TOKEN)
+            ? address(this).balance + IERC20(normalizedTokenIn).balanceOf(address(this))
+            : IERC20(normalizedTokenIn).balanceOf(address(this));
+        uint256 leftover = inputBalanceAfter > inputBalanceBefore ? inputBalanceAfter - inputBalanceBefore : 0;
+        if (leftover > 0) {
+            if (tokenIn == JBConstants.NATIVE_TOKEN) {
+                // Unwrap WETH portion if needed (raw ETH was already wrapped above).
+                uint256 wethBalance = IERC20(normalizedTokenIn).balanceOf(address(this));
+                if (wethBalance > 0 && wethBalance >= leftover) {
+                    WETH.withdraw(leftover);
+                } else if (wethBalance > 0) {
+                    WETH.withdraw(wethBalance);
+                }
+            }
+            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: leftover});
         }
     }
 
@@ -1332,8 +1355,30 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut)
     {
         PoolId id = key.toId();
-        // slither-disable-next-line unused-return
-        (, int24 tick,,) = POOL_MANAGER.getSlot0(id);
+        int24 tick;
+
+        // Try to use TWAP from the pool's oracle hook (if available) for manipulation resistance.
+        if (address(key.hooks) != address(0)) {
+            uint32[] memory secondsAgos = new uint32[](2);
+            secondsAgos[0] = _TWAP_WINDOW;
+            secondsAgos[1] = 0;
+            try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
+                int56[] memory tickCumulatives, uint160[] memory
+            ) {
+                // Compute the arithmetic mean tick from the TWAP window.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
+            } catch {
+                // Oracle hook not available or insufficient history — fall back to spot price.
+                // slither-disable-next-line unused-return
+                (, tick,,) = POOL_MANAGER.getSlot0(id);
+            }
+        } else {
+            // No hook attached — use spot price.
+            // slither-disable-next-line unused-return
+            (, tick,,) = POOL_MANAGER.getSlot0(id);
+        }
+
         uint128 liquidity = POOL_MANAGER.getLiquidity(id);
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
@@ -1497,15 +1542,21 @@ contract JBRouterTerminal is
             // Hold the token produced by the next previewed cashout hop.
             address tokenToReclaim;
 
-            // Preview the next cashout hop to learn which base token and amount would come out.
-            (tokenToReclaim, amount) =
-                _previewCashOutStep({sourceProjectId: sourceProjectId, destProjectId: destProjectId, amount: amount});
+            // Track the expected amount before cashout so we can scale the minimum proportionally.
+            uint256 previousExpectedAmount = amount;
 
-            // Enforce the caller's minimum reclaim amount on the first hop only.
+            // Preview the next cashout hop to learn which base token and amount would come out.
+            (tokenToReclaim, amount) = _previewCashOutStep({
+                sourceProjectId: sourceProjectId, destProjectId: destProjectId, amount: previousExpectedAmount
+            });
+
+            // Enforce the caller's minimum reclaim amount on this hop.
             if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
 
-            // Clear the first-hop minimum so deeper hops are evaluated without per-step slippage guards.
-            minTokensReclaimed = 0;
+            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
+            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
+                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+            }
 
             // Continue previewing from the token reclaimed in this hop.
             token = tokenToReclaim;
