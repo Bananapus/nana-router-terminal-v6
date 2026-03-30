@@ -6,7 +6,6 @@ import {Test} from "forge-std/Test.sol";
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -30,7 +29,6 @@ contract RouterTerminalCreditCashoutTest is Test {
     // Mocked dependencies.
     IJBDirectory mockDirectory;
     IJBPermissions mockPermissions;
-    IJBProjects mockProjects;
     IJBTokens mockTokens;
     IPermit2 mockPermit2;
     IWETH9 mockWeth;
@@ -44,8 +42,6 @@ contract RouterTerminalCreditCashoutTest is Test {
         vm.etch(address(mockDirectory), hex"00");
         mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
         vm.etch(address(mockPermissions), hex"00");
-        mockProjects = IJBProjects(makeAddr("mockProjects"));
-        vm.etch(address(mockProjects), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
@@ -62,7 +58,6 @@ contract RouterTerminalCreditCashoutTest is Test {
         routerTerminal = new JBRouterTerminal(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             terminalOwner,

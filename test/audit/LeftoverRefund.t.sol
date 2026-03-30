@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -288,7 +287,7 @@ contract LeftoverRefundTest is Test {
     JBRouterTerminal internal router;
     IJBDirectory internal directory;
     IJBPermissions internal permissions;
-    IJBProjects internal projects;
+
     IJBTokens internal tokens;
     IPermit2 internal permit2;
     IUniswapV3Factory internal factory;
@@ -299,7 +298,7 @@ contract LeftoverRefundTest is Test {
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
         permissions = IJBPermissions(makeAddr("permissions"));
-        projects = IJBProjects(makeAddr("projects"));
+
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         factory = IUniswapV3Factory(makeAddr("factory"));
@@ -307,7 +306,6 @@ contract LeftoverRefundTest is Test {
 
         vm.etch(address(directory), hex"00");
         vm.etch(address(permissions), hex"00");
-        vm.etch(address(projects), hex"00");
         vm.etch(address(tokens), hex"00");
         vm.etch(address(permit2), hex"00");
         vm.etch(address(factory), hex"00");
@@ -315,7 +313,6 @@ contract LeftoverRefundTest is Test {
         router = new JBRouterTerminal(
             directory,
             permissions,
-            projects,
             tokens,
             permit2,
             makeAddr("owner"),

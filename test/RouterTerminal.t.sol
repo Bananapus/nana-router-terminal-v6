@@ -6,7 +6,6 @@ import {Test} from "forge-std/Test.sol";
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
@@ -287,7 +286,6 @@ contract RouterTerminalHarness is JBRouterTerminal {
     constructor(
         IJBDirectory directory,
         IJBPermissions permissions,
-        IJBProjects projects,
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
@@ -296,9 +294,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         IPoolManager poolManager,
         address trustedForwarder
     )
-        JBRouterTerminal(
-            directory, permissions, projects, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder
-        )
+        JBRouterTerminal(directory, permissions, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder)
     {}
 
     function exposedResolveTokenOut(
@@ -340,7 +336,6 @@ contract RouterTerminalTest is Test {
     // Mocked dependencies
     IJBDirectory mockDirectory;
     IJBPermissions mockPermissions;
-    IJBProjects mockProjects;
     IJBTokens mockTokens;
     IPermit2 mockPermit2;
     IWETH9 mockWeth;
@@ -354,8 +349,6 @@ contract RouterTerminalTest is Test {
         vm.etch(address(mockDirectory), hex"00");
         mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
         vm.etch(address(mockPermissions), hex"00");
-        mockProjects = IJBProjects(makeAddr("mockProjects"));
-        vm.etch(address(mockProjects), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
@@ -372,7 +365,6 @@ contract RouterTerminalTest is Test {
         routerTerminal = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             terminalOwner,
@@ -1546,7 +1538,6 @@ contract RouterTerminalTest is Test {
         RouterTerminalHarness noV4Router = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             terminalOwner,
@@ -1891,7 +1882,6 @@ contract SettleV4DeficitTest is Test {
     // Mocked JB dependencies (unused by _settleV4 but required for constructor).
     IJBDirectory mockDirectory;
     IJBPermissions mockPermissions;
-    IJBProjects mockProjects;
     IJBTokens mockTokens;
     IPermit2 mockPermit2;
     IUniswapV3Factory mockFactory;
@@ -1901,8 +1891,6 @@ contract SettleV4DeficitTest is Test {
         vm.etch(address(mockDirectory), hex"00");
         mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
         vm.etch(address(mockPermissions), hex"00");
-        mockProjects = IJBProjects(makeAddr("mockProjects"));
-        vm.etch(address(mockProjects), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
@@ -1917,7 +1905,6 @@ contract SettleV4DeficitTest is Test {
         routerTerminal = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             makeAddr("owner"),

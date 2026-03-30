@@ -102,7 +102,6 @@ contract AuditHarness is JBRouterTerminal {
     constructor(
         IJBDirectory d,
         IJBPermissions p,
-        IJBProjects pr,
         IJBTokens t,
         IPermit2 pm,
         address o,
@@ -111,7 +110,7 @@ contract AuditHarness is JBRouterTerminal {
         IPoolManager pm4,
         address tf
     )
-        JBRouterTerminal(d, p, pr, t, pm, o, w, f, pm4, tf)
+        JBRouterTerminal(d, p, t, pm, o, w, f, pm4, tf)
     {}
 
     function exposedAcceptFundsFor(
@@ -169,7 +168,7 @@ contract TestAuditGaps is Test {
         vm.etch(address(pm), hex"00");
         owner = makeAddr("owner");
 
-        router = new AuditHarness(dir, perms, proj, toks, permit2, owner, weth, factory, pm, address(0));
+        router = new AuditHarness(dir, perms, toks, permit2, owner, weth, factory, pm, address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════════

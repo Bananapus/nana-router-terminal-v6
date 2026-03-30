@@ -18,7 +18,7 @@ import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
 import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -78,7 +78,6 @@ contract RouterTerminalPreviewForkTest is Test {
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
             permissions: IJBPermissions(address(jbPermissions)),
-            projects: IJBProjects(address(jbProjects)),
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
             owner: multisig,

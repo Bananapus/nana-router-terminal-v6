@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -475,7 +474,7 @@ contract RouterTerminalInvariant is Test {
     // Mocked protocol contracts.
     address public mockDirectory;
     address public mockPermissions;
-    address public mockProjects;
+
     address public mockTokens;
     address public mockPermit2;
     address public mockFactory;
@@ -499,8 +498,6 @@ contract RouterTerminalInvariant is Test {
         vm.etch(mockDirectory, hex"00");
         mockPermissions = makeAddr("mockPermissions");
         vm.etch(mockPermissions, hex"00");
-        mockProjects = makeAddr("mockProjects");
-        vm.etch(mockProjects, hex"00");
         mockTokens = makeAddr("mockTokens");
         vm.etch(mockTokens, hex"00");
         mockPermit2 = makeAddr("mockPermit2");
@@ -514,7 +511,6 @@ contract RouterTerminalInvariant is Test {
         router = new JBRouterTerminal(
             IJBDirectory(mockDirectory),
             IJBPermissions(mockPermissions),
-            IJBProjects(mockProjects),
             IJBTokens(mockTokens),
             IPermit2(mockPermit2),
             address(this), // owner

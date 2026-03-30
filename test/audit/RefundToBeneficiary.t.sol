@@ -9,7 +9,6 @@ import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -57,7 +56,6 @@ contract HarnessRouterTerminal is JBRouterTerminal {
         JBRouterTerminal(
             IJBDirectory(address(0)),
             IJBPermissions(address(0)),
-            IJBProjects(address(0)),
             IJBTokens(address(0)),
             IPermit2(address(0)),
             address(this),
