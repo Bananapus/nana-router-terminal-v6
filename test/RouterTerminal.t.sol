@@ -6,7 +6,6 @@ import {Test} from "forge-std/Test.sol";
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
@@ -65,14 +64,14 @@ contract MockERC20 {
 }
 
 contract MockERC20WithDecimals is MockERC20 {
-    uint8 internal immutable _decimals;
+    uint8 internal immutable _DECIMALS;
 
     constructor(uint8 decimals_) {
-        _decimals = decimals_;
+        _DECIMALS = decimals_;
     }
 
     function decimals() external view returns (uint8) {
-        return _decimals;
+        return _DECIMALS;
     }
 }
 
@@ -140,13 +139,13 @@ contract MockPoolManagerForSettle {
 }
 
 contract MockPreviewDestTerminal {
-    address public immutable acceptedToken;
-    uint256 public immutable previewedTokenCount;
+    address public immutable ACCEPTED_TOKEN;
+    uint256 public immutable PREVIEWED_TOKEN_COUNT;
     uint256 public totalReceived;
 
     constructor(address acceptedToken_, uint256 previewedTokenCount_) {
-        acceptedToken = acceptedToken_;
-        previewedTokenCount = previewedTokenCount_;
+        ACCEPTED_TOKEN = acceptedToken_;
+        PREVIEWED_TOKEN_COUNT = previewedTokenCount_;
     }
 
     function pay(
@@ -163,10 +162,11 @@ contract MockPreviewDestTerminal {
         returns (uint256)
     {
         if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "MockPreviewDestTerminal: ETH mismatch");
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         else IERC20(token).transferFrom(msg.sender, address(this), amount);
 
         totalReceived += amount;
-        return previewedTokenCount;
+        return PREVIEWED_TOKEN_COUNT;
     }
 
     function previewPayFor(
@@ -192,13 +192,14 @@ contract MockPreviewDestTerminal {
             metadata: 0
         });
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (ruleset, previewedTokenCount, 0, hookSpecifications);
+        return (ruleset, PREVIEWED_TOKEN_COUNT, 0, hookSpecifications);
     }
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        contexts[0] =
-            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 currency = uint32(uint160(ACCEPTED_TOKEN));
+        contexts[0] = JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: currency});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -209,12 +210,12 @@ contract MockPreviewDestTerminal {
 }
 
 contract MockPreviewCashOutTerminal {
-    uint256 public immutable reclaimAmount;
-    MockERC20 public immutable token;
+    uint256 public immutable RECLAIM_AMOUNT;
+    MockERC20 public immutable TOKEN;
 
     constructor(MockERC20 token_, uint256 reclaimAmount_) payable {
-        token = token_;
-        reclaimAmount = reclaimAmount_;
+        TOKEN = token_;
+        RECLAIM_AMOUNT = reclaimAmount_;
     }
 
     function cashOutTokensOf(
@@ -229,13 +230,13 @@ contract MockPreviewCashOutTerminal {
         external
         returns (uint256)
     {
-        token.burn(holder, cashOutCount);
+        TOKEN.burn(holder, cashOutCount);
 
         if (tokenToReclaim == JBConstants.NATIVE_TOKEN) {
-            (bool success,) = beneficiary.call{value: reclaimAmount}("");
+            (bool success,) = beneficiary.call{value: RECLAIM_AMOUNT}("");
             require(success, "MockPreviewCashOutTerminal: ETH send failed");
         }
-        return reclaimAmount;
+        return RECLAIM_AMOUNT;
     }
 
     function previewCashOutFrom(
@@ -262,7 +263,7 @@ contract MockPreviewCashOutTerminal {
             metadata: 0
         });
         hookSpecifications = new JBCashOutHookSpecification[](0);
-        return (ruleset, reclaimAmount, 0, hookSpecifications);
+        return (ruleset, RECLAIM_AMOUNT, 0, hookSpecifications);
     }
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
@@ -285,7 +286,6 @@ contract RouterTerminalHarness is JBRouterTerminal {
     constructor(
         IJBDirectory directory,
         IJBPermissions permissions,
-        IJBProjects projects,
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
@@ -294,9 +294,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         IPoolManager poolManager,
         address trustedForwarder
     )
-        JBRouterTerminal(
-            directory, permissions, projects, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder
-        )
+        JBRouterTerminal(directory, permissions, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder)
     {}
 
     function exposedResolveTokenOut(
@@ -338,7 +336,6 @@ contract RouterTerminalTest is Test {
     // Mocked dependencies
     IJBDirectory mockDirectory;
     IJBPermissions mockPermissions;
-    IJBProjects mockProjects;
     IJBTokens mockTokens;
     IPermit2 mockPermit2;
     IWETH9 mockWeth;
@@ -352,8 +349,6 @@ contract RouterTerminalTest is Test {
         vm.etch(address(mockDirectory), hex"00");
         mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
         vm.etch(address(mockPermissions), hex"00");
-        mockProjects = IJBProjects(makeAddr("mockProjects"));
-        vm.etch(address(mockProjects), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
@@ -370,7 +365,6 @@ contract RouterTerminalTest is Test {
         routerTerminal = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             terminalOwner,
@@ -836,6 +830,7 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
@@ -980,7 +975,17 @@ contract RouterTerminalTest is Test {
                 )
             ),
             abi.encode(
-                JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
+                JBRuleset({
+                    cycleNumber: 0,
+                    id: 0,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
                 uint256(60),
                 uint256(0),
                 new JBCashOutHookSpecification[](0)
@@ -1166,7 +1171,17 @@ contract RouterTerminalTest is Test {
                 )
             ),
             abi.encode(
-                JBRuleset(0, 0, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
+                JBRuleset({
+                    cycleNumber: 0,
+                    id: 0,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
                 uint256(60),
                 uint256(0),
                 new JBCashOutHookSpecification[](0)
@@ -1277,7 +1292,17 @@ contract RouterTerminalTest is Test {
             destTerminal,
             abi.encodeCall(IJBTerminal.previewPayFor, (projectId, tokenOut, quotedAmountOut, beneficiary, metadata)),
             abi.encode(
-                JBRuleset(0, 1, 0, 0, 0, 0, 0, IJBRulesetApprovalHook(address(0)), 0),
+                JBRuleset({
+                    cycleNumber: 0,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
                 quotedAmountOut,
                 uint256(0),
                 expectedSpecs
@@ -1513,7 +1538,6 @@ contract RouterTerminalTest is Test {
         RouterTerminalHarness noV4Router = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             terminalOwner,
@@ -1858,7 +1882,6 @@ contract SettleV4DeficitTest is Test {
     // Mocked JB dependencies (unused by _settleV4 but required for constructor).
     IJBDirectory mockDirectory;
     IJBPermissions mockPermissions;
-    IJBProjects mockProjects;
     IJBTokens mockTokens;
     IPermit2 mockPermit2;
     IUniswapV3Factory mockFactory;
@@ -1868,8 +1891,6 @@ contract SettleV4DeficitTest is Test {
         vm.etch(address(mockDirectory), hex"00");
         mockPermissions = IJBPermissions(makeAddr("mockPermissions"));
         vm.etch(address(mockPermissions), hex"00");
-        mockProjects = IJBProjects(makeAddr("mockProjects"));
-        vm.etch(address(mockProjects), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
@@ -1884,7 +1905,6 @@ contract SettleV4DeficitTest is Test {
         routerTerminal = new RouterTerminalHarness(
             mockDirectory,
             mockPermissions,
-            mockProjects,
             mockTokens,
             mockPermit2,
             makeAddr("owner"),

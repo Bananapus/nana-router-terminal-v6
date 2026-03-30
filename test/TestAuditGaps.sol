@@ -102,7 +102,6 @@ contract AuditHarness is JBRouterTerminal {
     constructor(
         IJBDirectory d,
         IJBPermissions p,
-        IJBProjects pr,
         IJBTokens t,
         IPermit2 pm,
         address o,
@@ -111,7 +110,7 @@ contract AuditHarness is JBRouterTerminal {
         IPoolManager pm4,
         address tf
     )
-        JBRouterTerminal(d, p, pr, t, pm, o, w, f, pm4, tf)
+        JBRouterTerminal(d, p, t, pm, o, w, f, pm4, tf)
     {}
 
     function exposedAcceptFundsFor(
@@ -169,7 +168,7 @@ contract TestAuditGaps is Test {
         vm.etch(address(pm), hex"00");
         owner = makeAddr("owner");
 
-        router = new AuditHarness(dir, perms, proj, toks, permit2, owner, weth, factory, pm, address(0));
+        router = new AuditHarness(dir, perms, toks, permit2, owner, weth, factory, pm, address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -761,14 +760,13 @@ contract TestAuditGaps is Test {
     // GAP 6 (M-7): Registry receive() Accepts Native Token Refunds
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Registry can receive native token transfers without reverting.
-    function test_registryReceive_acceptsNativeTokens() public {
+    /// @notice Registry reverts on bare native token transfers (no receive() function).
+    function test_registryReceive_revertsOnBareTransfer() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
         vm.deal(address(this), 1 ether);
         (bool success,) = address(reg).call{value: 1 ether}("");
-        assertTrue(success, "Registry should accept native token transfers via receive()");
-        assertEq(address(reg).balance, 1 ether, "Registry should hold the received ETH");
+        assertFalse(success, "Registry should reject bare native token transfers");
     }
 
     /// @notice ETH that is directly deposited to the registry (not via partial-fill refund) is still stuck.

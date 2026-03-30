@@ -100,7 +100,6 @@ contract RouterTerminalForkTest is Test {
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
             permissions: jbPermissions,
-            projects: jbProjects,
             tokens: jbTokens,
             permit2: PERMIT2,
             owner: multisig,

@@ -7,7 +7,6 @@ import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissioned} from "@bananapus/core-v6/src/interfaces/IJBPermissioned.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -17,6 +16,7 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -41,6 +41,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
+import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -106,15 +107,15 @@ contract JBRouterTerminal is
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
 
+    /// @notice The TWAP window (in seconds) used when querying a V4 oracle hook.
+    uint32 private constant _TWAP_WINDOW = 30;
+
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
     /// @notice The directory of terminals and controllers for projects.
     IJBDirectory public immutable DIRECTORY;
-
-    /// @notice Mints ERC-721s that represent project ownership and transfers.
-    IJBProjects public immutable PROJECTS;
 
     /// @notice Manages minting, burning, and balances of projects' tokens and token credits.
     IJBTokens public immutable TOKENS;
@@ -152,7 +153,6 @@ contract JBRouterTerminal is
 
     /// @param directory A contract storing directories of terminals and controllers for each project.
     /// @param permissions A contract storing permissions.
-    /// @param projects A contract which mints ERC-721s that represent project ownership and transfers.
     /// @param tokens A contract managing project token balances.
     /// @param permit2 A permit2 utility.
     /// @param owner The owner of the contract.
@@ -163,7 +163,6 @@ contract JBRouterTerminal is
     constructor(
         IJBDirectory directory,
         IJBPermissions permissions,
-        IJBProjects projects,
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
@@ -177,7 +176,6 @@ contract JBRouterTerminal is
         Ownable(owner)
     {
         DIRECTORY = directory;
-        PROJECTS = projects;
         TOKENS = tokens;
         FACTORY = factory;
         POOL_MANAGER = poolManager;
@@ -306,7 +304,7 @@ contract JBRouterTerminal is
 
         // Verify caller is a legitimate pool via the factory.
         uint24 fee = IUniswapV3Pool(msg.sender).fee();
-        address expectedPool = FACTORY.getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: fee});
+        address expectedPool = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: fee});
         if (msg.sender != expectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
@@ -314,7 +312,7 @@ contract JBRouterTerminal is
         uint256 amountToSendToPool = amount0Delta < 0 ? uint256(amount1Delta) : uint256(amount0Delta);
 
         // Wrap native tokens if needed.
-        if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.deposit{value: amountToSendToPool}();
+        if (tokenIn == JBConstants.NATIVE_TOKEN) _wethDeposit(amountToSendToPool);
 
         // Transfer the tokens to the pool.
         IERC20(normalizedTokenIn).safeTransfer({to: msg.sender, value: amountToSendToPool});
@@ -638,14 +636,13 @@ contract JBRouterTerminal is
         // Check for a user-provided minimum cashout reclaim amount (slippage protection).
         uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
-        // Intermediate steps have no per-step slippage protection. The final output amount is
-        // checked against the user's minReclaimed parameter, providing end-to-end slippage protection. Per-step
-        // checks would add gas and complexity without improving the overall guarantee.
+        // Propagate proportional slippage protection across multi-hop cashouts. Each intermediate step scales the
+        // minimum by the ratio of actual output to expected input, maintaining end-to-end slippage guarantees.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             // Skip the destination check on the first iteration if we have a credit override.
             if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
-                destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
+                destTerminal = _primaryTerminalOf({projectId: destProjectId, token: token});
                 if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
                     return (destTerminal, token, amount);
                 }
@@ -653,8 +650,7 @@ contract JBRouterTerminal is
 
             // Use the override if provided, otherwise look up the project ID from the token.
             // slither-disable-next-line calls-loop
-            uint256 sourceProjectId =
-                sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
+            uint256 sourceProjectId = sourceProjectIdOverride != 0 ? sourceProjectIdOverride : _projectIdOf(token);
 
             // If it's not a JB project token, return as-is (caller handles the swap).
             if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
@@ -663,20 +659,26 @@ contract JBRouterTerminal is
             (address tokenToReclaim, IJBCashOutTerminal cashOutTerminal) =
                 _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
+            // Track the expected amount before cashout so we can scale the minimum proportionally.
+            uint256 previousExpectedAmount = amount;
+
             // Cash out the source project's tokens.
             // slither-disable-next-line calls-loop
             amount = cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
-                cashOutCount: amount,
+                cashOutCount: previousExpectedAmount,
                 tokenToReclaim: tokenToReclaim,
                 minTokensReclaimed: minTokensReclaimed,
                 beneficiary: payable(address(this)),
                 metadata: ""
             });
 
-            // Only apply the minimum to the first cashout step.
-            minTokensReclaimed = 0;
+            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
+            // This propagates slippage protection through multi-hop cashouts instead of dropping it.
+            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
+                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+            }
 
             // Update for next iteration.
             token = tokenToReclaim;
@@ -714,8 +716,8 @@ contract JBRouterTerminal is
 
         if (nIn == nOut) {
             // Same underlying token — just wrap or unwrap.
-            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.deposit{value: amount}();
-            else WETH.withdraw(amount);
+            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethDeposit(amount);
+            else _wethWithdraw(amount);
             return amount;
         }
 
@@ -851,24 +853,21 @@ contract JBRouterTerminal is
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
         });
 
-        // Any pre-existing ETH in the contract is absorbed into swap leftovers and routed to
-        // the project. This is acceptable because the contract should not hold ETH between transactions. The
-        // receive() function or any direct ETH sends are treated as donations.
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
         // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
         if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance != 0) {
-            WETH.deposit{value: address(this).balance}();
+            _wethDeposit(address(this).balance);
         }
 
         // Unwrap if output is native token.
-        if (tokenOut == JBConstants.NATIVE_TOKEN) WETH.withdraw(amountOut);
+        if (tokenOut == JBConstants.NATIVE_TOKEN) _wethWithdraw(amountOut);
 
-        // Return leftover input tokens to payer. The router is stateless — any remaining balance after a swap is
-        // leftover from a partial fill. Using an absolute balance check (rather than a balance delta) correctly
-        // handles ERC-20 partial fills where the router already held the full input amount before the swap.
+        // Return leftover input tokens to payer. The router is stateless — it should never hold funds between
+        // transactions. The full remaining balance is refunded (not a delta) so that any accidentally-sent tokens
+        // are recovered rather than permanently stuck. This is intentional: recovery > lockup.
         uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
         if (balanceAfter > 0) {
-            if (tokenIn == JBConstants.NATIVE_TOKEN) WETH.withdraw(balanceAfter);
+            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethWithdraw(balanceAfter);
             _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: balanceAfter});
         }
     }
@@ -899,7 +898,7 @@ contract JBRouterTerminal is
         // Check if input is a JB project token (credit or ERC-20).
         uint256 sourceProjectId = sourceProjectIdOverride;
         if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = TOKENS.projectIdOf(IJBToken(tokenIn));
+            sourceProjectId = _projectIdOf(tokenIn);
         }
 
         if (sourceProjectId != 0) {
@@ -939,7 +938,7 @@ contract JBRouterTerminal is
         if (Currency.unwrap(currency) == address(0)) {
             // Unwrap only the WETH deficit (caller may hold partial ETH + partial WETH).
             uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
-            if (deficit > 0) WETH.withdraw(deficit);
+            if (deficit > 0) _wethWithdraw(deficit);
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {
@@ -956,7 +955,7 @@ contract JBRouterTerminal is
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
-        if (Currency.unwrap(currency) == address(0)) WETH.deposit{value: amount}();
+        if (Currency.unwrap(currency) == address(0)) _wethDeposit(amount);
     }
 
     /// @notice Transfers tokens.
@@ -984,17 +983,86 @@ contract JBRouterTerminal is
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
 
+    /// @notice Deposit native tokens into WETH.
+    /// @param amount The amount of native tokens to wrap.
+    function _wethDeposit(uint256 amount) internal {
+        WETH.deposit{value: amount}();
+    }
+
+    /// @notice Withdraw native tokens from WETH.
+    /// @param amount The amount of WETH to unwrap.
+    function _wethWithdraw(uint256 amount) internal {
+        WETH.withdraw(amount);
+    }
+
     //*********************************************************************//
     // ------------------------- internal views -------------------------- //
     //*********************************************************************//
+
+    /// @notice Look up the best pool address from the V3 factory.
+    /// @param tokenA One token in the pair.
+    /// @param tokenB The other token in the pair.
+    /// @param fee The fee tier to query.
+    /// @return The pool address, or address(0) if none exists.
+    // slither-disable-next-line calls-loop
+    function _getPool(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
+        return FACTORY.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
+    }
+
+    /// @notice Look up the in-range liquidity for a V4 pool.
+    /// @param id The pool ID.
+    /// @return The pool's current in-range liquidity.
+    function _getLiquidity(PoolId id) internal view returns (uint128) {
+        return POOL_MANAGER.getLiquidity(id);
+    }
+
+    /// @notice Read slot0 from a V4 pool.
+    /// @param id The pool ID.
+    /// @return sqrtPriceX96 The current sqrt price.
+    /// @return tick The current tick.
+    /// @return protocolFee The protocol fee.
+    /// @return lpFee The LP fee.
+    // slither-disable-next-line unused-return
+    function _getSlot0(PoolId id)
+        internal
+        view
+        returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)
+    {
+        return POOL_MANAGER.getSlot0(id);
+    }
+
+    /// @notice Look up the primary terminal for a project and token.
+    /// @param projectId The ID of the project.
+    /// @param token The token to look up.
+    /// @return The primary terminal, or IJBTerminal(address(0)) if none.
+    // slither-disable-next-line calls-loop
+    function _primaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal) {
+        return DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
+    }
+
+    /// @notice Look up the project ID for a token.
+    /// @param token The token address to query.
+    /// @return The project ID, or 0 if the token is not a JB project token.
+    function _projectIdOf(address token) internal view returns (uint256) {
+        return TOKENS.projectIdOf(IJBToken(token));
+    }
+
+    /// @notice Look up all terminals for a project.
+    /// @param projectId The ID of the project.
+    /// @return The array of terminals.
+    // slither-disable-next-line calls-loop
+    function _terminalsOf(uint256 projectId) internal view returns (IJBTerminal[] memory) {
+        return DIRECTORY.terminalsOf(projectId);
+    }
 
     /// @notice Find the highest liquidity across all V3 fee tiers and V4 pools for a token pair.
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
     /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
+    // slither-disable-next-line calls-loop
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
         PoolInfo memory pool = _discoverPool(tokenA, tokenB);
-        if (pool.isV4) return POOL_MANAGER.getLiquidity(pool.v4Key.toId());
+        if (pool.isV4) return _getLiquidity(pool.v4Key.toId());
         if (address(pool.v3Pool) != address(0)) return pool.v3Pool.liquidity();
     }
 
@@ -1035,7 +1103,7 @@ contract JBRouterTerminal is
         returns (address tokenOut, IJBTerminal destTerminal)
     {
         address normalizedTokenIn = _normalize(tokenIn);
-        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(projectId);
+        IJBTerminal[] memory terminals = _terminalsOf(projectId);
 
         uint128 bestLiquidity;
         bool hasFallback;
@@ -1058,7 +1126,8 @@ contract JBRouterTerminal is
                 }
 
                 // Search for pool with best liquidity (V3 + V4).
-                uint128 candidateLiquidity = _bestPoolLiquidity(normalizedTokenIn, normalizedCandidate);
+                uint128 candidateLiquidity =
+                    _bestPoolLiquidity({tokenA: normalizedTokenIn, tokenB: normalizedCandidate});
                 if (candidateLiquidity > bestLiquidity) {
                     bestLiquidity = candidateLiquidity;
                     tokenOut = candidateToken;
@@ -1088,8 +1157,7 @@ contract JBRouterTerminal is
         // Search V3.
         for (uint256 i; i < 4; i++) {
             // slither-disable-next-line calls-loop
-            address poolAddr =
-                FACTORY.getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _FEE_TIERS[i]});
+            address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _FEE_TIERS[i]});
 
             if (poolAddr == address(0)) continue;
 
@@ -1146,12 +1214,12 @@ contract JBRouterTerminal is
             });
 
             // slither-disable-next-line unused-return,calls-loop
-            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
+            (uint160 sqrtPriceX96,,,) = _getSlot0(key.toId());
             // slither-disable-next-line incorrect-equality
             if (sqrtPriceX96 == 0) continue;
 
             // slither-disable-next-line calls-loop
-            uint128 poolLiquidity = POOL_MANAGER.getLiquidity(key.toId());
+            uint128 poolLiquidity = _getLiquidity(key.toId());
             if (poolLiquidity > currentBestLiquidity) {
                 currentBestLiquidity = poolLiquidity;
                 bestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
@@ -1182,7 +1250,7 @@ contract JBRouterTerminal is
         IJBCashOutTerminal baseFallbackTerminal;
 
         // slither-disable-next-line calls-loop
-        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(sourceProjectId);
+        IJBTerminal[] memory terminals = _terminalsOf(sourceProjectId);
 
         for (uint256 i; i < terminals.length; i++) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
@@ -1204,13 +1272,13 @@ contract JBRouterTerminal is
 
                 // Priority 1: Does the destination project directly accept this token?
                 // slither-disable-next-line calls-loop
-                IJBTerminal destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: contextToken});
+                IJBTerminal destTerminal = _primaryTerminalOf({projectId: destProjectId, token: contextToken});
                 if (address(destTerminal) != address(0)) return (contextToken, terminal);
 
                 // Priority 2: Is this a JB project token (so we can recurse)?
                 if (address(fallbackTerminal) == address(0) && contextToken != JBConstants.NATIVE_TOKEN) {
                     // slither-disable-next-line calls-loop
-                    if (TOKENS.projectIdOf(IJBToken(contextToken)) != 0) {
+                    if (_projectIdOf(contextToken) != 0) {
                         fallbackToken = contextToken;
                         fallbackTerminal = terminal;
                     }
@@ -1332,9 +1400,32 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut)
     {
         PoolId id = key.toId();
-        // slither-disable-next-line unused-return
-        (, int24 tick,,) = POOL_MANAGER.getSlot0(id);
-        uint128 liquidity = POOL_MANAGER.getLiquidity(id);
+        int24 tick;
+        bool usedTwap;
+
+        // Try to use TWAP from the pool's oracle hook (if available) for manipulation resistance.
+        if (address(key.hooks) != address(0)) {
+            uint32[] memory secondsAgos = new uint32[](2);
+            secondsAgos[0] = _TWAP_WINDOW;
+            secondsAgos[1] = 0;
+            // slither-disable-next-line unused-return
+            try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
+                int56[] memory tickCumulatives, uint160[] memory
+            ) {
+                // Compute the arithmetic mean tick from the TWAP window.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
+                usedTwap = true;
+            } catch {}
+        }
+
+        // Fall back to spot price if TWAP was not available.
+        if (!usedTwap) {
+            // slither-disable-next-line unused-return
+            (, tick,,) = _getSlot0(id);
+        }
+
+        uint128 liquidity = _getLiquidity(id);
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
@@ -1479,7 +1570,7 @@ contract JBRouterTerminal is
             // Only probe direct destination acceptance when there is no one-shot source override to consume first.
             if (sourceProjectIdOverride == 0) {
                 // Ask the directory whether the destination already has a primary terminal for the current token.
-                destTerminal = DIRECTORY.primaryTerminalOf({projectId: destProjectId, token: token});
+                destTerminal = _primaryTerminalOf({projectId: destProjectId, token: token});
 
                 // If a real external terminal accepts this token, the preview route is complete and exact.
                 if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
@@ -1488,8 +1579,7 @@ contract JBRouterTerminal is
             }
 
             // Use the override once when present; otherwise infer the source project from the current JB token.
-            uint256 sourceProjectId =
-                sourceProjectIdOverride != 0 ? sourceProjectIdOverride : TOKENS.projectIdOf(IJBToken(token));
+            uint256 sourceProjectId = sourceProjectIdOverride != 0 ? sourceProjectIdOverride : _projectIdOf(token);
 
             // If this is no longer a JB project token, stop cashing out and let the caller continue routing from it.
             if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
@@ -1497,15 +1587,21 @@ contract JBRouterTerminal is
             // Hold the token produced by the next previewed cashout hop.
             address tokenToReclaim;
 
-            // Preview the next cashout hop to learn which base token and amount would come out.
-            (tokenToReclaim, amount) =
-                _previewCashOutStep({sourceProjectId: sourceProjectId, destProjectId: destProjectId, amount: amount});
+            // Track the expected amount before cashout so we can scale the minimum proportionally.
+            uint256 previousExpectedAmount = amount;
 
-            // Enforce the caller's minimum reclaim amount on the first hop only.
+            // Preview the next cashout hop to learn which base token and amount would come out.
+            (tokenToReclaim, amount) = _previewCashOutStep({
+                sourceProjectId: sourceProjectId, destProjectId: destProjectId, amount: previousExpectedAmount
+            });
+
+            // Enforce the caller's minimum reclaim amount on this hop.
             if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
 
-            // Clear the first-hop minimum so deeper hops are evaluated without per-step slippage guards.
-            minTokensReclaimed = 0;
+            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
+            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
+                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+            }
 
             // Continue previewing from the token reclaimed in this hop.
             token = tokenToReclaim;
@@ -1541,7 +1637,7 @@ contract JBRouterTerminal is
             _findCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
 
         // Ask that terminal how much of the reclaim token this cashout count would return.
-        // slither-disable-next-line unused-return
+        // slither-disable-next-line unused-return,calls-loop
         (, reclaimAmount,,) = cashOutTerminal.previewCashOutFrom({
             holder: address(this),
             projectId: sourceProjectId,
@@ -1581,7 +1677,7 @@ contract JBRouterTerminal is
 
         // Otherwise, infer the source project from the input token when it is not the native-token sentinel.
         if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = TOKENS.projectIdOf(IJBToken(tokenIn));
+            sourceProjectId = _projectIdOf(tokenIn);
         }
 
         // JB project tokens and credit routes must be previewed through the cash-out path first.
@@ -1689,13 +1785,13 @@ contract JBRouterTerminal is
             JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
         if (exists) {
             (tokenOut) = abi.decode(routeData, (address));
-            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
             return (tokenOut, destTerminal);
         }
 
         // 2. Direct acceptance — project accepts tokenIn as-is.
-        destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenIn});
+        destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenIn});
         if (address(destTerminal) != address(0) && destTerminal.accountingContextsOf(projectId).length != 0) {
             return (tokenIn, destTerminal);
         }
@@ -1703,7 +1799,7 @@ contract JBRouterTerminal is
         // 2b. Check NATIVE_TOKEN <-> WETH equivalence.
         if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WETH)) {
             tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : JBConstants.NATIVE_TOKEN;
-            destTerminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (address(destTerminal) != address(0)) return (tokenOut, destTerminal);
         }
 

@@ -108,7 +108,6 @@ contract DeployScript is Script, Sphinx {
         JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
             directory: core.directory,
             permissions: core.permissions,
-            projects: core.projects,
             tokens: core.tokens,
             permit2: IPermit2(permit2),
             owner: safeAddress(),

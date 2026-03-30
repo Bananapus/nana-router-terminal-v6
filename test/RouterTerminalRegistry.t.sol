@@ -150,8 +150,10 @@ contract RouterTerminalRegistryTest is Test {
 
     function test_accountingContext_passthroughDoesNotCorrectTerminalDecimals() public {
         address usdcLike = makeAddr("usdcLike");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 usdcCurrency = uint32(uint160(usdcLike));
         JBAccountingContext memory expected =
-            JBAccountingContext({token: usdcLike, decimals: 18, currency: uint32(uint160(usdcLike))});
+            JBAccountingContext({token: usdcLike, decimals: 18, currency: usdcCurrency});
 
         vm.mockCall(
             address(terminalA),

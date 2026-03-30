@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
-import "../../src/JBRouterTerminal.sol";
-import "../../src/interfaces/IJBPayerTracker.sol";
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
+import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+
+import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
+import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
+import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 // ---------------------------------------------------------------------------
 // Harness – exposes the internal `_resolveRefundTo` for direct testing.
@@ -14,7 +22,6 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
     constructor(
         IJBDirectory directory,
         IJBPermissions permissions,
-        IJBProjects projects,
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
@@ -23,9 +30,7 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         IPoolManager poolManager,
         address trustedForwarder
     )
-        JBRouterTerminal(
-            directory, permissions, projects, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder
-        )
+        JBRouterTerminal(directory, permissions, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder)
     {}
 
     /// @notice Public wrapper so tests can call `_resolveRefundWithBackupRecipient` directly.
@@ -98,7 +103,6 @@ contract PayerTrackerRefundTest is Test {
         harness = new PayerTrackerRefundHarness(
             IJBDirectory(address(0)),
             IJBPermissions(address(0)),
-            IJBProjects(address(0)),
             IJBTokens(address(0)),
             IPermit2(address(0)),
             address(this), // owner

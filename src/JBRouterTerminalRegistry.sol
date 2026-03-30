@@ -109,13 +109,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     //*********************************************************************//
-    // ------------------------- receive -------------------------------- //
-    //*********************************************************************//
-
-    /// @notice Accept native token refunds from the router on partial swap fills.
-    receive() external payable {}
-
-    //*********************************************************************//
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
 
@@ -259,6 +252,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param shouldReturnHeldFees A boolean to indicate whether held fees should be returned.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    // slither-disable-next-line reentrancy-benign
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -374,6 +368,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
     /// @return result The number of tokens received.
+    // slither-disable-next-line reentrancy-benign
     function pay(
         uint256 projectId,
         address token,
@@ -464,6 +459,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param amount The amount of tokens being paid in.
     /// @param metadata The metadata in which `permit2` context is provided.
     /// @return amount The amount of tokens that have been accepted.
+    // slither-disable-next-line reentrancy-events
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // If native tokens are being paid in, return the `msg.value`.
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;

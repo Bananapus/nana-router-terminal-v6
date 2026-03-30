@@ -18,7 +18,7 @@ import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
 import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -78,7 +78,6 @@ contract RouterTerminalPreviewForkTest is Test {
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
             permissions: IJBPermissions(address(jbPermissions)),
-            projects: IJBProjects(address(jbProjects)),
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
             owner: multisig,
@@ -286,10 +285,12 @@ contract RouterTerminalPreviewForkTest is Test {
         internal
         returns (uint256 projectId)
     {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 baseCurrency = uint32(uint160(acceptedToken));
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: cashOutTaxRate,
-            baseCurrency: uint32(uint160(acceptedToken)),
+            baseCurrency: baseCurrency,
             pausePay: false,
             pauseCreditTransfers: false,
             allowOwnerMinting: false,
@@ -319,8 +320,9 @@ contract RouterTerminalPreviewForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = new JBFundAccessLimitGroup[](0);
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
-        tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 tokenCurrency = uint32(uint160(acceptedToken));
+        tokensToAccept[0] = JBAccountingContext({token: acceptedToken, decimals: decimals, currency: tokenCurrency});
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});

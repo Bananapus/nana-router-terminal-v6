@@ -6,7 +6,6 @@ import {Test} from "forge-std/Test.sol";
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -54,7 +53,7 @@ contract CashOutLoopLimitTest is Test {
 
     IJBDirectory directory = IJBDirectory(makeAddr("directory"));
     IJBPermissions permissions = IJBPermissions(makeAddr("permissions"));
-    IJBProjects projects = IJBProjects(makeAddr("projects"));
+
     IJBTokens tokens = IJBTokens(makeAddr("tokens"));
     IPermit2 permit2 = IPermit2(makeAddr("permit2"));
     IWETH9 weth = IWETH9(makeAddr("weth"));
@@ -75,7 +74,6 @@ contract CashOutLoopLimitTest is Test {
     function setUp() public {
         vm.etch(address(directory), hex"00");
         vm.etch(address(permissions), hex"00");
-        vm.etch(address(projects), hex"00");
         vm.etch(address(tokens), hex"00");
         vm.etch(address(permit2), hex"00");
         vm.etch(address(weth), hex"00");
@@ -85,7 +83,6 @@ contract CashOutLoopLimitTest is Test {
         routerTerminal = new JBRouterTerminal(
             directory,
             permissions,
-            projects,
             tokens,
             permit2,
             owner,
