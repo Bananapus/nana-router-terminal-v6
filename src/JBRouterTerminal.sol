@@ -999,6 +999,7 @@ contract JBRouterTerminal is
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
     /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
+    // slither-disable-next-line calls-loop
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
         PoolInfo memory pool = _discoverPool(tokenA, tokenB);
         if (pool.isV4) return POOL_MANAGER.getLiquidity(pool.v4Key.toId());
@@ -1342,6 +1343,7 @@ contract JBRouterTerminal is
         int24 tick;
 
         // Try to use TWAP from the pool's oracle hook (if available) for manipulation resistance.
+        // slither-disable-next-line unused-return
         if (address(key.hooks) != address(0)) {
             uint32[] memory secondsAgos = new uint32[](2);
             secondsAgos[0] = _TWAP_WINDOW;
@@ -1489,6 +1491,7 @@ contract JBRouterTerminal is
     /// @return destTerminal The terminal that accepts the final token, if found.
     /// @return finalToken The token after all cash-out steps.
     /// @return finalAmount The amount of the final token.
+    // slither-disable-next-line calls-loop
     function _previewCashOutLoop(
         uint256 destProjectId,
         address token,
