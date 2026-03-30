@@ -1004,6 +1004,7 @@ contract JBRouterTerminal is
     /// @param tokenB The other token in the pair.
     /// @param fee The fee tier to query.
     /// @return The pool address, or address(0) if none exists.
+    // slither-disable-next-line calls-loop
     function _getPool(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
         return FACTORY.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
     }
@@ -1021,6 +1022,7 @@ contract JBRouterTerminal is
     /// @return tick The current tick.
     /// @return protocolFee The protocol fee.
     /// @return lpFee The LP fee.
+    // slither-disable-next-line unused-return
     function _getSlot0(PoolId id)
         internal
         view
@@ -1033,6 +1035,7 @@ contract JBRouterTerminal is
     /// @param projectId The ID of the project.
     /// @param token The token to look up.
     /// @return The primary terminal, or IJBTerminal(address(0)) if none.
+    // slither-disable-next-line calls-loop
     function _primaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal) {
         return DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
     }
@@ -1047,6 +1050,7 @@ contract JBRouterTerminal is
     /// @notice Look up all terminals for a project.
     /// @param projectId The ID of the project.
     /// @return The array of terminals.
+    // slither-disable-next-line calls-loop
     function _terminalsOf(uint256 projectId) internal view returns (IJBTerminal[] memory) {
         return DIRECTORY.terminalsOf(projectId);
     }
