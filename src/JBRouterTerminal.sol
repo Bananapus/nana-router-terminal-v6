@@ -683,8 +683,8 @@ contract JBRouterTerminal is
             // This propagates slippage protection through multi-hop cashouts instead of dropping it.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
-                // Preserve at least 1 wei of slippage protection when rounding truncates to zero.
-                if (minTokensReclaimed == 0) minTokensReclaimed = 1;
+                // minTokensReclaimed may round to 0 here — that is intentional.
+                // A 0 minimum is valid and means no slippage protection for this hop.
             }
 
             // Update for next iteration.
@@ -1594,8 +1594,8 @@ contract JBRouterTerminal is
             // Scale the minimum proportionally for the next step based on the actual cashout ratio.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
-                // Preserve at least 1 wei of slippage protection when rounding truncates to zero.
-                if (minTokensReclaimed == 0) minTokensReclaimed = 1;
+                // minTokensReclaimed may round to 0 here — that is intentional.
+                // A 0 minimum is valid and means no slippage protection for this hop.
             }
 
             // Continue previewing from the token reclaimed in this hop.
