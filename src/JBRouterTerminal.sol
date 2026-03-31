@@ -41,6 +41,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
+import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -105,6 +106,9 @@ contract JBRouterTerminal is
 
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
+
+    /// @notice The TWAP window (in seconds) used when querying a V4 oracle hook.
+    uint32 private constant _TWAP_WINDOW = 30;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -1408,9 +1412,36 @@ contract JBRouterTerminal is
     {
         PoolId id = key.toId();
 
-        // Use the spot price from the pool's current state.
-        // slither-disable-next-line unused-return
-        (, int24 tick,,) = _getSlot0(id);
+        // The tick used for quoting — prefer TWAP over spot for MEV resistance.
+        int24 tick;
+
+        // Track whether the oracle hook provided a TWAP so we know whether to fall back to spot.
+        bool usedTwap;
+
+        // If the pool has a hook, try querying it as a geomean oracle (e.g., JBUniswapV4Hook implements this).
+        if (address(key.hooks) != address(0)) {
+            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, now].
+            uint32[] memory secondsAgos = new uint32[](2);
+            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (30 seconds ago).
+            secondsAgos[1] = 0; // End of the window (current block).
+
+            // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
+            // slither-disable-next-line unused-return
+            try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
+                int56[] memory tickCumulatives, uint160[] memory
+            ) {
+                // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
+                usedTwap = true;
+            } catch {}
+        }
+
+        // If no TWAP was available (no hook, or hook doesn't implement observe), use the instantaneous spot tick.
+        if (!usedTwap) {
+            // slither-disable-next-line unused-return
+            (, tick,,) = _getSlot0(id);
+        }
 
         uint128 liquidity = _getLiquidity(id);
 
