@@ -2,6 +2,33 @@
 
 Admin privileges and their scope in nana-router-terminal-v6.
 
+## At A Glance
+
+| Item | Details |
+|------|---------|
+| Scope | Registry-level selection of router terminal implementations plus immutable router-terminal swap and forwarding behavior. |
+| Operators | Registry owner for the global allowlist/default, project owners or `SET_ROUTER_TERMINAL` delegates for per-project selection, and users who must supply valid routing metadata. |
+| Highest-risk actions | Locking a project to the wrong terminal, changing the default terminal without understanding who inherits it, or assuming the router is an accounting-truth surface when it is not. |
+| Recovery posture | Unlocked projects can switch terminals. Locked projects keep the stored terminal choice, so recovery requires moving the project to a different admin path outside the registry. |
+
+## Routine Operations
+
+- Keep the registry allowlist limited to router terminal implementations you actually want projects to choose from.
+- Change the default terminal only when you are comfortable affecting every project that still relies on fallback resolution.
+- Encourage projects to lock their terminal only after verifying the resolved terminal address and expected routing behavior.
+- For credit-cashout routing, verify the payer has granted the router terminal the needed `TRANSFER_CREDITS` permission before relying on that path.
+
+## One-Way Or High-Risk Actions
+
+- `lockTerminalFor` is irreversible.
+- The current default terminal cannot be disallowed; the registry owner must move the default first before removing the old implementation from the allowlist.
+- The router terminal owner currently has no operational powers, but ownership still matters for any future code that might inherit or extend the contract.
+
+## Recovery Notes
+
+- If the default terminal is wrong, update the registry quickly before more projects snapshot it through `lockTerminalFor`.
+- If a project already locked the wrong terminal, the registry cannot unlock it; recovery has to happen by migrating the project's broader terminal setup elsewhere.
+
 ## Roles
 
 ### 1. Registry Owner (Ownable)
@@ -13,7 +40,7 @@ Admin privileges and their scope in nana-router-terminal-v6.
 ### 2. Project Owner / SET_ROUTER_TERMINAL Delegate
 
 **Contract**: `JBRouterTerminalRegistry`
-**Assigned via**: Ownership of the project's ERC-721 NFT (via `JBProjects.ownerOf(projectId)`), or delegation via `JBPermissions` with permission ID `SET_ROUTER_TERMINAL` (29).
+**Assigned via**: Ownership of the project's ERC-721 NFT (via `JBProjects.ownerOf(projectId)`), or delegation via `JBPermissions` with permission ID `SET_ROUTER_TERMINAL` (30).
 **Scope**: Per-project -- controls which router terminal a specific project uses, and can permanently lock that choice.
 
 ### 3. Router Terminal Owner (Ownable)
@@ -40,7 +67,7 @@ When a payment is forwarded through the registry, the terminal is resolved as fo
 
 **Lock semantics:** When `lockTerminalFor()` is called on a project with no explicit terminal, the current default is snapshot into `_terminalOf[projectId]` before locking. The project becomes independent of future default changes.
 
-**Disallow interaction:** If the registry owner calls `disallowTerminal()` on the current default terminal, the `defaultTerminal` is automatically cleared (set to `address(0)`). Projects relying on the default (without locking) would lose their terminal resolution until a new default is set. Projects should lock their terminal to avoid disruption.
+**Disallow interaction:** The registry owner cannot disallow the current default terminal. `disallowTerminal()` reverts with `JBRouterTerminalRegistry_CannotDisallowDefaultTerminal` until `setDefaultTerminal()` has moved the default elsewhere first. Projects relying on the default therefore keep a valid fallback terminal unless the owner explicitly changes that default.
 
 ## Privileged Functions
 
@@ -49,10 +76,10 @@ When a payment is forwarded through the registry, the terminal is resolved as fo
 | Function | Required Role | Permission ID | Scope | What It Does |
 |----------|--------------|---------------|-------|--------------|
 | `allowTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Adds a terminal to the allowlist (`isTerminalAllowed[terminal] = true`). Projects can only use allowlisted terminals. |
-| `disallowTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Removes a terminal from the allowlist. Also clears `defaultTerminal` if it matches the disallowed terminal. Does NOT affect projects that have already locked their terminal. |
+| `disallowTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Removes a terminal from the allowlist. Reverts if `terminal` is the current `defaultTerminal`, so the owner must move the default first. Does NOT affect projects that have already locked their terminal or explicitly set another terminal. |
 | `setDefaultTerminal(terminal)` | Registry Owner | `onlyOwner` | Global | Sets the default terminal for all projects that have not set a project-specific terminal. Also auto-allows the terminal. |
-| `setTerminalFor(projectId, terminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (29) | Per-project | Routes a specific project to a specific allowed terminal. Reverts if the terminal is not allowlisted or if the project's terminal is locked. |
-| `lockTerminalFor(projectId, expectedTerminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (29) | Per-project | Permanently locks the terminal choice for a project. If no explicit terminal is set, snapshots the current default into `_terminalOf[projectId]`. Reverts with `TerminalMismatch` if the resolved terminal differs from `expectedTerminal` (race condition protection). **Irreversible.** |
+| `setTerminalFor(projectId, terminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (30) | Per-project | Routes a specific project to a specific allowed terminal. Reverts if the terminal is not allowlisted or if the project's terminal is locked. |
+| `lockTerminalFor(projectId, expectedTerminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (30) | Per-project | Permanently locks the terminal choice for a project. If no explicit terminal is set, snapshots the current default into `_terminalOf[projectId]`. Reverts with `TerminalMismatch` if the resolved terminal differs from `expectedTerminal` (race condition protection). **Irreversible.** |
 
 ### JBRouterTerminal
 
