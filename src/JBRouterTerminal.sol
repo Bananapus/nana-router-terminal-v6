@@ -41,7 +41,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
-import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -106,9 +105,6 @@ contract JBRouterTerminal is
 
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
-
-    /// @notice The TWAP window (in seconds) used when querying a V4 oracle hook.
-    uint32 private constant _TWAP_WINDOW = 30;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -543,9 +539,18 @@ contract JBRouterTerminal is
 
             (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-            // Pull credits from the payer (requires payer to have granted TRANSFER_CREDITS to this contract).
+            // Resolve the actual credit holder. When called via an intermediary (e.g. JBRouterTerminalRegistry),
+            // _msgSender() is the intermediary — use its originalPayer to find the true holder.
+            address holder = _msgSender();
+            if (msg.sender.code.length > 0) {
+                try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
+                    if (payer != address(0)) holder = payer;
+                } catch {}
+            }
+
+            // Pull credits from the holder (requires holder to have granted TRANSFER_CREDITS to this contract).
             TOKENS.transferCreditsFrom({
-                holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
+                holder: holder, projectId: sourceProjectId, recipient: address(this), count: creditAmount
             });
 
             return creditAmount;
@@ -678,6 +683,8 @@ contract JBRouterTerminal is
             // This propagates slippage protection through multi-hop cashouts instead of dropping it.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+                // Preserve at least 1 wei of slippage protection when rounding truncates to zero.
+                if (minTokensReclaimed == 0) minTokensReclaimed = 1;
             }
 
             // Update for next iteration.
@@ -1400,30 +1407,10 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut)
     {
         PoolId id = key.toId();
-        int24 tick;
-        bool usedTwap;
 
-        // Try to use TWAP from the pool's oracle hook (if available) for manipulation resistance.
-        if (address(key.hooks) != address(0)) {
-            uint32[] memory secondsAgos = new uint32[](2);
-            secondsAgos[0] = _TWAP_WINDOW;
-            secondsAgos[1] = 0;
-            // slither-disable-next-line unused-return
-            try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
-                int56[] memory tickCumulatives, uint160[] memory
-            ) {
-                // Compute the arithmetic mean tick from the TWAP window.
-                // forge-lint: disable-next-line(unsafe-typecast)
-                tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
-                usedTwap = true;
-            } catch {}
-        }
-
-        // Fall back to spot price if TWAP was not available.
-        if (!usedTwap) {
-            // slither-disable-next-line unused-return
-            (, tick,,) = _getSlot0(id);
-        }
+        // Use the spot price from the pool's current state.
+        // slither-disable-next-line unused-return
+        (, int24 tick,,) = _getSlot0(id);
 
         uint128 liquidity = _getLiquidity(id);
 
@@ -1509,6 +1496,12 @@ contract JBRouterTerminal is
 
         if (exists) {
             (minAmountOut) = abi.decode(quote, (uint256));
+        }
+
+        // Treat a decoded value of 0 the same as "not provided" so that a stale or default-zero quote
+        // does not silently disable slippage protection. Fall through to automatic quoting.
+        if (minAmountOut != 0) {
+            // User-provided quote is valid; skip automatic quoting.
         } else if (pool.isV4) {
             minAmountOut = _getV4SpotQuote({
                 key: pool.v4Key,
@@ -1601,6 +1594,8 @@ contract JBRouterTerminal is
             // Scale the minimum proportionally for the next step based on the actual cashout ratio.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+                // Preserve at least 1 wei of slippage protection when rounding truncates to zero.
+                if (minTokensReclaimed == 0) minTokensReclaimed = 1;
             }
 
             // Continue previewing from the token reclaimed in this hop.
