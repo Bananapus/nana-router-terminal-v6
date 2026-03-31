@@ -46,7 +46,20 @@
 
 **Edge conditions that change user experience:** cash-out loop limits, cross-project routing assumptions, preview drift, and slippage when the first leg is a project-token reclaim rather than a swap.
 
-## Journey 4: Preview Routes And Protect The User Against Bad Settlement
+## Journey 4: Route A Payment From Credits Or A Cash-Out Source
+
+**Starting state:** the payer has Juicebox credits or a known source project position instead of an ordinary wallet token balance.
+
+**Success:** the router can pull that source value, cash it out if needed, and continue routing toward the destination project.
+
+**Flow**
+1. Encode the `cashOutSource` or equivalent metadata the router expects.
+2. Let the router pull credits or source-project value through the token and terminal surfaces it integrates with.
+3. Continue through the route-discovery process only after the source value has been converted into something the destination path can use.
+
+**Failure cases that matter:** sending `msg.value` alongside credit-based routing, wrong source-project metadata, and assuming credit cash-out behaves like direct ERC-20 routing.
+
+## Journey 5: Preview Routes And Protect The User Against Bad Settlement
 
 **Starting state:** a frontend or integration needs to show likely output before execution.
 
@@ -57,7 +70,7 @@
 2. Surface expected destination amount, input requirements, and route shape to the user.
 3. On execution, enforce the relevant minimums and refund rules so the user is not silently settled on a materially worse path.
 
-## Journey 5: Lock Down Which Router A Project Uses
+## Journey 6: Lock Down Which Router A Project Uses
 
 **Starting state:** the project has chosen a router and wants to prevent later redirection.
 
@@ -67,6 +80,17 @@
 1. An authorized actor sets the project-specific router in the registry.
 2. The actor locks the configuration once operational confidence is high.
 3. Integrations can treat the registry entry as durable infrastructure rather than mutable routing advice.
+
+## Journey 7: Migrate Registry-Held Balance Or Router Responsibility Safely
+
+**Starting state:** the project is changing router expectations or needs to move balance from a registry-held context.
+
+**Success:** the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind.
+
+**Flow**
+1. Use the registry's migration surface when a project's router balance or canonical terminal relationship needs to change.
+2. Verify the destination terminal and router assumptions before moving value.
+3. Update frontends only after the registry state and balance migration agree.
 
 ## Hand-Offs
 
