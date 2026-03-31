@@ -543,9 +543,18 @@ contract JBRouterTerminal is
 
             (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-            // Pull credits from the payer (requires payer to have granted TRANSFER_CREDITS to this contract).
+            // Resolve the actual credit holder. When called via an intermediary (e.g. JBRouterTerminalRegistry),
+            // _msgSender() is the intermediary — use its originalPayer to find the true holder.
+            address holder = _msgSender();
+            if (msg.sender.code.length > 0) {
+                try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
+                    if (payer != address(0)) holder = payer;
+                } catch {}
+            }
+
+            // Pull credits from the holder (requires holder to have granted TRANSFER_CREDITS to this contract).
             TOKENS.transferCreditsFrom({
-                holder: _msgSender(), projectId: sourceProjectId, recipient: address(this), count: creditAmount
+                holder: holder, projectId: sourceProjectId, recipient: address(this), count: creditAmount
             });
 
             return creditAmount;
@@ -678,6 +687,8 @@ contract JBRouterTerminal is
             // This propagates slippage protection through multi-hop cashouts instead of dropping it.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+                // minTokensReclaimed may round to 0 here — that is intentional.
+                // A 0 minimum is valid and means no slippage protection for this hop.
             }
 
             // Update for next iteration.
@@ -1400,26 +1411,33 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut)
     {
         PoolId id = key.toId();
+
+        // The tick used for quoting — prefer TWAP over spot for MEV resistance.
         int24 tick;
+
+        // Track whether the oracle hook provided a TWAP so we know whether to fall back to spot.
         bool usedTwap;
 
-        // Try to use TWAP from the pool's oracle hook (if available) for manipulation resistance.
+        // If the pool has a hook, try querying it as a geomean oracle (e.g., JBUniswapV4Hook implements this).
         if (address(key.hooks) != address(0)) {
+            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, now].
             uint32[] memory secondsAgos = new uint32[](2);
-            secondsAgos[0] = _TWAP_WINDOW;
-            secondsAgos[1] = 0;
+            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (30 seconds ago).
+            secondsAgos[1] = 0; // End of the window (current block).
+
+            // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
             // slither-disable-next-line unused-return
             try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
                 int56[] memory tickCumulatives, uint160[] memory
             ) {
-                // Compute the arithmetic mean tick from the TWAP window.
+                // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
                 // forge-lint: disable-next-line(unsafe-typecast)
                 tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
                 usedTwap = true;
             } catch {}
         }
 
-        // Fall back to spot price if TWAP was not available.
+        // If no TWAP was available (no hook, or hook doesn't implement observe), use the instantaneous spot tick.
         if (!usedTwap) {
             // slither-disable-next-line unused-return
             (, tick,,) = _getSlot0(id);
@@ -1509,6 +1527,12 @@ contract JBRouterTerminal is
 
         if (exists) {
             (minAmountOut) = abi.decode(quote, (uint256));
+        }
+
+        // Treat a decoded value of 0 the same as "not provided" so that a stale or default-zero quote
+        // does not silently disable slippage protection. Fall through to automatic quoting.
+        if (minAmountOut != 0) {
+            // User-provided quote is valid; skip automatic quoting.
         } else if (pool.isV4) {
             minAmountOut = _getV4SpotQuote({
                 key: pool.v4Key,
@@ -1601,6 +1625,8 @@ contract JBRouterTerminal is
             // Scale the minimum proportionally for the next step based on the actual cashout ratio.
             if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
                 minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
+                // minTokensReclaimed may round to 0 here — that is intentional.
+                // A 0 minimum is valid and means no slippage protection for this hop.
             }
 
             // Continue previewing from the token reclaimed in this hop.

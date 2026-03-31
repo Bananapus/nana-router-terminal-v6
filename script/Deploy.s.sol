@@ -62,32 +62,38 @@ contract DeployScript is Script, Sphinx {
         } else if (block.chainid == 10) {
             weth = 0x4200000000000000000000000000000000000006;
             factory = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
-            poolManager = 0x000000000004444c5dc75cB358380D2e3dE08A90;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0x9a13F98Cb987694C9F086b1F5eB990EeA8264Ec3;
             // Base Mainnet
         } else if (block.chainid == 8453) {
             weth = 0x4200000000000000000000000000000000000006;
             factory = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
-            poolManager = 0x000000000004444c5dc75cB358380D2e3dE08A90;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
             // Optimism Sepolia
         } else if (block.chainid == 11_155_420) {
             weth = 0x4200000000000000000000000000000000000006;
             factory = 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24;
-            poolManager = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0x1390B1276c3C0dd59E0e666d4cF97e30267E72E0;
             // BASE Sepolia
         } else if (block.chainid == 84_532) {
             weth = 0x4200000000000000000000000000000000000006;
             factory = 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24;
-            poolManager = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
             // Arbitrum Mainnet
         } else if (block.chainid == 42_161) {
             weth = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
             factory = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
-            poolManager = 0x000000000004444c5dc75cB358380D2e3dE08A90;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32;
             // Arbitrum Sepolia
         } else if (block.chainid == 421_614) {
             weth = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
             factory = 0x248AB79Bbb9bC29bB72f7Cd42F17e054Fc40188e;
-            poolManager = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+            // https://docs.uniswap.org/contracts/v4/deployments
+            poolManager = 0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317;
         } else {
             revert("Invalid RPC / no juice contracts deployed on this network");
         }
