@@ -1,225 +1,116 @@
 # Juicebox Router Terminal
 
-A Juicebox terminal that accepts payments in any token, dynamically discovers what token each destination project accepts, and routes the payment there -- via direct forwarding, Uniswap swap, JB token cashout, or a combination. Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
+`@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best available route.
 
-This contract family is a routing surface, not an accounting-truth surface. `JBRouterTerminal` synthesizes
-best-effort `JBAccountingContext` values for routing discovery: native tokens use `18` decimals, ERC-20s probe
-`IERC20Metadata.decimals()` when available, and broken or non-standard tokens fall back to `18`. The registry simply
-forwards that context. Do not reuse the router terminal or router terminal registry as an accounting-sensitive terminal
-source for lending or other logic that relies on real token decimals.
+Docs: <https://docs.juicebox.money>
+Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md)
 
-_If you're having trouble understanding this contract, take a look at the [core protocol contracts](https://github.com/Bananapus/nana-core-v6) and the [documentation](https://docs.juicebox.money/) first. If you have questions, reach out on [Discord](https://discord.com/invite/ErQYmth4dS)._
+## Overview
 
-## Architecture
+The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal.
 
-| Contract | Description |
-|----------|-------------|
-| `JBRouterTerminal` | Core terminal. Accepts any token via `pay` or `addToBalanceOf`, previews payment routes via `previewPayFor`, discovers the destination project's accepted token, and routes there -- swapping through Uniswap V3 or V4 pools if needed, cashing out JB project tokens if the input is a project token, or forwarding directly if the token is already accepted. Uses TWAP oracle (V3) or spot price (V4) for automatic slippage protection when the caller does not provide a quote. Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnlockCallback`, and `IJBRouterTerminal`. |
-| `JBRouterTerminalRegistry` | A proxy terminal that delegates `pay`, `previewPayFor`, and `addToBalanceOf` to a per-project or default `JBRouterTerminal` instance. Project owners can choose which router terminal they use, and optionally lock that choice permanently. Implements `IJBTerminal`, `IJBPayerTracker`, and the extra registry management surface via `IJBRouterTerminalRegistry`. |
+It can route through:
 
-## How It Works
+- direct forwarding when the destination already accepts the input token
+- wrapping or unwrapping native ETH and WETH
+- Uniswap V3 or V4 swaps
+- recursive Juicebox token cash outs when the input itself is a project token
 
-1. A payer calls `pay(projectId, token, amount, ...)` with any token.
-2. The terminal accepts the token (supports ERC-20 approvals, Permit2, and credit transfers).
-3. If the input is a JB project token (ERC-20 or credits), it recursively cashes out through the source project's terminals until reaching a base token.
-4. It resolves which token the destination project accepts, checking: metadata override (`routeTokenOut`), direct acceptance only if the chosen terminal exposes non-empty accounting contexts for the project, NATIVE/WETH equivalence, then dynamic pool discovery across all terminals.
-5. If the resolved token differs from the input, it converts -- wrapping/unwrapping ETH/WETH, or swapping through the best Uniswap V3 or V4 pool.
-6. Slippage protection: the caller can pass a minimum output quote in metadata (`quoteForSwap` key), or the terminal calculates one using TWAP (V3) or spot price (V4) with a dynamic sigmoid slippage tolerance based on estimated price impact.
-7. The output tokens are forwarded to the project's primary terminal via `terminal.pay(...)` or `terminal.addToBalanceOf(...)`.
+Projects can use the registry contract to choose a project-specific router terminal or fall back to a default.
 
-### Previewing Payments
+Use this repo when UX requires "pay with many tokens, settle into the right one." Do not use it as a replacement for downstream terminal accounting or as an authoritative decimal source.
 
-`previewPayFor(...)` mirrors the router's payment routing logic and forwards the preview to the terminal that would ultimately receive the payment. When a swap is required, it returns the router's best estimate using the same pool-discovery and quote-selection logic used to derive execution bounds.
+This repo is best understood as an execution router attached to Juicebox, not as a new accounting model.
 
-- Direct routes are exact.
-- Native/WETH wrap-unwrap routes are exact.
-- Cashout-only routes are exact when the downstream cashout terminal exposes an exact preview surface.
-- Swap routes return best-effort estimates based on current pool state and any caller-provided `quoteForSwap` metadata.
+## Key Contracts
 
-```mermaid
-sequenceDiagram
-    participant Frontend client
-    participant JBDirectory
-    participant JBRouterTerminal
-    participant Uniswap V3/V4
-    participant JBMultiTerminal
-    Note left of Frontend client: User pays project with USDC
-    Frontend client->>JBDirectory: Checks project's primary USDC terminal
-    JBDirectory->>Frontend client: Returns JBRouterTerminal
-    Frontend client->>JBRouterTerminal: Calls pay(...) with USDC (and optional quote)
-    JBRouterTerminal->>JBDirectory: Discovers project's accepted token (ETH)
-    JBRouterTerminal->>Uniswap V3/V4: Finds best pool, swaps USDC for ETH
-    JBRouterTerminal->>JBMultiTerminal: Pays ETH to project's terminal
-    Note right of JBMultiTerminal: Mint tokens for original beneficiary
-```
+| Contract | Role |
+| --- | --- |
+| `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
+| `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 
-### Routing Strategies
+## Mental Model
 
-The terminal uses a multi-step routing algorithm:
+There are three separate decisions on the payment path:
 
-1. **JB token cashout** -- If the input is a JB project token (detected via `TOKENS.projectIdOf()` or the `cashOutSource` metadata key for credits), the terminal recursively cashes out through the source project's cashout terminals. At each step it prioritizes: tokens the destination directly accepts, then other JB tokens (recursable), then any base token.
-2. **Direct forwarding** -- If the (possibly post-cashout) token is already accepted by the destination terminal.
-3. **NATIVE/WETH equivalence** -- If the project accepts NATIVE_TOKEN and the input is WETH (or vice versa), wrap or unwrap.
-4. **Uniswap swap** -- Through the highest-liquidity pool across V3 fee tiers (0.3%, 0.05%, 1%, 0.01%) and V4 fee/tick-spacing pairs. V3 and V4 compete on liquidity; the deeper pool wins.
-5. **Combination** -- Chaining cashout + swap when no single route works.
+1. what token the destination project actually wants
+2. whether the input token can become that token directly, through a swap, or through a Juicebox cash-out path first
+3. which downstream terminal should receive the final asset
 
-### Token Output Resolution Priority
+The router answers those questions, then hands off to the canonical terminal. It should not be treated as the system of record after that handoff.
 
-When deciding what token to convert to, `_resolveTokenOut` follows this order:
+The shortest useful reading order is:
 
-1. **Metadata override** -- Payer specifies `routeTokenOut` in metadata.
-2. **Direct acceptance** -- The destination project accepts `tokenIn` as-is.
-3. **NATIVE/WETH equivalence** -- The project accepts the wrapped/unwrapped form.
-4. **Dynamic discovery** -- Iterate all terminals and accounting contexts for the project, find the accepted token with the deepest Uniswap pool against `tokenIn`.
+1. `JBRouterTerminal`
+2. `JBRouterTerminalRegistry`
+3. the downstream terminal selected through `JBDirectory`
+
+## Read These Files First
+
+1. `src/JBRouterTerminal.sol`
+2. `src/JBRouterTerminalRegistry.sol`
+3. `src/libraries/JBSwapLib.sol`
+4. the downstream terminal implementation in `nana-core-v6`
+
+## Integration Traps
+
+- projects that expose a router terminal still settle into ordinary Juicebox terminals underneath; downstream semantics still matter
+- route discovery and route execution are related but not identical, especially when liquidity or metadata-supplied quotes move
+- using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
+- the registry layer changes who a project routes through, but not what the downstream terminal ultimately is
+
+## Where State Lives
+
+- route-selection logic lives in `JBRouterTerminal`
+- per-project router choice and lock status live in `JBRouterTerminalRegistry`
+- accepted-token accounting and final balance changes live in the downstream terminal, usually in `nana-core-v6`
+
+That separation is the reason a successful route can still end in a downstream terminal behavior you did not expect.
 
 ## Install
-
-For projects using `npm` to manage dependencies (recommended):
 
 ```bash
 npm install @bananapus/router-terminal-v6
 ```
 
-For projects using `forge` to manage dependencies:
+## Development
 
 ```bash
-forge install Bananapus/nana-router-terminal-v6
+npm install
+forge build
+forge test
 ```
 
-If you're using `forge`, add `@bananapus/router-terminal-v6/=lib/nana-router-terminal-v6/` to `remappings.txt`.
+Useful scripts:
 
-## Develop
+- `npm run deploy:mainnets`
+- `npm run deploy:testnets`
 
-`nana-router-terminal-v6` uses [npm](https://www.npmjs.com/) (version >=20.0.0) for package management and [Foundry](https://github.com/foundry-rs/foundry) for builds and tests.
+## Deployment Notes
 
-```bash
-npm ci && forge install
-```
-
-| Command | Description |
-|---------|-------------|
-| `forge build` | Compile the contracts and write artifacts to `out`. |
-| `forge test` | Run the tests. |
-| `forge fmt` | Lint. |
-| `forge build --sizes` | Get contract sizes. |
-| `forge coverage` | Generate a test coverage report. |
-| `forge clean` | Remove the build artifacts and cache directories. |
-
-### Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm test` | Run local tests. |
-| `npm run coverage` | Generate an LCOV test coverage report. |
-
-### Configuration
-
-Key `foundry.toml` settings:
-
-- `solc = '0.8.28'`
-- `evm_version = 'cancun'` (required for Uniswap V4's transient storage)
-- `optimizer_runs = 200`
-- `via_ir = true` (required for `JBRouterTerminal` to fit under EIP-170)
-- `fuzz.runs = 4096`
-- `invariant.runs = 1024`, `invariant.depth = 100`
+This package depends on core, address-registry, and permission-ID packages plus Uniswap V3, V4, and Permit2 integrations. It is meant to sit in front of canonical Juicebox terminals, not replace them.
 
 ## Repository Layout
 
-```
-nana-router-terminal-v6/
-├── src/
-│   ├── JBRouterTerminal.sol              # Core router terminal
-│   ├── JBRouterTerminalRegistry.sol      # Per-project terminal routing
-│   ├── interfaces/
-│   │   ├── IJBPayerTracker.sol           # Original-payer tracking for refund resolution
-│   │   ├── IJBRouterTerminal.sol         # Router terminal interface
-│   │   ├── IJBRouterTerminalRegistry.sol # Registry interface (extends IJBTerminal, IJBPayerTracker)
-│   │   └── IWETH9.sol                    # WETH wrapper interface
-│   ├── libraries/
-│   │   └── JBSwapLib.sol                 # Slippage tolerance, impact, and price limit math
-│   └── structs/
-│       └── PoolInfo.sol                  # V3/V4 pool metadata struct
-├── script/
-│   ├── Deploy.s.sol                      # Deployment script (multi-chain)
-│   └── helpers/
-│       └── RouterTerminalDeploymentLib.sol # Deployment address loader
-└── test/
-    ├── RouterTerminal.t.sol              # Unit tests (mocked dependencies)
-    ├── RouterTerminalRegistry.t.sol      # Registry unit tests
-    ├── RouterTerminalFork.t.sol          # Fork tests against mainnet Uniswap pools
-    ├── RouterTerminalPreviewFork.t.sol   # Fork parity tests for previewPayFor
-    ├── RouterTerminalCashOutFork.t.sol   # Fork tests for cashout routing
-    ├── RouterTerminalCreditCashout.t.sol # Credit cashout unit tests
-    ├── RouterTerminalERC2771.t.sol       # ERC-2771 meta-transaction tests
-    ├── RouterTerminalFeeCashOutFork.t.sol # Fee routing through cashout (fork)
-    ├── RouterTerminalMultihopFork.t.sol  # Multi-hop routing (fork)
-    ├── RouterTerminalReentrancy.t.sol    # Reentrancy attack tests
-    ├── RouterTerminalSandwichFork.t.sol  # MEV/sandwich resistance (fork)
-    ├── fork/
-    │   └── V4QuoteAndSettlementFork.t.sol # V4 quote and settlement (fork)
-    ├── invariant/
-    │   └── RouterTerminalInvariant.t.sol  # Invariant/fuzz tests
-    └── regression/
-        ├── CashOutLoopLimit.t.sol        # Circular cashout loop cap
-        ├── LockTerminalRace.t.sol        # Lock terminal race condition
-        └── V4SpotPriceSlippage.t.sol     # Sigmoid slippage math
+```text
+src/
+  JBRouterTerminal.sol
+  JBRouterTerminalRegistry.sol
+  interfaces/
+  libraries/
+  structs/
+test/
+  unit, fork, registry, audit, invariant, and regression coverage
+script/
+  Deploy.s.sol
+  helpers/
 ```
 
-## Payment Metadata
+## Risks And Notes
 
-The `JBRouterTerminal` accepts encoded `metadata` in its `pay(...)` and `addToBalanceOf(...)` functions. Metadata is decoded using `JBMetadataResolver` with string-based keys:
+- the router synthesizes accounting context for discovery and should not be treated as an accounting-truth surface
+- swap previews are best-effort estimates and depend on current pool state plus caller-supplied quote data
+- recursive cash-out routing increases complexity when the input token is itself a Juicebox project token
+- slippage and sandwich resistance depend on the quality of the quote path chosen for the route
 
-| Key | Type | Purpose |
-|-----|------|---------|
-| `"quoteForSwap"` | `uint256` | Minimum output amount from the swap. Overrides the automatic TWAP/spot-based quote. |
-| `"permit2"` | `JBSingleAllowance` | Permit2 signature for gasless ERC-20 approvals. |
-| `"routeTokenOut"` | `address` | Force the router to convert to a specific output token instead of auto-discovering. Reverts if the destination project does not accept it. |
-| `"cashOutSource"` | `(uint256 sourceProjectId, uint256 creditAmount)` | Cash out credits from `sourceProjectId`. The payer must have granted `TRANSFER_CREDITS` permission (ID 13) to the router terminal. |
-| `"cashOutMinReclaimed"` | `uint256` | Minimum tokens reclaimed from the first cashout step (slippage protection for cashouts). |
-
-### Quote Example
-
-```solidity
-// Provide a minimum output quote in metadata
-bytes memory metadata = JBMetadataResolver.addToMetadata({
-    originalMetadata: "",
-    id: JBMetadataResolver.getId("quoteForSwap"),
-    data: abi.encode(minAmountOut)
-});
-
-routerTerminal.pay(projectId, usdc, 1000e6, beneficiary, 0, "swap with quote", metadata);
-```
-
-If no `quoteForSwap` is provided, the terminal calculates one automatically:
-- **V3 pools**: TWAP oracle with a configurable window (default 10 minutes, capped by oldest observation). Reverts if no observation history exists.
-- **V4 pools**: The terminal first attempts a 30-second TWAP via the pool's oracle hook. If no oracle hook exists or the call fails, it falls back to the instantaneous spot tick. Both use the sigmoid slippage formula.
-- **Both**: Dynamic sigmoid slippage tolerance based on estimated price impact and pool fee. Range: 2% minimum to 88% maximum ceiling.
-
-## Supported Chains
-
-The deployment script (`script/Deploy.s.sol`) supports:
-
-- Ethereum Mainnet
-- Optimism
-- Base
-- Arbitrum
-- Sepolia testnets for each
-
-Each chain is configured with the appropriate WETH, Uniswap V3 Factory, and V4 PoolManager addresses. Permit2 is deployed at `0x000000000022D473030F116dDEE9F6B43aC78BA3` on all chains. See `script/Deploy.s.sol` for the full address list.
-
-## Permissions
-
-| Permission | ID | Contract | Purpose |
-|------------|----|----------|---------|
-| `SET_ROUTER_TERMINAL` | 29 | `JBRouterTerminalRegistry` | Allows a project owner or delegate to call `setTerminalFor` (choose which router terminal a project uses) and `lockTerminalFor` (permanently lock that choice). |
-| `TRANSFER_CREDITS` | 13 | `JBRouterTerminal` | Must be granted by the payer to the router terminal address for the source project. Required when using `cashOutSource` metadata to cash out credits -- the router calls `TOKENS.transferCreditsFrom()` to pull credits from the payer. |
-
-## Risks
-
-- The terminal never holds a token balance between transactions. After every swap, all output tokens are forwarded to the destination terminal, and leftover input tokens from partial fills are returned to the payer.
-- Pool discovery is dynamic -- the terminal searches V3 and V4 pools at runtime. If pool liquidity changes between discovery and execution, slippage protection prevents excessive losses.
-- The `receive()` function accepts ETH from any sender. This is required because ETH arrives from multiple sources: WETH unwraps, cash out reclaims from project terminals, and V4 PoolManager takes. The terminal processes all received ETH within the same transaction.
-- TWAP fallback: V3 pools with no TWAP observation history (`oldestObservation == 0`) will cause the transaction to revert with `JBRouterTerminal_NoObservationHistory()`. V4 attempts a TWAP via the pool's oracle hook first, falling back to spot price if unavailable.
-- Uniswap V4 requires `cancun` EVM version (transient storage opcodes). On chains without EIP-1153 support, the terminal falls back to V3-only routing.
-- Credit cashouts require the payer to grant `TRANSFER_CREDITS` permission (ID 13) to the router terminal address. Without this, credit-based routing will revert.
-- The `_cashOutLoop` recursively cashes out JB project tokens. Deeply nested project token chains (project A's token backed by project B's token backed by project C's token, etc.) will consume more gas per level of recursion.
+The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.

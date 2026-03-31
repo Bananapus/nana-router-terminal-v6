@@ -1,4 +1,21 @@
-# RISKS.md -- nana-router-terminal-v6
+# Router Terminal Risk Register
+
+This file focuses on the routing, accounting-context, and liquidity-selection risks in the terminal that accepts arbitrary tokens and forwards them into the destination project's real accounting surface.
+
+## How to use this file
+
+- Read `Priority risks` first; they explain where routing convenience can diverge from accounting truth.
+- Use the detailed sections for token-decimal synthesis, swap-path, and integration reasoning.
+- Treat `Accepted Behaviors` as explicit statements about what this terminal does not guarantee.
+
+## Priority risks
+
+| Priority | Risk | Why it matters | Primary controls |
+|----------|------|----------------|------------------|
+| P0 | Synthetic accounting context misuse | The router synthesizes best-effort decimals and routing context; if downstream systems treat it as accounting truth, they can misprice or mis-lend. | Clear docs, registry scoping, and explicit prohibition on accounting-sensitive reuse. |
+| P1 | Wrong-route or low-liquidity execution | The router chooses among direct forwarding, V3, V4, and cash-out paths; a bad route can degrade user execution. | Route selection tests, liquidity checks, and user-specified minimum returns. |
+| P1 | Integration fragility with broken tokens | Non-standard ERC-20 metadata or transfer behavior can distort decimal inference or swap execution. | Fallback defaults, defensive probing, and integration testing with hostile token behavior. |
+
 
 ## 1. Trust Assumptions
 

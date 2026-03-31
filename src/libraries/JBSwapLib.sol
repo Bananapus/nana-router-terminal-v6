@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
-import {mulDiv} from "@prb/math/src/Common.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
+import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 
 /// @custom:benediction DEVS BENEDICAT ET PROTEGAT CONTRACTVS MEAM
 /// @notice Shared library for slippage tolerance and price limit calculations.
