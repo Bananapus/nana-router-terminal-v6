@@ -269,45 +269,25 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IJBTerminal terminal = _terminalOf[projectId];
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
+        // Accept the funds for the token.
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+
+        // Trigger any pre-transfer logic.
+        uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
+
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
-        // leftovers to the true payer and resolve credit holders.
+        // leftovers to the true payer.
         originalPayer = _msgSender();
 
-        // Check for credit cash-out metadata. Credits bypass the normal fund acceptance flow because:
-        // 1. No ERC-20 transfer or ETH value is needed — credits are internal JB accounting.
-        // 2. The downstream terminal pulls credits from the original payer (resolved via `originalPayer`).
-        (bool creditExists,) = _creditCashOutFrom({terminal: address(terminal), metadata: metadata});
-
-        if (creditExists) {
-            // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
-            if (msg.value != 0) revert JBRouterTerminalRegistry_NoMsgValueAllowed(msg.value);
-
-            // Forward to the terminal with no ETH value. The terminal handles the credit transfer.
-            terminal.addToBalanceOf({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                shouldReturnHeldFees: shouldReturnHeldFees,
-                memo: memo,
-                metadata: metadata
-            });
-        } else {
-            // Accept the funds for the token.
-            amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-
-            // Trigger any pre-transfer logic.
-            uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
-
-            // Forward to the resolved terminal.
-            terminal.addToBalanceOf{value: payValue}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                shouldReturnHeldFees: shouldReturnHeldFees,
-                memo: memo,
-                metadata: metadata
-            });
-        }
+        // Forward to the resolved terminal.
+        terminal.addToBalanceOf{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            shouldReturnHeldFees: shouldReturnHeldFees,
+            memo: memo,
+            metadata: metadata
+        });
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -408,47 +388,26 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IJBTerminal terminal = _terminalOf[projectId];
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
+        // Accept the funds for the token.
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+
+        // Trigger any pre-transfer logic.
+        uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
+
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
-        // leftovers to the true payer and resolve credit holders.
+        // leftovers to the true payer.
         originalPayer = _msgSender();
 
-        // Check for credit cash-out metadata. Credits bypass the normal fund acceptance flow because:
-        // 1. No ERC-20 transfer or ETH value is needed — credits are internal JB accounting.
-        // 2. The downstream terminal pulls credits from the original payer (resolved via `originalPayer`).
-        (bool creditExists,) = _creditCashOutFrom({terminal: address(terminal), metadata: metadata});
-
-        if (creditExists) {
-            // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
-            if (msg.value != 0) revert JBRouterTerminalRegistry_NoMsgValueAllowed(msg.value);
-
-            // Forward to the terminal with no ETH value. The terminal handles the credit transfer.
-            result = terminal.pay({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                beneficiary: beneficiary,
-                minReturnedTokens: minReturnedTokens,
-                memo: memo,
-                metadata: metadata
-            });
-        } else {
-            // Accept the funds for the token.
-            amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-
-            // Trigger any pre-transfer logic.
-            uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
-
-            // Forward the payment to the terminal.
-            result = terminal.pay{value: payValue}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                beneficiary: beneficiary,
-                minReturnedTokens: minReturnedTokens,
-                memo: memo,
-                metadata: metadata
-            });
-        }
+        // Forward the payment to the terminal.
+        result = terminal.pay{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: minReturnedTokens,
+            memo: memo,
+            metadata: metadata
+        });
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -493,30 +452,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
-
-    /// @notice Check for credit cash-out metadata keyed to the downstream terminal.
-    /// @param terminal The resolved terminal that the credits target.
-    /// @param metadata The metadata to inspect.
-    /// @return creditExists Whether the `cashOutSource` metadata is present.
-    /// @return creditAmount The credit amount, or 0 if none specified.
-    function _creditCashOutFrom(
-        address terminal,
-        bytes calldata metadata
-    )
-        internal
-        pure
-        returns (bool creditExists, uint256 creditAmount)
-    {
-        // The metadata ID is derived from the terminal's address, not the registry's, because the user encodes
-        // metadata targeting the terminal that will ultimately process the credits.
-        (bool exists, bytes memory creditData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource", terminal), metadata: metadata});
-
-        if (exists) {
-            (, creditAmount) = abi.decode(creditData, (uint256, uint256));
-            creditExists = true;
-        }
-    }
 
     /// @notice Accepts a token being paid in.
     /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
