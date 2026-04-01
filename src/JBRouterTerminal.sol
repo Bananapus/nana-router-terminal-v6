@@ -273,7 +273,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: _resolveRefundWithBackupRecipient(payable(beneficiary))
+            refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
         });
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
@@ -714,7 +714,8 @@ contract JBRouterTerminal is
         uint256 amount,
         uint256 projectId,
         bytes calldata metadata,
-        address payable refundTo
+        address payable refundTo,
+        uint256 refundBalanceBaseline
     )
         internal
         returns (uint256)
@@ -739,7 +740,8 @@ contract JBRouterTerminal is
             tokenOut: tokenOut,
             amount: amount,
             metadata: metadata,
-            refundTo: refundTo
+            refundTo: refundTo,
+            refundBalanceBaseline: refundBalanceBaseline
         });
     }
 
@@ -848,7 +850,8 @@ contract JBRouterTerminal is
         address tokenOut,
         uint256 amount,
         bytes calldata metadata,
-        address payable refundTo
+        address payable refundTo,
+        uint256 refundBalanceBaseline
     )
         internal
         returns (uint256 amountOut)
@@ -873,13 +876,13 @@ contract JBRouterTerminal is
         // Unwrap if output is native token.
         if (tokenOut == JBConstants.NATIVE_TOKEN) _wethWithdraw(amountOut);
 
-        // Return leftover input tokens to payer. The router is stateless — it should never hold funds between
-        // transactions. The full remaining balance is refunded (not a delta) so that any accidentally-sent tokens
-        // are recovered rather than permanently stuck. This is intentional: recovery > lockup.
+        // Refund only the leftover portion attributable to this swap. Pre-existing balances are not part of the
+        // caller's route and should not be swept into the current refund.
         uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
-        if (balanceAfter > 0) {
-            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethWithdraw(balanceAfter);
-            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: balanceAfter});
+        if (balanceAfter > refundBalanceBaseline) {
+            uint256 refundAmount = balanceAfter - refundBalanceBaseline;
+            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethWithdraw(refundAmount);
+            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: refundAmount});
         }
     }
 
@@ -933,6 +936,13 @@ contract JBRouterTerminal is
         // Resolve what token the destination project accepts and which terminal to use.
         (tokenOut, destTerminal) = _resolveTokenOut({projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
 
+        uint256 refundBalanceBaseline;
+        if (tokenIn == JBConstants.NATIVE_TOKEN) {
+            refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
+        } else {
+            refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this)) - amount;
+        }
+
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
         amountOut = _convert({
             tokenIn: tokenIn,
@@ -940,7 +950,8 @@ contract JBRouterTerminal is
             amount: amount,
             projectId: destProjectId,
             metadata: metadata,
-            refundTo: refundTo
+            refundTo: refundTo,
+            refundBalanceBaseline: refundBalanceBaseline
         });
     }
 
@@ -1557,10 +1568,11 @@ contract JBRouterTerminal is
     /// @return The effective amount that routing should use.
     function _previewAcceptFundsFor(uint256 amount, bytes calldata metadata) internal view returns (uint256) {
         // Credit cashouts use the credit amount encoded in metadata rather than the raw token amount.
-        (, uint256 creditAmount) = _cashOutSourceFrom(metadata);
+        (uint256 sourceProjectId, uint256 creditAmount) = _cashOutSourceFrom(metadata);
 
-        // If credits are being routed, preview using the credited amount.
-        if (creditAmount != 0) return creditAmount;
+        // Mirror execution semantics exactly: the presence of a source override means the decoded
+        // credit amount, even `0`, is the effective routed amount.
+        if (sourceProjectId != 0) return creditAmount;
 
         // Otherwise, use the caller-specified amount unchanged.
         return amount;

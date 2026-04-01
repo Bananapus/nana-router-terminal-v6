@@ -770,13 +770,13 @@ contract TestAuditGaps is Test {
     }
 
     /// @notice ETH that is directly deposited to the registry (not via partial-fill refund) is still stuck.
-    /// However, partial-fill leftovers are now routed to `beneficiary` (for pay()) or `_msgSender()`
-    /// (for addToBalanceOf()) instead of `_msgSender()` of the router, so the registry no longer
+    /// However, partial-fill leftovers are now routed to the original payer for both pay() and addToBalanceOf(),
+    /// so the registry no longer
     /// receives partial-fill refunds in the first place.
     function test_registryReceive_directDepositStillStuck() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
-        // Simulate ETH arriving directly (not from partial-fill — that path now goes to beneficiary).
+        // Simulate ETH arriving directly (not from partial-fill — that path now goes to the original payer).
         vm.deal(address(reg), 1 ether);
         assertEq(address(reg).balance, 1 ether);
 
@@ -803,14 +803,12 @@ contract TestAuditGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 6b: Partial-fill leftovers go to beneficiary, not _msgSender()
+    // GAP 6b: Partial-fill leftovers go to the original payer, not the downstream beneficiary
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When pay() is called and a partial fill occurs, leftover input tokens
-    /// are sent to the `beneficiary`, not `_msgSender()`. This is critical when pay()
-    /// is called through a registry or other intermediary where _msgSender() differs
-    /// from the intended recipient.
-    function test_partialFill_leftoverSentToBeneficiary_notMsgSender() public {
+    /// are sent back to the original payer, not to the downstream beneficiary.
+    function test_partialFill_leftoverSentToOriginalPayer_notBeneficiary() public {
         MockERC20Std tok = new MockERC20Std();
         address tokenIn = address(tok);
         address tokenOut = makeAddr("tokenOut_refund");
@@ -831,8 +829,7 @@ contract TestAuditGaps is Test {
         // Mock V3 swap (partial fill — swap returns only 90 output for 80 input consumed).
         // Because the swap is fully mocked, no tokens actually leave the router.
         // After _acceptFundsFor transfers 100 in, the router's real balance stays at 100.
-        // The leftover check sees that 100 and refunds all of it. This is correct behavior
-        // for testing the *recipient* — what matters is WHERE the leftover goes, not how much.
+        // The leftover check sees that 100 and refunds all of it to the original payer.
         {
             bool zeroForOne = tokenIn < tokenOut;
             if (zeroForOne) {
@@ -857,22 +854,20 @@ contract TestAuditGaps is Test {
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
 
-        address alice = makeAddr("alice"); // msg.sender
-        address bob = makeAddr("bob"); // beneficiary (should receive leftover)
+        address alice = makeAddr("alice"); // original payer
+        address bob = makeAddr("bob"); // downstream beneficiary
 
         tok.mint(alice, 100);
         vm.prank(alice);
         tok.approve(address(router), 100);
 
-        // Alice pays on behalf of Bob. Leftover should go to Bob (beneficiary), not Alice (_msgSender()).
+        // Alice pays on behalf of Bob. Leftover should return to Alice, not Bob.
         vm.prank(alice);
         uint256 result = router.pay(1, tokenIn, 100, bob, 0, "", metadata);
         assertEq(result, 42);
 
-        // Bob (beneficiary) received the leftover tokens.
-        assertTrue(tok.balanceOf(bob) > 0, "Leftover should go to beneficiary (bob)");
-        // Alice should NOT have received the leftover.
-        assertEq(tok.balanceOf(alice), 0, "Alice (_msgSender) should not receive leftover");
+        assertEq(tok.balanceOf(bob), 0, "Beneficiary should not receive leftover input");
+        assertEq(tok.balanceOf(alice), 100, "Original payer should receive leftover input");
     }
 
     // ═══════════════════════════════════════════════════════════════════════

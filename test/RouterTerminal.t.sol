@@ -353,8 +353,7 @@ contract RouterTerminalTest is Test {
         vm.etch(address(mockTokens), hex"00");
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
         vm.etch(address(mockPermit2), hex"00");
-        mockWeth = IWETH9(makeAddr("mockWeth"));
-        vm.etch(address(mockWeth), hex"00");
+        mockWeth = IWETH9(address(new MockWETH9()));
         mockFactory = IUniswapV3Factory(makeAddr("mockFactory"));
         vm.etch(address(mockFactory), hex"00");
         mockPoolManager = IPoolManager(makeAddr("mockPoolManager"));

@@ -323,8 +323,8 @@ contract LeftoverRefundTest is Test {
         );
     }
 
-    /// @notice Partial-fill leftovers from pay() are refunded to the beneficiary.
-    function test_payPartialFillRefundsBeneficiary() public {
+    /// @notice Partial-fill leftovers from pay() are refunded to the original payer.
+    function test_payPartialFillRefundsOriginalPayer() public {
         AuditLeftoverMockERC20 tokenIn = new AuditLeftoverMockERC20();
         AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
         AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
@@ -343,11 +343,11 @@ contract LeftoverRefundTest is Test {
         router.pay(PROJECT_ID, address(tokenIn), 1000 ether, bob, 0, "", _metadata(tokenOut));
 
         assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
-        assertEq(tokenIn.balanceOf(bob), 400 ether, "beneficiary receives leftover input");
-        assertEq(tokenIn.balanceOf(alice), 0, "payer receives nothing extra");
+        assertEq(tokenIn.balanceOf(bob), 0, "beneficiary should not receive leftover input");
+        assertEq(tokenIn.balanceOf(alice), 400 ether, "original payer receives leftover input");
     }
 
-    function test_addToBalanceRefundAlsoLeaksPreexistingRouterBalance() public {
+    function test_addToBalanceRefundDoesNotLeakPreexistingRouterBalance() public {
         AuditLeftoverMockERC20 tokenIn = new AuditLeftoverMockERC20();
         AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
         AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
@@ -371,10 +371,8 @@ contract LeftoverRefundTest is Test {
         router.addToBalanceOf(PROJECT_ID, address(tokenIn), 1000 ether, false, "", _metadata(tokenOut));
 
         assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
-        assertEq(
-            tokenIn.balanceOf(attacker), 450 ether, "attacker captures both leftover and preexisting router balance"
-        );
-        assertEq(tokenIn.balanceOf(address(router)), 0, "router balance is fully drained by the refund");
+        assertEq(tokenIn.balanceOf(attacker), 400 ether, "attacker only receives this route's leftover");
+        assertEq(tokenIn.balanceOf(address(router)), 50 ether, "preexisting router balance should remain untouched");
     }
 
     function _deployPool(

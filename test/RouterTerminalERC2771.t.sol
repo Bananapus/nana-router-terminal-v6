@@ -51,6 +51,23 @@ contract ERC2771MockERC20 {
     }
 }
 
+contract ERC2771MockWETH9 {
+    mapping(address => uint256) public balanceOf;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "ERC2771MockWETH9: insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "ERC2771MockWETH9: ETH transfer failed");
+    }
+
+    receive() external payable {}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Trusted forwarder that relays calls per ERC-2771 spec.
 // Appends the original sender's address (20 bytes) to the calldata.
@@ -80,6 +97,7 @@ contract RouterTerminalERC2771Test is Test {
     JBRouterTerminal routerTerminal;
     MockTrustedForwarder forwarder;
     ERC2771MockERC20 token;
+    ERC2771MockWETH9 weth;
 
     // Mocked dependencies.
     IJBDirectory mockDirectory;
@@ -94,6 +112,7 @@ contract RouterTerminalERC2771Test is Test {
     function setUp() public {
         forwarder = new MockTrustedForwarder();
         token = new ERC2771MockERC20();
+        weth = new ERC2771MockWETH9();
 
         mockDirectory = IJBDirectory(makeAddr("mockDirectory"));
         vm.etch(address(mockDirectory), hex"00");
@@ -117,7 +136,7 @@ contract RouterTerminalERC2771Test is Test {
             mockTokens,
             mockPermit2,
             terminalOwner,
-            IWETH9(makeAddr("mockWeth")),
+            IWETH9(address(weth)),
             mockFactory,
             mockPoolManager,
             address(forwarder)
