@@ -47,8 +47,8 @@ import {TickMath as V4TickMath} from "@uniswap/v4-core/src/libraries/TickMath.so
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
-import {JBBuybackHook} from "../lib/nana-buyback-hook-v6/src/JBBuybackHook.sol";
-import {IGeomeanOracle} from "../lib/nana-buyback-hook-v6/src/interfaces/IGeomeanOracle.sol";
+import {JBBuybackHook} from "@bananapus/buyback-hook-v6/src/JBBuybackHook.sol";
+import {IGeomeanOracle} from "@bananapus/buyback-hook-v6/src/interfaces/IGeomeanOracle.sol";
 
 contract BuybackForkLiquidityHelper is IUnlockCallback {
     using CurrencyLibrary for Currency;
