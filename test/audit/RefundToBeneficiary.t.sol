@@ -62,6 +62,7 @@ contract HarnessRouterTerminal is JBRouterTerminal {
             IWETH9(address(new MockWETH())),
             IUniswapV3Factory(address(0)),
             IPoolManager(address(0)),
+            address(0),
             address(0)
         )
     {}

@@ -276,6 +276,7 @@ contract RouterTerminalReentrancyTest is Test {
             mockWeth,
             mockFactory,
             mockPoolManager,
+            address(0),
             address(0)
         );
     }

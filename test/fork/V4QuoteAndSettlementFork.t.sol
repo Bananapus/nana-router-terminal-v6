@@ -249,6 +249,7 @@ contract V4QuoteAndSettlementForkTest is Test {
             weth: WETH,
             factory: IUniswapV3Factory(address(noV3Factory)),
             poolManager: V4_POOL_MANAGER,
+            buybackHook: address(0),
             trustedForwarder: trustedForwarder
         });
 

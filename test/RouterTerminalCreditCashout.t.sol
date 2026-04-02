@@ -6,11 +6,15 @@ import {Test} from "forge-std/Test.sol";
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -22,6 +26,89 @@ import {IWETH9} from "../src/interfaces/IWETH9.sol";
 // ══════════════════════════════════════════════════════════════════════════════
 // Test Contract: Credit cashout flow in JBRouterTerminal
 // ══════════════════════════════════════════════════════════════════════════════
+
+contract CreditCashoutHarnessTerminal {
+    uint256 public immutable reclaimAmount;
+    address public immutable acceptedToken;
+    uint256 public lastMinTokensReclaimed;
+
+    constructor(uint256 reclaimAmount_, address acceptedToken_) payable {
+        reclaimAmount = reclaimAmount_;
+        acceptedToken = acceptedToken_;
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] =
+            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+    }
+
+    function cashOutTokensOf(
+        address,
+        uint256,
+        uint256,
+        address,
+        uint256 minTokensReclaimed,
+        address payable beneficiary,
+        bytes calldata
+    )
+        external
+        returns (uint256)
+    {
+        lastMinTokensReclaimed = minTokensReclaimed;
+        if (reclaimAmount != 0) beneficiary.transfer(reclaimAmount);
+        return reclaimAmount;
+    }
+
+    receive() external payable {}
+}
+
+contract CreditCashoutHarnessDestinationTerminal {
+    uint256 public lastAmount;
+    uint256 public lastValue;
+    uint256 public payReturnValue;
+
+    constructor(uint256 payReturnValue_) {
+        payReturnValue = payReturnValue_;
+    }
+
+    function pay(
+        uint256,
+        address,
+        uint256 amount,
+        address,
+        uint256,
+        string calldata,
+        bytes calldata
+    )
+        external
+        payable
+        returns (uint256)
+    {
+        lastAmount = amount;
+        lastValue = msg.value;
+        return payReturnValue;
+    }
+
+    function addToBalanceOf(
+        uint256,
+        address,
+        uint256 amount,
+        bool,
+        string calldata,
+        bytes calldata
+    )
+        external
+        payable
+    {
+        lastAmount = amount;
+        lastValue = msg.value;
+    }
+}
 
 contract RouterTerminalCreditCashoutTest is Test {
     JBRouterTerminal routerTerminal;
@@ -64,6 +151,7 @@ contract RouterTerminalCreditCashoutTest is Test {
             mockWeth,
             mockFactory,
             mockPoolManager,
+            address(0),
             address(0)
         );
     }
@@ -208,10 +296,9 @@ contract RouterTerminalCreditCashoutTest is Test {
         uint256 destProjectId = 1;
         uint256 sourceProjectId = 2;
         uint256 creditAmount = 50e18;
-        address mockDestTerminal = makeAddr("destTerminal");
-        address mockCashOutTerminal = makeAddr("cashOutTerminal");
-        vm.etch(mockDestTerminal, hex"00");
-        vm.etch(mockCashOutTerminal, hex"00");
+        CreditCashoutHarnessDestinationTerminal destTerminal = new CreditCashoutHarnessDestinationTerminal(0);
+        CreditCashoutHarnessTerminal cashOutTerminal =
+            new CreditCashoutHarnessTerminal{value: 30e18}(30e18, JBConstants.NATIVE_TOKEN);
 
         // Build metadata with cashOutSource.
         bytes memory metadata;
@@ -241,13 +328,13 @@ contract RouterTerminalCreditCashoutTest is Test {
         vm.mockCall(
             address(mockDirectory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-            abi.encode(mockDestTerminal)
+            abi.encode(address(destTerminal))
         );
 
         // Source project's terminal list (for _findCashOutPath).
         {
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
@@ -255,53 +342,12 @@ contract RouterTerminalCreditCashoutTest is Test {
             );
         }
 
-        // Mock supportsInterface for IJBCashOutTerminal.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-            abi.encode(true)
-        );
-
-        // Accounting context: source project terminal accepts NATIVE_TOKEN.
-        {
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-        }
-
-        // Mock cashOutTokensOf: returns 30 ETH reclaimed.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-            abi.encode(uint256(30e18))
-        );
-
-        // Fund the router with ETH for the cashout reclaim.
-        vm.deal(address(routerTerminal), 30e18);
-
-        // Mock dest terminal addToBalanceOf.
-        vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector), abi.encode());
-
-        // Expect: addToBalanceOf is called with the reclaimed amount (30e18) on the dest terminal.
-        // Note: vm.mockCall intercepts the call, so ETH is not actually transferred to the mock.
-        // We verify correctness by checking the call was made with the right value.
-        vm.expectCall(
-            mockDestTerminal,
-            30e18, // msg.value
-            abi.encodeCall(
-                IJBTerminal.addToBalanceOf, (destProjectId, JBConstants.NATIVE_TOKEN, 30e18, false, "", metadata)
-            )
-        );
-
         // Execute.
         vm.prank(payer);
         routerTerminal.addToBalanceOf(destProjectId, JBConstants.NATIVE_TOKEN, 0, false, "", metadata);
+
+        assertEq(destTerminal.lastAmount(), 30e18, "dest terminal should receive the reclaimed amount");
+        assertEq(destTerminal.lastValue(), 30e18, "dest terminal should receive ETH value");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -333,17 +379,16 @@ contract RouterTerminalCreditCashoutTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When both cashOutSource and cashOutMinReclaimed are in the metadata,
-    /// the minTokensReclaimed should be forwarded to the cashout terminal.
+    /// the router should enforce slippage locally from the actual balance delta.
     function test_creditCashout_withMinReclaimed() public {
         address payer = makeAddr("payer");
         uint256 destProjectId = 1;
         uint256 sourceProjectId = 2;
         uint256 creditAmount = 100e18;
         uint256 minReclaimed = 50e18;
-        address mockDestTerminal = makeAddr("destTerminal");
-        address mockCashOutTerminal = makeAddr("cashOutTerminal");
-        vm.etch(mockDestTerminal, hex"00");
-        vm.etch(mockCashOutTerminal, hex"00");
+        CreditCashoutHarnessDestinationTerminal destTerminal = new CreditCashoutHarnessDestinationTerminal(200);
+        CreditCashoutHarnessTerminal cashOutTerminal =
+            new CreditCashoutHarnessTerminal{value: 60e18}(60e18, JBConstants.NATIVE_TOKEN);
 
         // Build metadata with both cashOutSource and cashOutMinReclaimed.
         bytes memory metadata;
@@ -368,13 +413,13 @@ contract RouterTerminalCreditCashoutTest is Test {
         vm.mockCall(
             address(mockDirectory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-            abi.encode(mockDestTerminal)
+            abi.encode(address(destTerminal))
         );
 
         // Source project's terminal list.
         {
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
@@ -382,60 +427,13 @@ contract RouterTerminalCreditCashoutTest is Test {
             );
         }
 
-        // Mock supportsInterface.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-            abi.encode(true)
-        );
-
-        // Accounting context.
-        {
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-        }
-
-        // Mock cashOutTokensOf — returns 60 ETH.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-            abi.encode(uint256(60e18))
-        );
-
-        // Expect: cashOutTokensOf is called with minReclaimed = 50e18.
-        vm.expectCall(
-            mockCashOutTerminal,
-            abi.encodeCall(
-                IJBCashOutTerminal.cashOutTokensOf,
-                (
-                    address(routerTerminal),
-                    sourceProjectId,
-                    creditAmount,
-                    JBConstants.NATIVE_TOKEN,
-                    minReclaimed,
-                    payable(address(routerTerminal)),
-                    bytes("")
-                )
-            )
-        );
-
-        // Fund the router with ETH.
-        vm.deal(address(routerTerminal), 60e18);
-
-        // Mock dest terminal pay.
-        vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(200)));
-
         vm.prank(payer);
         uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);
 
         assertEq(result, 200, "pay should return dest terminal token count");
+        assertEq(cashOutTerminal.lastMinTokensReclaimed(), 0, "router should forward zero and enforce min locally");
+        assertEq(destTerminal.lastAmount(), 60e18, "dest terminal should receive the reclaimed amount");
+        assertEq(destTerminal.lastValue(), 60e18, "dest terminal should receive ETH value");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -519,5 +517,101 @@ contract RouterTerminalCreditCashoutTest is Test {
         uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);
 
         assertEq(result, 0, "pay with zero credits should return zero tokens");
+    }
+
+    /// @notice Preview should mirror execution semantics when the credit cash-out amount is zero.
+    function test_previewCreditCashout_zeroCreditAmount() public {
+        uint256 destProjectId = 1;
+        uint256 sourceProjectId = 2;
+        address beneficiary = makeAddr("beneficiary");
+        address mockDestTerminal = makeAddr("destTerminal");
+        address mockCashOutTerminal = makeAddr("cashOutTerminal");
+        vm.etch(mockDestTerminal, hex"00");
+        vm.etch(mockCashOutTerminal, hex"00");
+
+        bytes memory metadata;
+        {
+            bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
+            metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(sourceProjectId, uint256(0)));
+        }
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
+            abi.encode(mockDestTerminal)
+        );
+
+        {
+            IJBTerminal[] memory destTerminals = new IJBTerminal[](1);
+            destTerminals[0] = IJBTerminal(mockDestTerminal);
+            vm.mockCall(
+                address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (destProjectId)), abi.encode(destTerminals)
+            );
+        }
+
+        {
+            IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            vm.mockCall(
+                address(mockDirectory),
+                abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
+                abi.encode(sourceTerminals)
+            );
+        }
+
+        vm.mockCall(
+            mockCashOutTerminal,
+            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
+            abi.encode(true)
+        );
+
+        {
+            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+            contexts[0] = JBAccountingContext({
+                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            });
+            vm.mockCall(
+                mockCashOutTerminal,
+                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
+                abi.encode(contexts)
+            );
+            vm.mockCall(
+                mockDestTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (destProjectId)), abi.encode(contexts)
+            );
+        }
+
+        vm.mockCall(
+            mockCashOutTerminal,
+            abi.encodeWithSelector(IJBCashOutTerminal.previewCashOutFrom.selector),
+            abi.encode(uint256(0), new JBCashOutHookSpecification[](0))
+        );
+
+        vm.mockCall(
+            mockDestTerminal,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(0),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
+        );
+
+        (JBRuleset memory ruleset, uint256 beneficiaryTokenCount, uint256 reservedTokenCount,) =
+            routerTerminal.previewPayFor(destProjectId, JBConstants.NATIVE_TOKEN, 123e18, beneficiary, metadata);
+
+        assertEq(ruleset.id, 1, "preview should still resolve destination terminal");
+        assertEq(beneficiaryTokenCount, 0, "preview should treat zero credited amount as zero routed value");
+        assertEq(reservedTokenCount, 0, "preview should not report minted tokens");
     }
 }

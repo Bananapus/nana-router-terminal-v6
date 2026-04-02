@@ -89,6 +89,7 @@ contract CashOutLoopLimitTest is Test {
             weth,
             factory,
             IPoolManager(address(0)), // no V4
+            address(0),
             address(0)
         );
 

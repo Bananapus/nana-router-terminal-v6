@@ -327,6 +327,7 @@ contract RouterTerminalSandwichForkTest is Test {
             weth: WETH,
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,
+            buybackHook: address(0),
             trustedForwarder: trustedForwarder
         });
 

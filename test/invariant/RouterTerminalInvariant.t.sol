@@ -517,6 +517,7 @@ contract RouterTerminalInvariant is Test {
             IWETH9(address(weth)),
             IUniswapV3Factory(mockFactory),
             IPoolManager(mockPoolManager),
+            address(0),
             address(0) // no trusted forwarder
         );
 

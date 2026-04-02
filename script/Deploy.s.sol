@@ -120,6 +120,7 @@ contract DeployScript is Script, Sphinx {
             weth: IWETH9(weth),
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),
+            buybackHook: address(0),
             trustedForwarder: trustedForwarder
         });
 
