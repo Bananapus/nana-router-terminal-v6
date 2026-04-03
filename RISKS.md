@@ -14,7 +14,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 |----------|------|----------------|------------------|
 | P0 | Synthetic accounting context misuse | The router synthesizes best-effort decimals and routing context; if downstream systems treat it as accounting truth, they can misprice or mis-lend. | Clear docs, registry scoping, and explicit prohibition on accounting-sensitive reuse. |
 | P1 | Wrong-route or low-liquidity execution | The router chooses among direct forwarding, V3, V4, and cash-out paths; a bad route can degrade user execution. | Route selection tests, liquidity checks, and user-specified minimum returns. |
-| P1 | Integration fragility with broken tokens | Non-standard ERC-20 metadata or transfer behavior can distort decimal inference or swap execution. | Fallback defaults, defensive probing, and integration testing with hostile token behavior. |
+| P1 | Integration fragility with broken tokens | Non-standard ERC-20 metadata or transfer behavior can distort decimal inference or swap execution. | Fallback defaults, defensive probing, receipt checks on terminal-facing hops, and integration testing with hostile token behavior. |
 
 
 ## 1. Trust Assumptions
@@ -34,11 +34,12 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 - **Leftover token handling.** `_handleSwap` refunds the full remaining input token balance after a swap. The router is stateless and should never hold funds between transactions. If tokens are accidentally sent to the contract, they are absorbed into the next caller's refund rather than being permanently stuck — this is intentional, as recovering stuck funds is preferable to locking them forever. There is no sweep mechanism because there should be no persistent balance to sweep.
 - **V4 native ETH settlement.** `_settleV4` unwraps WETH to native ETH when settling a `Currency.wrap(address(0))` debt with PoolManager. This is necessary because the router may hold WETH (from ERC-20 transfers or prior wrapping) but V4 native pools require `msg.value` settlement. If `address(this).balance` is already sufficient, no unwrap occurs.
 - **Pool selection by liquidity.** `_discoverPool` selects the pool with the highest `liquidity()` value. An attacker can deploy a pool with high but concentrated (out-of-range) liquidity to win selection, then manipulate the actual swap execution at worse prices.
+- **Heuristic route selection, not best execution.** Automatic routing chooses among discovered paths using bounded heuristics, and pool discovery prefers the deepest discovered pool rather than exhaustively quoting every viable pool. This is an intentional tradeoff to keep routing predictable and gas-bounded. Integrators should treat router-selected execution as best-effort convenience, not a guarantee of the globally best obtainable output. When execution quality matters more than convenience, frontends should supply `quoteForSwap` metadata.
 
 ## 3. Access Control
 
 - **No access control on `pay` / `addToBalanceOf`.** Anyone can route payments. This is by design but means the contract processes arbitrary token types and amounts.
-- **Fee-on-transfer tokens unsupported.** `_acceptFundsFor` in the terminal uses balance-delta, but the registry does NOT. Fee-on-transfer tokens through the registry will mismatch.
+- **Lossy terminal-facing ERC-20s unsupported.** Ingress into the router or registry is balance-delta reconciled, but the final forwarded ERC-20 hop must still be standard. The registry now enforces this on direct terminal forwards, and the router documents the same requirement for routed output tokens because a generic in-router receipt check exceeds the current EIP-170 size budget.
 - **Credit cashout path.** `_acceptFundsFor` processes `cashOutSource` metadata to transfer credits from `_msgSender()`. Requires `TRANSFER_CREDITS` permission. If a user has this permission set broadly, any caller through the trusted forwarder could drain their credits.
 - **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing the current default terminal now reverts with `CannotDisallowDefaultTerminal` instead of silently clearing it. Per-project terminal settings already set to a disallowed terminal are NOT cleared.
 - **Synthetic accounting contexts.** `JBRouterTerminal.accountingContextForTokenOf()` uses best-effort decimals for
@@ -57,6 +58,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 - **Cashout loop limit.** Circular or deep token dependency chains hit `_MAX_CASHOUT_ITERATIONS = 20` and revert.
 - **Pool with zero liquidity.** Pools with zero in-range liquidity cause reverts.
 - **External terminal reverts.** The final `destTerminal.pay()` or `destTerminal.addToBalanceOf()` call is not wrapped in try-catch. A reverting destination terminal blocks the entire payment.
+- **Non-standard final ERC-20 transfer behavior.** Registry-mediated terminal-facing ERC-20 hops are enforced to settle exactly. Routed output tokens are also expected to be standard ERC-20s, but that requirement is currently documented rather than generically re-checked in-router because of contract-size constraints.
 
 ## 5. Integration Risks
 
@@ -100,3 +102,7 @@ Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` 
 ### 8.3 Cashout loop slippage uses proportional scaling
 
 `_cashOutLoop` applies `minTokensReclaimed` to the first cashout step. Subsequent recursive cashouts (steps 2-20) use proportionally scaled slippage protection based on the first step's ratio. This ensures intermediate hops have meaningful slippage bounds without requiring the caller to predict exact intermediate amounts. The final output is also validated by the destination terminal's `minReturnedTokens` parameter.
+
+### 8.4 Liquidity-first pool selection is intentional
+
+The router does not attempt full best-execution search across every viable V3 and V4 pool. `_discoverPool` prefers the deepest discovered pool, and the selected pool is then quoted and executed. This can underperform an alternative pool in some market states, but it is an accepted product tradeoff: bounded route discovery, lower complexity, and predictable behavior are prioritized over exhaustive output maximization. Users who need tighter execution guarantees should provide `quoteForSwap` metadata or route externally.

@@ -8,6 +8,7 @@ import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.s
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
@@ -376,6 +377,27 @@ contract LeftoverRefundTest is Test {
         assertEq(tokenIn.balanceOf(address(router)), 50 ether, "preexisting router balance should remain untouched");
     }
 
+    function test_payNativePartialFillDoesNotSweepPreexistingRouterEth() public {
+        AuditLeftoverMockERC20 tokenOut = new AuditLeftoverMockERC20();
+        AuditLeftoverDestTerminal destTerminal = new AuditLeftoverDestTerminal();
+        AuditLeftoverPartialFillPool pool = _deployNativePool(tokenOut, 600 ether, 100 ether);
+
+        _mockSimpleNativeSwapRoute(tokenOut, destTerminal, pool);
+
+        address payer = makeAddr("payer");
+        vm.deal(address(router), 50 ether);
+        vm.deal(payer, 1000 ether);
+
+        vm.prank(payer);
+        router.pay{value: 1000 ether}(
+            PROJECT_ID, JBConstants.NATIVE_TOKEN, 1000 ether, payer, 0, "", _metadata(tokenOut)
+        );
+
+        assertEq(destTerminal.lastAmount(), 100 ether, "destination only receives filled output");
+        assertEq(payer.balance, 400 ether, "payer only receives this route's leftover");
+        assertEq(address(router).balance, 50 ether, "preexisting raw ETH should remain untouched");
+    }
+
     function _deployPool(
         AuditLeftoverMockERC20 tokenIn,
         AuditLeftoverMockERC20 tokenOut,
@@ -388,6 +410,19 @@ contract LeftoverRefundTest is Test {
         (address token0, address token1) = address(tokenIn) < address(tokenOut)
             ? (address(tokenIn), address(tokenOut))
             : (address(tokenOut), address(tokenIn));
+        pool = new AuditLeftoverPartialFillPool(token0, token1, tokenOut, amountInUsed, amountOutGiven);
+    }
+
+    function _deployNativePool(
+        AuditLeftoverMockERC20 tokenOut,
+        uint256 amountInUsed,
+        uint256 amountOutGiven
+    )
+        internal
+        returns (AuditLeftoverPartialFillPool pool)
+    {
+        (address token0, address token1) =
+            address(weth) < address(tokenOut) ? (address(weth), address(tokenOut)) : (address(tokenOut), address(weth));
         pool = new AuditLeftoverPartialFillPool(token0, token1, tokenOut, amountInUsed, amountOutGiven);
     }
 
@@ -437,6 +472,46 @@ contract LeftoverRefundTest is Test {
         vm.mockCall(
             address(factory),
             abi.encodeCall(IUniswapV3Factory.getPool, (address(tokenIn), address(tokenOut), uint24(100))),
+            abi.encode(address(0))
+        );
+    }
+
+    function _mockSimpleNativeSwapRoute(
+        AuditLeftoverMockERC20 tokenOut,
+        AuditLeftoverDestTerminal destTerminal,
+        AuditLeftoverPartialFillPool pool
+    )
+        internal
+    {
+        vm.mockCall(address(tokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, JBConstants.NATIVE_TOKEN)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(tokenOut))),
+            abi.encode(address(destTerminal))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(weth), address(tokenOut), uint24(3000))),
+            abi.encode(address(pool))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(weth), address(tokenOut), uint24(500))),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(weth), address(tokenOut), uint24(10_000))),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(weth), address(tokenOut), uint24(100))),
             abi.encode(address(0))
         );
     }

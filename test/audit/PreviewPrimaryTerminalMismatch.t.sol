@@ -103,7 +103,8 @@ contract AuditPreviewTerminal {
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
         // forge-lint: disable-next-line(unsafe-typecast)
-        contexts[0] = JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+        contexts[0] =
+            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -160,7 +161,7 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         });
 
         token = new AuditMismatchToken();
-        fakePreviewTerminal = new AuditPreviewTerminal(address(token), 1_000e18);
+        fakePreviewTerminal = new AuditPreviewTerminal(address(token), 1000e18);
         primaryTerminal = new AuditPreviewTerminal(address(token), 1e18);
 
         token.mint(payer, 100e18);
@@ -183,15 +184,14 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         );
     }
 
-    function test_previewCanUseNonPrimaryTerminalButExecutionUsesPrimary() public {
-        (, uint256 previewBeneficiaryTokenCount,,) =
-            router.previewPayFor(1, address(token), 100e18, beneficiary, "");
+    function test_previewUsesPrimaryTerminalLikeExecution() public {
+        (, uint256 previewBeneficiaryTokenCount,,) = router.previewPayFor(1, address(token), 100e18, beneficiary, "");
 
         vm.prank(payer);
         uint256 minted = router.pay(1, address(token), 100e18, beneficiary, 0, "", "");
 
-        assertEq(previewBeneficiaryTokenCount, 1_000e18, "preview should read the non-primary terminal");
-        assertEq(minted, 1e18, "execution should use the primary terminal instead");
+        assertEq(previewBeneficiaryTokenCount, 1e18, "preview should read the primary terminal");
+        assertEq(minted, 1e18, "execution should use the primary terminal too");
         assertEq(primaryTerminal.totalReceived(), 100e18, "payment should be forwarded to the primary terminal");
         assertEq(fakePreviewTerminal.totalReceived(), 0, "non-primary preview terminal should never receive funds");
     }

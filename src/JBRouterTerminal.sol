@@ -44,10 +44,13 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
+import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
+import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
+import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
 
 /// @notice The `JBRouterTerminal` accepts any token and dynamically discovers what token each destination project
@@ -61,23 +64,14 @@ contract JBRouterTerminal is
     IJBPermitTerminal,
     IUniswapV3SwapCallback,
     IUnlockCallback,
-    IJBRouterTerminal
+    IJBRouterTerminal,
+    IJBPayRoutePreviewer
 {
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using BalanceDeltaLibrary for BalanceDelta;
-
-    struct PayRoutePreview {
-        IJBTerminal destTerminal;
-        address tokenOut;
-        uint256 amountOut;
-        JBRuleset ruleset;
-        uint256 beneficiaryTokenCount;
-        uint256 reservedTokenCount;
-        JBPayHookSpecification[] hookSpecifications;
-    }
 
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -147,6 +141,9 @@ contract JBRouterTerminal is
     /// @notice The canonical buyback hook whose preview hook specification metadata this router understands.
     address public immutable BUYBACK_HOOK;
 
+    /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
+    IJBPayRouteResolver internal immutable PAY_ROUTE_RESOLVER;
+
     //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
     //*********************************************************************//
@@ -198,6 +195,7 @@ contract JBRouterTerminal is
         PERMIT2 = permit2;
         WETH = weth;
         BUYBACK_HOOK = buybackHook;
+        PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver()));
     }
 
     //*********************************************************************//
@@ -298,7 +296,7 @@ contract JBRouterTerminal is
 
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
-        return destTerminal.pay{value: payValue}({
+        beneficiaryTokenCount = destTerminal.pay{value: payValue}({
             projectId: projectId,
             token: token,
             amount: amount,
@@ -440,12 +438,13 @@ contract JBRouterTerminal is
         external
         view
         override
-        returns (PoolInfo memory pool)
+        returns (PoolInfo memory)
     {
-        pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        PoolInfo memory pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
         if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
+        return pool;
     }
 
     /// @notice Public wrapper for V3-only _discoverPool, useful for off-chain queries.
@@ -459,13 +458,14 @@ contract JBRouterTerminal is
         external
         view
         override
-        returns (IUniswapV3Pool pool)
+        returns (IUniswapV3Pool)
     {
         PoolInfo memory info = _discoverPool(normalizedTokenIn, normalizedTokenOut);
         if (!info.isV4 && address(info.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
-        if (!info.isV4) pool = info.v3Pool;
+        if (!info.isV4) return info.v3Pool;
+        return IUniswapV3Pool(address(0));
     }
 
     /// @notice Preview a payment by simulating the router's routing logic in view context.
@@ -497,15 +497,102 @@ contract JBRouterTerminal is
     {
         // Simulate how the router would normalize the incoming funds before routing.
         amount = _previewAcceptFundsFor({amount: amount, metadata: metadata});
-        PayRoutePreview memory route =
-            _previewBestPayRoute({projectId: projectId, tokenIn: token, amount: amount, beneficiary: beneficiary, metadata: metadata});
+        (,,, ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) =
+            PAY_ROUTE_RESOLVER.previewBestPayRoute({
+                router: IJBPayRoutePreviewer(address(this)),
+                projectId: projectId,
+                tokenIn: token,
+                amount: amount,
+                beneficiary: beneficiary,
+                metadata: metadata
+            });
+    }
 
-        return (
-            route.ruleset,
-            route.beneficiaryTokenCount,
-            route.reservedTokenCount,
-            route.hookSpecifications
-        );
+    /// @notice Preview the recursive cashout loop the router would use for a project-token input.
+    /// @param destProjectId The destination project the router is trying to pay.
+    /// @param token The current token being routed.
+    /// @param amount The amount of `token` being previewed.
+    /// @param sourceProjectIdOverride The one-shot source project override encoded in metadata, if any.
+    /// @param metadata Metadata forwarded into preview helpers.
+    /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
+    /// @return destTerminal The terminal reached by the cashout loop, or address(0) if routing should continue.
+    /// @return finalToken The token produced by the previewed cashout loop.
+    /// @return finalAmount The amount of `finalToken` produced by the previewed cashout loop.
+    function previewCashOutLoopOf(
+        uint256 destProjectId,
+        address token,
+        uint256 amount,
+        uint256 sourceProjectIdOverride,
+        bytes calldata metadata,
+        address preferredToken
+    )
+        external
+        view
+        returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
+    {
+        return _previewCashOutLoop({
+            destProjectId: destProjectId,
+            token: token,
+            amount: amount,
+            sourceProjectIdOverride: sourceProjectIdOverride,
+            metadata: metadata,
+            preferredToken: preferredToken
+        });
+    }
+
+    /// @notice Preview the amount a direct token-to-token swap would return.
+    /// @param tokenIn The input token.
+    /// @param tokenOut The output token.
+    /// @param amount The amount of `tokenIn` being swapped.
+    /// @param metadata Metadata forwarded into quote selection.
+    /// @return amountOut The quoted amount of `tokenOut`.
+    function previewSwapAmountOutOf(
+        address tokenIn,
+        address tokenOut,
+        uint256 amount,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (uint256 amountOut)
+    {
+        return _previewSwapAmountOut({tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata});
+    }
+
+    /// @notice Preview a destination terminal payment from the router's caller context.
+    /// @param destTerminal The terminal whose pay preview should be queried.
+    /// @param projectId The destination project that would receive the payment.
+    /// @param token The token the destination terminal would receive.
+    /// @param amount The amount of `token` the destination terminal would receive.
+    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param metadata Metadata forwarded unchanged into the destination terminal preview.
+    /// @return ruleset The ruleset returned by the destination terminal preview.
+    /// @return beneficiaryTokenCount The beneficiary token count returned by the destination terminal preview.
+    /// @return reservedTokenCount The reserved token count returned by the destination terminal preview.
+    /// @return hookSpecifications The pay hook specifications returned by the destination terminal preview.
+    function previewTerminalPayOf(
+        IJBTerminal destTerminal,
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory)
+    {
+        return destTerminal.previewPayFor({
+            projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
+        });
+    }
+
+    /// @notice Return the highest discovered pool liquidity between two normalized tokens.
+    /// @param tokenA One token in the pair.
+    /// @param tokenB The other token in the pair.
+    /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
+    function bestPoolLiquidityOf(address tokenA, address tokenB) external view returns (uint128) {
+        return _bestPoolLiquidity(tokenA, tokenB);
     }
 
     //*********************************************************************//
@@ -555,282 +642,34 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
-        if (_safeTerminalsOf(destProjectId).length == 0) {
+        IJBTerminal[] memory terminals;
+        (bool success, bytes memory data) =
+            address(DIRECTORY).staticcall(abi.encodeWithSelector(IJBDirectory.terminalsOf.selector, destProjectId));
+        if (success && data.length != 0) terminals = abi.decode(data, (IJBTerminal[]));
+
+        if (terminals.length == 0) {
             return _route({
-                destProjectId: destProjectId,
-                tokenIn: tokenIn,
-                amount: amount,
-                metadata: metadata,
-                refundTo: refundTo
+                destProjectId: destProjectId, tokenIn: tokenIn, amount: amount, metadata: metadata, refundTo: refundTo
             });
         }
 
-        PayRoutePreview memory bestRoute =
-            _previewBestPayRoute({projectId: destProjectId, tokenIn: tokenIn, amount: amount, beneficiary: beneficiary, metadata: metadata});
+        (destTerminal, tokenOut,,,,,) = PAY_ROUTE_RESOLVER.previewBestPayRoute({
+            router: IJBPayRoutePreviewer(address(this)),
+            projectId: destProjectId,
+            tokenIn: tokenIn,
+            amount: amount,
+            beneficiary: beneficiary,
+            metadata: metadata
+        });
 
         return _routeToDestination({
             destProjectId: destProjectId,
             tokenIn: tokenIn,
             amount: amount,
-            tokenOut: bestRoute.tokenOut,
+            tokenOut: tokenOut,
             metadata: metadata,
             refundTo: refundTo
         });
-    }
-
-    /// @notice Preview the best pay route by comparing final beneficiary token counts across destination candidates.
-    function _previewBestPayRoute(
-        uint256 projectId,
-        address tokenIn,
-        uint256 amount,
-        address beneficiary,
-        bytes calldata metadata
-    )
-        internal
-        view
-        returns (PayRoutePreview memory bestRoute)
-    {
-        // Respect explicit token routing overrides.
-        (bool routeOverrideExists, bytes memory routeData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
-        if (routeOverrideExists) {
-            address tokenOut = abi.decode(routeData, (address));
-            IJBTerminal destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenOut});
-            if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
-            return _previewPayRouteForCandidate({
-                projectId: projectId,
-                tokenIn: tokenIn,
-                amount: amount,
-                beneficiary: beneficiary,
-                metadata: metadata,
-                tokenOut: tokenOut,
-                destTerminal: destTerminal
-            });
-        }
-
-        IJBTerminal[] memory terminals = _safeTerminalsOf(projectId);
-        uint256 totalContexts;
-        for (uint256 i; i < terminals.length; i++) {
-            totalContexts += terminals[i].accountingContextsOf(projectId).length;
-        }
-
-        address[] memory seenTokens = new address[](totalContexts);
-        uint256 seenCount;
-        bool foundRoute;
-
-        for (uint256 i; i < terminals.length; i++) {
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
-
-            for (uint256 j; j < contexts.length; j++) {
-                address candidateToken = contexts[j].token;
-                bool alreadySeen;
-
-                for (uint256 k; k < seenCount; k++) {
-                    if (seenTokens[k] == candidateToken) {
-                        alreadySeen = true;
-                        break;
-                    }
-                }
-                if (alreadySeen) continue;
-
-                seenTokens[seenCount++] = candidateToken;
-
-                PayRoutePreview memory candidateRoute = _previewPayRouteForCandidate({
-                    projectId: projectId,
-                    tokenIn: tokenIn,
-                    amount: amount,
-                    beneficiary: beneficiary,
-                    metadata: metadata,
-                    tokenOut: candidateToken,
-                    destTerminal: terminals[i]
-                });
-
-                if (
-                    !foundRoute || candidateRoute.beneficiaryTokenCount > bestRoute.beneficiaryTokenCount
-                        || (
-                            candidateRoute.beneficiaryTokenCount == bestRoute.beneficiaryTokenCount
-                                && candidateRoute.reservedTokenCount > bestRoute.reservedTokenCount
-                        )
-                ) {
-                    bestRoute = candidateRoute;
-                    foundRoute = true;
-                }
-            }
-        }
-
-        if (!foundRoute) {
-            (
-                bestRoute.destTerminal,
-                bestRoute.tokenOut,
-                bestRoute.amountOut
-            ) = _previewRoute({destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata});
-
-            (
-                bestRoute.ruleset,
-                bestRoute.beneficiaryTokenCount,
-                bestRoute.reservedTokenCount,
-                bestRoute.hookSpecifications
-            ) = bestRoute.destTerminal.previewPayFor({
-                projectId: projectId,
-                token: bestRoute.tokenOut,
-                amount: bestRoute.amountOut,
-                beneficiary: beneficiary,
-                metadata: metadata
-            });
-
-            (bestRoute.beneficiaryTokenCount, bestRoute.reservedTokenCount) = _effectivePreviewPayTokenCounts({
-                beneficiaryTokenCount: bestRoute.beneficiaryTokenCount,
-                reservedTokenCount: bestRoute.reservedTokenCount,
-                hookSpecifications: bestRoute.hookSpecifications
-            });
-        }
-    }
-
-    /// @notice Preview a pay route for a specific destination token.
-    function _previewPayRouteForCandidate(
-        uint256 projectId,
-        address tokenIn,
-        uint256 amount,
-        address beneficiary,
-        bytes calldata metadata,
-        address tokenOut,
-        IJBTerminal destTerminal
-    )
-        internal
-        view
-        returns (PayRoutePreview memory route)
-    {
-        (address routedTokenIn, uint256 routedAmountIn) =
-            _previewAmountToToken({destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata, tokenOut: tokenOut});
-
-        (
-            route.ruleset,
-            route.beneficiaryTokenCount,
-            route.reservedTokenCount,
-            route.hookSpecifications
-        ) = destTerminal.previewPayFor({
-            projectId: projectId,
-            token: routedTokenIn,
-            amount: routedAmountIn,
-            beneficiary: beneficiary,
-            metadata: metadata
-        });
-
-        (route.beneficiaryTokenCount, route.reservedTokenCount) = _effectivePreviewPayTokenCounts({
-            beneficiaryTokenCount: route.beneficiaryTokenCount,
-            reservedTokenCount: route.reservedTokenCount,
-            hookSpecifications: route.hookSpecifications
-        });
-
-        route.destTerminal = destTerminal;
-        route.tokenOut = routedTokenIn;
-        route.amountOut = routedAmountIn;
-    }
-
-    /// @notice Preview the amount that would be routed into a specific destination token.
-    function _previewAmountToToken(
-        uint256 destProjectId,
-        address tokenIn,
-        uint256 amount,
-        bytes calldata metadata,
-        address tokenOut
-    )
-        internal
-        view
-        returns (address routedTokenIn, uint256 routedAmountIn)
-    {
-        uint256 sourceProjectIdOverride;
-        (sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
-
-        uint256 sourceProjectId = sourceProjectIdOverride;
-        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = _projectIdOf(tokenIn);
-        }
-
-        if (sourceProjectId != 0) {
-            (, routedTokenIn, routedAmountIn) = _previewCashOutLoop({
-                destProjectId: destProjectId,
-                token: tokenIn,
-                amount: amount,
-                sourceProjectIdOverride: sourceProjectIdOverride,
-                metadata: metadata,
-                preferredToken: tokenOut
-            });
-        } else {
-            routedTokenIn = tokenIn;
-            routedAmountIn = amount;
-        }
-
-        if (routedTokenIn == tokenOut || _normalize(routedTokenIn) == _normalize(tokenOut)) {
-            return (tokenOut, routedAmountIn);
-        }
-
-        routedAmountIn = _previewSwapAmountOut({
-            tokenIn: routedTokenIn,
-            tokenOut: tokenOut,
-            amount: routedAmountIn,
-            metadata: metadata
-        });
-
-        routedTokenIn = tokenOut;
-    }
-
-    /// @notice Decode buyback-hook pay hook metadata so previews surface the token counts users actually care about.
-    function _effectivePreviewPayTokenCounts(
-        uint256 beneficiaryTokenCount,
-        uint256 reservedTokenCount,
-        JBPayHookSpecification[] memory hookSpecifications
-    )
-        internal
-        view
-        returns (uint256 effectiveBeneficiaryTokenCount, uint256 effectiveReservedTokenCount)
-    {
-        effectiveBeneficiaryTokenCount = beneficiaryTokenCount;
-        effectiveReservedTokenCount = reservedTokenCount;
-
-        if (beneficiaryTokenCount != 0 || reservedTokenCount != 0) return (beneficiaryTokenCount, reservedTokenCount);
-
-        for (uint256 i; i < hookSpecifications.length; i++) {
-            JBPayHookSpecification memory specification = hookSpecifications[i];
-            if (specification.noop || !_isBuybackHook(address(specification.hook))) continue;
-
-            (
-                bool projectTokenIs0,
-                uint256 amountToMintWith,
-                uint256 minimumSwapAmountOut,
-                IJBController controller,
-                uint256 tokenCountWithoutHook,
-                int24 twapTick,
-                uint128 twapLiquidity,
-                PoolId poolId,
-                uint256 minimumBeneficiaryTokenCount,
-                uint256 minimumReservedTokenCount,
-                uint256 rawSwapQuote
-            ) = abi.decode(
-                specification.metadata,
-                (bool, uint256, uint256, IJBController, uint256, int24, uint128, PoolId, uint256, uint256, uint256)
-            );
-            projectTokenIs0;
-            amountToMintWith;
-            minimumSwapAmountOut;
-            controller;
-            tokenCountWithoutHook;
-            twapTick;
-            twapLiquidity;
-            poolId;
-            rawSwapQuote;
-
-            if (
-                minimumBeneficiaryTokenCount > effectiveBeneficiaryTokenCount
-                    || (
-                        minimumBeneficiaryTokenCount == effectiveBeneficiaryTokenCount
-                            && minimumReservedTokenCount > effectiveReservedTokenCount
-                    )
-            ) {
-                effectiveBeneficiaryTokenCount = minimumBeneficiaryTokenCount;
-                effectiveReservedTokenCount = minimumReservedTokenCount;
-            }
-        }
     }
 
     /// @notice Estimate the amount a buyback-hook cash-out preview would actually deliver to the router.
@@ -846,17 +685,10 @@ contract JBRouterTerminal is
 
         for (uint256 i; i < hookSpecifications.length; i++) {
             JBCashOutHookSpecification memory specification = hookSpecifications[i];
-            if (specification.noop || !_isBuybackHook(address(specification.hook))) continue;
+            if (specification.noop || address(specification.hook) != BUYBACK_HOOK) continue;
 
-            (
-                uint256 minimumSwapAmountOut,
-                ,
-                ,
-                ,
-                ,
-                ,
-                uint256 rawSwapQuote
-            ) = abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
+            (uint256 minimumSwapAmountOut,,,,,, uint256 rawSwapQuote) =
+                abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
             uint256 quotedAmount = rawSwapQuote != 0 ? rawSwapQuote : minimumSwapAmountOut;
             if (quotedAmount > effectiveAmount) effectiveAmount = quotedAmount;
@@ -891,9 +723,12 @@ contract JBRouterTerminal is
         });
     }
 
-    /// @notice Whether an address is the buyback hook interface.
-    function _isBuybackHook(address hook) internal view returns (bool) {
-        return hook != address(0) && hook == BUYBACK_HOOK;
+    /// @notice Whether routing through a terminal would immediately cycle back into the router.
+    /// @param projectId The destination project whose terminal topology is being checked.
+    /// @param terminal The terminal that would receive the route.
+    /// @return isCircular A flag indicating whether `terminal` resolves back into this router.
+    function _isCircularTerminal(uint256 projectId, IJBTerminal terminal) internal view returns (bool isCircular) {
+        return PAY_ROUTE_RESOLVER.isCircularTerminal(IJBPayRoutePreviewer(address(this)), projectId, terminal);
     }
 
     /// @notice Accepts a token being paid in.
@@ -912,18 +747,14 @@ contract JBRouterTerminal is
 
             (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-            // Resolve the actual credit holder. When called via an intermediary (e.g. JBRouterTerminalRegistry),
-            // _msgSender() is the intermediary — use its originalPayer to find the true holder.
+            // Credit transfers must be attributed to the direct caller.
+            // Intermediary-supplied payer metadata is not trusted for credit ownership.
             address holder = _msgSender();
-            if (msg.sender.code.length > 0) {
-                try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
-                    if (payer != address(0)) holder = payer;
-                } catch {}
-            }
 
-            // Pull credits from the holder (requires holder to have granted TRANSFER_CREDITS to this contract).
-            TOKENS.transferCreditsFrom({
-                holder: holder, projectId: sourceProjectId, recipient: address(this), count: creditAmount
+            // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
+            IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));
+            controller.transferCreditsFrom({
+                holder: holder, projectId: sourceProjectId, recipient: address(this), creditCount: creditAmount
             });
 
             return creditAmount;
@@ -1021,7 +852,10 @@ contract JBRouterTerminal is
             if (preferredToken != address(0)) {
                 if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
-                    if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                    if (
+                        address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                            && !_isCircularTerminal(destProjectId, destTerminal)
+                    ) {
                         return (destTerminal, preferredToken, amount);
                     }
                 }
@@ -1030,7 +864,10 @@ contract JBRouterTerminal is
             else if (sourceProjectIdOverride == 0) {
                 // slither-disable-next-line calls-loop
                 destTerminal = _primaryTerminalOf({projectId: destProjectId, token: token});
-                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                if (
+                    address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                        && !_isCircularTerminal(destProjectId, destTerminal)
+                ) {
                     return (destTerminal, token, amount);
                 }
             }
@@ -1043,12 +880,9 @@ contract JBRouterTerminal is
             if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
 
             // Find which terminal to cash out from and which token to reclaim.
-            (address tokenToReclaim, IJBCashOutTerminal cashOutTerminal) =
-                _findCashOutPath({
-                    sourceProjectId: sourceProjectId,
-                    destProjectId: destProjectId,
-                    preferredToken: preferredToken
-                });
+            (address tokenToReclaim, IJBCashOutTerminal cashOutTerminal) = _findCashOutPath({
+                sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
+            });
 
             // Track the expected amount before cashout so we can scale the minimum proportionally.
             uint256 previousExpectedAmount = amount;
@@ -1245,6 +1079,8 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         address normalizedTokenIn = _normalize(tokenIn);
+        uint256 nativeBalanceBaseline;
+        if (tokenIn == JBConstants.NATIVE_TOKEN) nativeBalanceBaseline = address(this).balance - amount;
 
         // Execute the swap in a scoped block to manage stack depth.
         amountOut = _executeSwap({
@@ -1257,8 +1093,8 @@ contract JBRouterTerminal is
 
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
         // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
-        if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance != 0) {
-            _wethDeposit(address(this).balance);
+        if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance > nativeBalanceBaseline) {
+            _wethDeposit(address(this).balance - nativeBalanceBaseline);
         }
 
         // Unwrap if output is native token.
@@ -1294,38 +1130,24 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
-        // Check for credit source override.
-        (uint256 sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
+        // Route any project-token source through cashout before resolving the destination token.
+        (destTerminal, tokenIn, amount) = _routeInputFromSource({
+            destProjectId: destProjectId,
+            tokenIn: tokenIn,
+            amount: amount,
+            metadata: metadata,
+            preferredToken: address(0)
+        });
 
-        // Check if input is a JB project token (credit or ERC-20).
-        uint256 sourceProjectId = sourceProjectIdOverride;
-        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = _projectIdOf(tokenIn);
-        }
-
-        if (sourceProjectId != 0) {
-            // JB token path: cashout recursively, then maybe swap the reclaimed token.
-            (destTerminal, tokenOut, amountOut) = _cashOutLoop({
-                destProjectId: destProjectId,
-                token: tokenIn,
-                amount: amount,
-                sourceProjectIdOverride: sourceProjectIdOverride,
-                metadata: metadata,
-                preferredToken: address(0)
-            });
-
-            // If the cashout loop found a terminal that accepts the reclaimed token, we're done.
-            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut);
-
-            // Cashout produced a base token the destination doesn't accept — fall through to resolve + convert.
-            tokenIn = tokenOut;
-            amount = amountOut;
-        }
+        // If the cashout loop found a destination terminal, the route is already complete.
+        if (address(destTerminal) != address(0)) return (destTerminal, tokenIn, amount);
 
         // Resolve what token the destination project accepts and which terminal to use.
-        (tokenOut, destTerminal) = _resolveTokenOut({projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
+        (tokenOut, destTerminal) = PAY_ROUTE_RESOLVER.resolveTokenOut({
+            router: IJBPayRoutePreviewer(address(this)), projectId: destProjectId, tokenIn: tokenIn, metadata: metadata
+        });
 
-        uint256 refundBalanceBaseline = _balanceOf({token: tokenIn, account: address(this)});
+        uint256 refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
         if (tokenIn != JBConstants.NATIVE_TOKEN) refundBalanceBaseline -= amount;
 
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
@@ -1356,28 +1178,13 @@ contract JBRouterTerminal is
         destTerminal = _primaryTerminalOf({projectId: destProjectId, token: tokenOut});
         if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(destProjectId, tokenOut);
 
-        (uint256 sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
+        IJBTerminal cashOutResolvedTerminal;
+        (cashOutResolvedTerminal, tokenIn, amount) = _routeInputFromSource({
+            destProjectId: destProjectId, tokenIn: tokenIn, amount: amount, metadata: metadata, preferredToken: tokenOut
+        });
+        if (address(cashOutResolvedTerminal) != address(0)) return (cashOutResolvedTerminal, tokenOut, amount);
 
-        uint256 sourceProjectId = sourceProjectIdOverride;
-        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = _projectIdOf(tokenIn);
-        }
-
-        if (sourceProjectId != 0) {
-            IJBTerminal cashOutResolvedTerminal;
-            (cashOutResolvedTerminal, tokenIn, amount) = _cashOutLoop({
-                destProjectId: destProjectId,
-                token: tokenIn,
-                amount: amount,
-                sourceProjectIdOverride: sourceProjectIdOverride,
-                metadata: metadata,
-                preferredToken: tokenOut
-            });
-
-            if (address(cashOutResolvedTerminal) != address(0)) return (cashOutResolvedTerminal, tokenOut, amount);
-        }
-
-        uint256 refundBalanceBaseline = _balanceOf({token: tokenIn, account: address(this)});
+        uint256 refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
         if (tokenIn != JBConstants.NATIVE_TOKEN) refundBalanceBaseline -= amount;
 
         amountOut = _convert({
@@ -1388,6 +1195,43 @@ contract JBRouterTerminal is
             metadata: metadata,
             refundTo: refundTo,
             refundBalanceBaseline: refundBalanceBaseline
+        });
+    }
+
+    /// @notice Route the current input through a project-token cashout first when the route starts from a JB token.
+    /// @param destProjectId The destination project the route is trying to reach.
+    /// @param tokenIn The current route input token.
+    /// @param amount The current route input amount.
+    /// @param metadata Metadata that may include a cashout-source override.
+    /// @param preferredToken The preferred token to target during any cashout loop.
+    /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion should continue.
+    /// @return routedTokenIn The token that remains to be routed after the cashout step.
+    /// @return routedAmountIn The amount of `routedTokenIn` that remains to be routed.
+    function _routeInputFromSource(
+        uint256 destProjectId,
+        address tokenIn,
+        uint256 amount,
+        bytes calldata metadata,
+        address preferredToken
+    )
+        internal
+        returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
+    {
+        (uint256 sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
+        uint256 sourceProjectId = sourceProjectIdOverride;
+        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
+            sourceProjectId = _projectIdOf(tokenIn);
+        }
+
+        if (sourceProjectId == 0) return (resolvedTerminal, tokenIn, amount);
+
+        return _cashOutLoop({
+            destProjectId: destProjectId,
+            token: tokenIn,
+            amount: amount,
+            sourceProjectIdOverride: sourceProjectIdOverride,
+            metadata: metadata,
+            preferredToken: preferredToken
         });
     }
 
@@ -1498,37 +1342,11 @@ contract JBRouterTerminal is
         return DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
     }
 
-    /// @notice Best-effort primary-terminal lookup that degrades to address(0) if the directory call reverts.
-    function _safePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        (bool success, bytes memory data) =
-            address(DIRECTORY).staticcall(abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, token)));
-
-        if (!success || data.length == 0) return terminal;
-        return abi.decode(data, (IJBTerminal));
-    }
-
     /// @notice Look up the project ID for a token.
     /// @param token The token address to query.
     /// @return The project ID, or 0 if the token is not a JB project token.
     function _projectIdOf(address token) internal view returns (uint256) {
         return TOKENS.projectIdOf(IJBToken(token));
-    }
-
-    /// @notice Look up all terminals for a project.
-    /// @param projectId The ID of the project.
-    /// @return The array of terminals.
-    // slither-disable-next-line calls-loop
-    function _terminalsOf(uint256 projectId) internal view returns (IJBTerminal[] memory) {
-        return DIRECTORY.terminalsOf(projectId);
-    }
-
-    /// @notice Best-effort terminal lookup that degrades to an empty list if the directory call reverts.
-    function _safeTerminalsOf(uint256 projectId) internal view returns (IJBTerminal[] memory terminals) {
-        (bool success, bytes memory data) =
-            address(DIRECTORY).staticcall(abi.encodeCall(IJBDirectory.terminalsOf, (projectId)));
-
-        if (!success || data.length == 0) return terminals;
-        return abi.decode(data, (IJBTerminal[]));
     }
 
     /// @notice Find the highest liquidity across all V3 fee tiers and V4 pools for a token pair.
@@ -1562,57 +1380,6 @@ contract JBRouterTerminal is
     /// @dev `ERC-2771` specifies the context as being a single address (20 bytes).
     function _contextSuffixLength() internal view override(ERC2771Context, Context) returns (uint256) {
         return super._contextSuffixLength();
-    }
-
-    /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with tokenIn.
-    /// @dev Falls back to the first accepted token if no pool exists (for JB token cashout paths).
-    /// @param projectId The ID of the project to search.
-    /// @param tokenIn The input token to find a pool for.
-    /// @return tokenOut The best accepted token found.
-    /// @return destTerminal The terminal that accepts tokenOut.
-    function _discoverAcceptedToken(
-        uint256 projectId,
-        address tokenIn
-    )
-        internal
-        view
-        returns (address tokenOut, IJBTerminal destTerminal)
-    {
-        address normalizedTokenIn = _normalize(tokenIn);
-        IJBTerminal[] memory terminals = _terminalsOf(projectId);
-
-        uint128 bestLiquidity;
-        bool hasFallback;
-
-        for (uint256 i; i < terminals.length; i++) {
-            // slither-disable-next-line calls-loop
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
-
-            for (uint256 j; j < contexts.length; j++) {
-                address candidateToken = contexts[j].token;
-                address normalizedCandidate = _normalize(candidateToken);
-
-                if (normalizedCandidate == normalizedTokenIn) continue;
-
-                // Save first candidate as fallback.
-                if (!hasFallback) {
-                    tokenOut = candidateToken;
-                    destTerminal = terminals[i];
-                    hasFallback = true;
-                }
-
-                // Search for pool with best liquidity (V3 + V4).
-                uint128 candidateLiquidity =
-                    _bestPoolLiquidity({tokenA: normalizedTokenIn, tokenB: normalizedCandidate});
-                if (candidateLiquidity > bestLiquidity) {
-                    bestLiquidity = candidateLiquidity;
-                    tokenOut = candidateToken;
-                    destTerminal = terminals[i];
-                }
-            }
-        }
-
-        if (!hasFallback) revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
     }
 
     /// @notice Search Uniswap V3 and V4 for the best pool between two tokens.
@@ -1729,7 +1496,7 @@ contract JBRouterTerminal is
         IJBCashOutTerminal directFallbackTerminal;
 
         // slither-disable-next-line calls-loop
-        IJBTerminal[] memory terminals = _terminalsOf(sourceProjectId);
+        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(sourceProjectId);
 
         for (uint256 i; i < terminals.length; i++) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
@@ -2078,7 +1845,10 @@ contract JBRouterTerminal is
             if (preferredToken != address(0)) {
                 if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
-                    if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                    if (
+                        address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                            && !_isCircularTerminal(destProjectId, destTerminal)
+                    ) {
                         return (destTerminal, preferredToken, amount);
                     }
                 }
@@ -2089,7 +1859,10 @@ contract JBRouterTerminal is
                 destTerminal = _primaryTerminalOf({projectId: destProjectId, token: token});
 
                 // If a real external terminal accepts this token, the preview route is complete and exact.
-                if (address(destTerminal) != address(0) && address(destTerminal) != address(this)) {
+                if (
+                    address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                        && !_isCircularTerminal(destProjectId, destTerminal)
+                ) {
                     return (destTerminal, token, amount);
                 }
             }
@@ -2155,12 +1928,9 @@ contract JBRouterTerminal is
         IJBCashOutTerminal cashOutTerminal;
 
         // Resolve both the reclaim token and the terminal the router would use for this hop.
-        (tokenToReclaim, cashOutTerminal) =
-            _findCashOutPath({
-                sourceProjectId: sourceProjectId,
-                destProjectId: destProjectId,
-                preferredToken: preferredToken
-            });
+        (tokenToReclaim, cashOutTerminal) = _findCashOutPath({
+            sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
+        });
 
         // Ask that terminal how much of the reclaim token this cashout count would return.
         // slither-disable-next-line unused-return,calls-loop
@@ -2175,79 +1945,6 @@ contract JBRouterTerminal is
         });
 
         reclaimAmount = _effectivePreviewCashOutAmount(reclaimAmount, hookSpecifications);
-    }
-
-    /// @notice A view-only mirror of `_route`.
-    /// @param destProjectId The ID of the destination project.
-    /// @param tokenIn The token being paid in.
-    /// @param amount The amount of the input token being paid.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    /// @return destTerminal The terminal that would receive the payment.
-    /// @return tokenOut The token that terminal would receive.
-    /// @return amountOut The amount that terminal would receive, estimated when a swap is required.
-    function _previewRoute(
-        uint256 destProjectId,
-        address tokenIn,
-        uint256 amount,
-        bytes calldata metadata
-    )
-        internal
-        view
-        returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
-    {
-        // Hold any one-shot source-project override encoded in metadata.
-        uint256 sourceProjectIdOverride;
-
-        // Extract the override from metadata if the caller specified one.
-        (sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
-
-        // Start by assuming the source project comes from the override.
-        uint256 sourceProjectId = sourceProjectIdOverride;
-
-        // Otherwise, infer the source project from the input token when it is not the native-token sentinel.
-        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = _projectIdOf(tokenIn);
-        }
-
-        // JB project tokens and credit routes must be previewed through the cash-out path first.
-        if (sourceProjectId != 0) {
-            // Preview the recursive cash-out flow until we either reach an accepting terminal or a base token.
-            (destTerminal, tokenOut, amountOut) = _previewCashOutLoop({
-                destProjectId: destProjectId,
-                token: tokenIn,
-                amount: amount,
-                sourceProjectIdOverride: sourceProjectIdOverride,
-                metadata: metadata,
-                preferredToken: address(0)
-            });
-
-            // If cash-out preview already found the receiving terminal, the route is fully resolved.
-            if (address(destTerminal) != address(0)) return (destTerminal, tokenOut, amountOut);
-
-            // Otherwise continue routing from the reclaimed base token and amount.
-            tokenIn = tokenOut;
-            amount = amountOut;
-        }
-
-        // Resolve which token the destination project would ultimately accept from this point.
-        (tokenOut, destTerminal) = _resolveTokenOut({projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
-
-        // Direct transfers and native/WETH wrap-unwrap paths can be previewed exactly.
-        if (tokenIn == tokenOut || _normalize(tokenIn) == _normalize(tokenOut)) {
-            return (destTerminal, tokenOut, amount);
-        }
-
-        // Quote the swap using the same pool-discovery and quote-selection logic production uses for swap bounds.
-        (amountOut,) = _pickPoolAndQuote({
-            metadata: metadata,
-            normalizedTokenIn: _normalize(tokenIn),
-            amount: amount,
-            normalizedTokenOut: _normalize(tokenOut)
-        });
-
-        // Swap previews are still estimates because execution-time pool state can move before the real transaction
-        // lands.
-        return (destTerminal, tokenOut, amountOut);
     }
 
     /// @notice Get a minimum-amount-out quote at the given tick, applying dynamic slippage.
@@ -2292,48 +1989,5 @@ contract JBRouterTerminal is
         });
 
         minAmountOut -= (minAmountOut * slippageTolerance) / _SLIPPAGE_DENOMINATOR;
-    }
-
-    /// @notice Determine what output token a project accepts for a given input token.
-    /// @dev Priority: 1) metadata override, 2) direct acceptance, 3) NATIVE/WETH equivalence, 4) pool discovery.
-    /// @param projectId The ID of the destination project.
-    /// @param tokenIn The input token being routed.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    /// @return tokenOut The token the project accepts.
-    /// @return destTerminal The terminal that accepts tokenOut.
-    function _resolveTokenOut(
-        uint256 projectId,
-        address tokenIn,
-        bytes calldata metadata
-    )
-        internal
-        view
-        returns (address tokenOut, IJBTerminal destTerminal)
-    {
-        // 1. Metadata override — payer specifies tokenOut explicitly.
-        (bool exists, bytes memory routeData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("routeTokenOut"), metadata: metadata});
-        if (exists) {
-            (tokenOut) = abi.decode(routeData, (address));
-            destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenOut});
-            if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(projectId, tokenOut);
-            return (tokenOut, destTerminal);
-        }
-
-        // 2. Direct acceptance — project accepts tokenIn as-is.
-        destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenIn});
-        if (address(destTerminal) != address(0) && destTerminal.accountingContextsOf(projectId).length != 0) {
-            return (tokenIn, destTerminal);
-        }
-
-        // 2b. Check NATIVE_TOKEN <-> WETH equivalence.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WETH)) {
-            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : JBConstants.NATIVE_TOKEN;
-            destTerminal = _primaryTerminalOf({projectId: projectId, token: tokenOut});
-            if (address(destTerminal) != address(0)) return (tokenOut, destTerminal);
-        }
-
-        // 3. Dynamic discovery — iterate terminals, find accepted token with best Uniswap pool.
-        (tokenOut, destTerminal) = _discoverAcceptedToken({projectId: projectId, tokenIn: tokenIn});
     }
 }

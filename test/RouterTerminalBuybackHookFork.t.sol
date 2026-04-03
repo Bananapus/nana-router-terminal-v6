@@ -170,14 +170,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
         _deployJbCore();
 
         buybackHook = new JBBuybackHook(
-            jbDirectory,
-            jbPermissions,
-            jbPrices,
-            jbProjects,
-            jbTokens,
-            V4_POOL_MANAGER,
-            IHooks(address(0)),
-            address(0)
+            jbDirectory, jbPermissions, jbPrices, jbProjects, jbTokens, V4_POOL_MANAGER, IHooks(address(0)), address(0)
         );
 
         routerTerminal = new JBRouterTerminal({
@@ -312,9 +305,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
         tokensToAccept[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN,
-            decimals: 18,
-            currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
         });
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
@@ -331,8 +322,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
     function _seedBuybackPool() internal {
         address terminalToken = address(0);
-        (address currency0, address currency1) =
-            terminalToken < hookedProjectToken ? (terminalToken, hookedProjectToken) : (hookedProjectToken, terminalToken);
+        (address currency0, address currency1) = terminalToken < hookedProjectToken
+            ? (terminalToken, hookedProjectToken)
+            : (hookedProjectToken, terminalToken);
 
         buybackPoolKey = PoolKey({
             currency0: Currency.wrap(currency0),
@@ -373,9 +365,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
         returns (bytes memory metadata)
     {
         return JBMetadataResolver.addToMetadata(
-            "",
-            JBMetadataResolver.getId("quote"),
-            abi.encode(amountToSwapWith, minimumSwapAmountOut)
+            "", JBMetadataResolver.getId("quote"), abi.encode(amountToSwapWith, minimumSwapAmountOut)
         );
     }
 

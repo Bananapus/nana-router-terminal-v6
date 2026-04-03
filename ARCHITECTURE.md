@@ -3,12 +3,14 @@
 ## Purpose
 
 `nana-router-terminal-v6` lets a payer fund a Juicebox project with a token the project does not directly accept. It discovers the destination token, unwraps or wraps native assets when needed, optionally cashes out upstream JB project tokens, and swaps through the deepest available Uniswap V3 or V4 route before forwarding the final asset to the destination terminal.
+The router is intentionally heuristic: it does not exhaustively search every viable pool for the absolute best execution price.
 
 ## Boundaries
 
 - The router is a terminal-shaped payment adapter, not a canonical accounting terminal.
 - It owns routing, swapping, quoting, and refund behavior.
 - Final accounting still occurs at the destination terminal that actually accepts the routed token.
+- Pool selection is optimized for simple, bounded route discovery, not full best-execution search across all candidate pools.
 
 ## Main Components
 
@@ -37,12 +39,15 @@ router pay call
 - Pool discovery and quote logic must stay aligned between preview and execution paths.
 - Refund resolution is part of correctness, not ergonomics. Partial fills without correct refunds create value leaks.
 - Registry locking is a security feature; it prevents projects from being silently switched to untrusted router implementations.
+- Final forwarded ERC-20 hops are only supported for standard tokens whose destination-terminal pull transfers the full nominal amount without transfer fees or burns.
 
 ## Where Complexity Lives
 
 - The router composes multiple route families: direct, wrap/unwrap, recursive JB cash-out, and DEX swaps.
 - Native-asset handling and refund handling are the most failure-prone parts of the implementation.
 - Liquidity discovery across V3 and V4 is simple to describe but easy to desynchronize between preview and live execution.
+- “Best route” in this system means the best route under the router's discovery heuristic, not a guarantee of globally optimal output across every live pool.
+- Fee-on-transfer or otherwise lossy ERC-20s are only tolerated on ingress where the router can reconcile the received balance delta. They are rejected on the final terminal-facing hop.
 
 ## Dependencies
 

@@ -23,9 +23,11 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
-import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
+import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 
+/// @notice Lets projects pick, lock, and forward through a router terminal or a shared default router terminal.
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
@@ -37,6 +39,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     error JBRouterTerminalRegistry_AmountOverflow();
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
+    error JBRouterTerminalRegistry_NonStandardTerminalToken(
+        address token, IJBTerminal terminal, uint256 amountReceived, uint256 amountExpected
+    );
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
     error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
@@ -88,6 +93,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ---------------------------- constructor -------------------------- //
     //*********************************************************************//
 
+    /// @notice Construct a router-terminal registry.
     /// @param permissions The permissions contract.
     /// @param projects The project registry.
     /// @param permit2 The permit2 utility.
@@ -151,6 +157,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
+    /// @return currentSurplus Always returns 0 because the registry is only a forwarding layer.
     function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {}
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
@@ -206,8 +213,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
-    function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
-        return interfaceId == type(IJBRouterTerminalRegistry).interfaceId
+    /// @notice Whether the registry supports a given interface ID.
+    /// @param interfaceId The interface ID to check.
+    /// @return supported A flag indicating whether `interfaceId` is implemented.
+    function supportsInterface(bytes4 interfaceId) public pure override returns (bool supported) {
+        supported = interfaceId == type(IJBRouterTerminalRegistry).interfaceId
             || interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
@@ -237,6 +247,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice Empty implementation to satisfy the interface.
+    /// @param projectId The ID of the project whose contexts would otherwise be updated.
+    /// @param accountingContexts Ignored because the registry delegates accounting contexts to the resolved terminal.
     function addAccountingContextsFor(
         uint256 projectId,
         JBAccountingContext[] calldata accountingContexts
@@ -245,7 +257,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
     {}
 
-    /// @notice Accepts funds for a given project and adds them to the project's balance in the resolved terminal.
+    /// @notice Accept funds for a project and add them to the balance of the resolved terminal.
     /// @param projectId The ID of the project for which funds are being accepted.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
@@ -272,6 +284,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
+        // Snapshot the terminal balance so lossy terminal-facing ERC-20 pulls can be detected after the forward.
+        uint256 terminalBalanceBefore = token == JBConstants.NATIVE_TOKEN || _isTerminalLikeRouter(terminal)
+            ? 0
+            : IERC20(token).balanceOf(address(terminal));
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -288,6 +304,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             memo: memo,
             metadata: metadata
         });
+
+        // Reject lossy terminal-facing ERC-20s when the terminal received less than the nominal forwarded amount.
+        if (token != JBConstants.NATIVE_TOKEN && !_isTerminalLikeRouter(terminal)) {
+            uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - terminalBalanceBefore;
+            if (amountReceived != amount) {
+                revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
+            }
+        }
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -391,6 +415,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
+        uint256 terminalBalanceBefore = token == JBConstants.NATIVE_TOKEN || _isTerminalLikeRouter(terminal)
+            ? 0
+            : IERC20(token).balanceOf(address(terminal));
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -408,6 +435,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             memo: memo,
             metadata: metadata
         });
+
+        if (token != JBConstants.NATIVE_TOKEN && !_isTerminalLikeRouter(terminal)) {
+            uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - terminalBalanceBefore;
+            if (amountReceived != amount) {
+                revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
+            }
+        }
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -454,7 +488,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice Accepts a token being paid in.
-    /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
+    /// @dev Measures the actual received balance so forwarded amounts stay in sync with lossy ERC-20 transfers.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
     /// @param metadata The metadata in which `permit2` context is provided.
@@ -497,13 +531,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             }
         }
 
-        // Fee-on-transfer tokens are not supported by design. The router uses balance-delta
-        // checks for its own accounting but relies on underlying terminal behavior for FoT tokens. Projects
-        // should avoid configuring FoT tokens.
+        // Measure the actual received balance so downstream forwarding uses what arrived, not the caller's nominal
+        // amount.
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
         // Transfer the tokens from the `_msgSender()` to this terminal.
         _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
 
-        return amount;
+        return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
     /// @notice Logic to be triggered before transferring tokens from this terminal.
@@ -519,6 +554,17 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
 
         return 0;
+    }
+
+    /// @notice Whether a terminal is another router-style forwarding hop that enforces its own final ERC-20 receipt.
+    /// @param terminal The terminal being checked.
+    /// @return isRouterTerminal A flag indicating whether `terminal` supports `IJBRouterTerminal`.
+    function _isTerminalLikeRouter(IJBTerminal terminal) internal view returns (bool isRouterTerminal) {
+        try IERC165(address(terminal)).supportsInterface(type(IJBRouterTerminal).interfaceId) returns (bool supported) {
+            return supported;
+        } catch {
+            return false;
+        }
     }
 
     /// @notice Transfers tokens.

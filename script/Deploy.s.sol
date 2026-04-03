@@ -1,48 +1,92 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {
+    BuybackDeployment,
+    BuybackDeploymentLib
+} from "@bananapus/buyback-hook-v6/script/helpers/BuybackDeploymentLib.sol";
 import {CoreDeployment, CoreDeploymentLib} from "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
-
 import {Sphinx} from "@sphinx-labs/contracts/contracts/foundry/SphinxPlugin.sol";
 import {Script} from "forge-std/Script.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
+import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
+/// @notice Deploys the router terminal and registry with network-specific dependency addresses.
 contract DeployScript is Script, Sphinx {
-    /// @notice tracks the deployment of the core contracts for the chain we are deploying to.
-    CoreDeployment core;
+    //*********************************************************************//
+    // ------------------------ internal constants ----------------------- //
+    //*********************************************************************//
 
-    /// @notice the salts that are used to deploy the contracts.
+    /// @notice The CREATE2 salt used for the router terminal deployment.
     bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
+
+    /// @notice The CREATE2 salt used for the router-terminal registry deployment.
     bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
 
-    /// @notice tracks the addresses that are required for the chain we are deploying to.
+    //*********************************************************************//
+    // --------------------- internal stored properties ------------------ //
+    //*********************************************************************//
+
+    /// @notice Tracks the deployment of the core contracts for the chain being deployed to.
+    CoreDeployment core;
+
+    /// @notice Tracks the deployment of the buyback-hook contracts for the chain being deployed to.
+    BuybackDeployment buyback;
+
+    /// @notice The wrapped native token address for the active deployment network.
     address weth;
+
+    /// @notice The Uniswap V3 factory address for the active deployment network.
     address factory;
+
+    /// @notice The Uniswap V4 pool manager address for the active deployment network.
     address poolManager;
+
+    /// @notice The Permit2 singleton address for the active deployment network.
     address permit2;
+
+    /// @notice The trusted forwarder inherited from the core deployment.
     address trustedForwarder;
 
+    //*********************************************************************//
+    // ---------------------- external transactions ---------------------- //
+    //*********************************************************************//
+
+    /// @notice Configure the Sphinx deployment metadata for this repo.
     function configureSphinx() public override {
+        // Name the Sphinx project so deployments reuse the canonical artifact tree.
         sphinxConfig.projectName = "nana-router-terminal-v6";
+
+        // Declare the supported mainnet targets for the deployment bundle.
         sphinxConfig.mainnets = ["ethereum", "optimism", "base", "arbitrum"];
+
+        // Declare the supported testnet targets for the deployment bundle.
         sphinxConfig.testnets = ["ethereum_sepolia", "optimism_sepolia", "base_sepolia", "arbitrum_sepolia"];
     }
 
+    /// @notice Resolve network-specific dependencies and then execute the Sphinx deployment.
     function run() public {
-        // Get the deployment addresses for the nana CORE for this chain.
-        // We want to do this outside of the `sphinx` modifier.
+        // Read the core deployment bundle outside the `sphinx` modifier so address resolution stays pure setup.
         core = CoreDeploymentLib.getDeployment(
             vm.envOr({
                 name: "NANA_CORE_DEPLOYMENT_PATH", defaultValue: string("node_modules/@bananapus/core-v6/deployments/")
             })
         );
 
+        // Read the buyback-hook deployment bundle that the router will use for buyback-aware preview logic.
+        buyback = BuybackDeploymentLib.getDeployment(
+            vm.envOr({
+                name: "NANA_BUYBACK_HOOK_DEPLOYMENT_PATH",
+                defaultValue: string("node_modules/@bananapus/buyback-hook-v6/deployments/")
+            })
+        );
+
+        // Reuse the trusted forwarder from core so router meta-transactions match the rest of the stack.
         trustedForwarder = core.permissions.trustedForwarder();
 
         // Permit2 is deployed at the same address on all chains.
@@ -102,7 +146,9 @@ contract DeployScript is Script, Sphinx {
         deploy();
     }
 
+    /// @notice Deploy the registry and router terminal through Sphinx for the already-configured network addresses.
     function deploy() public sphinx {
+        // Deploy the registry first so the router can be assigned as its default terminal immediately after.
         JBRouterTerminalRegistry registry = new JBRouterTerminalRegistry{salt: ROUTER_TERMINAL_REGISTRY}({
             permissions: core.permissions,
             projects: core.projects,
@@ -111,6 +157,7 @@ contract DeployScript is Script, Sphinx {
             trustedForwarder: trustedForwarder
         });
 
+        // Deploy the router terminal using the resolved network-specific Uniswap and buyback-hook addresses.
         JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
             directory: core.directory,
             permissions: core.permissions,
@@ -120,7 +167,7 @@ contract DeployScript is Script, Sphinx {
             weth: IWETH9(weth),
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),
-            buybackHook: address(0),
+            buybackHook: address(buyback.hook),
             trustedForwarder: trustedForwarder
         });
 
@@ -128,9 +175,18 @@ contract DeployScript is Script, Sphinx {
         registry.setDefaultTerminal(terminal);
     }
 
-    // Note: _isDeployed is not used by the Sphinx deployment flow but is retained as a utility for
-    // manual CREATE2 deployments and local testing where Sphinx is not available.
+    //*********************************************************************//
+    // ------------------------- internal views -------------------------- //
+    //*********************************************************************//
+
+    /// @notice Compute whether a CREATE2 deployment would already exist at its deterministic address.
+    /// @dev This helper is retained for manual deployment flows even though Sphinx does not call it directly.
+    /// @param salt The CREATE2 salt that would be used for the deployment.
+    /// @param creationCode The contract creation code.
+    /// @param arguments The ABI-encoded constructor arguments.
+    /// @return isDeployed A flag indicating whether code already exists at the computed deployment address.
     function _isDeployed(bytes32 salt, bytes memory creationCode, bytes memory arguments) internal view returns (bool) {
+        // Derive the deterministic deployment address using the canonical Arachnid CREATE2 deployer.
         address _deployedTo = vm.computeCreate2Address({
             salt: salt,
             initCodeHash: keccak256(abi.encodePacked(creationCode, arguments)),
@@ -138,7 +194,7 @@ contract DeployScript is Script, Sphinx {
             deployer: address(0x4e59b44847b379578588920cA78FbF26c0B4956C)
         });
 
-        // Return if code is already present at this address.
+        // Report whether a contract is already deployed at the computed CREATE2 address.
         return address(_deployedTo).code.length != 0;
     }
 }
