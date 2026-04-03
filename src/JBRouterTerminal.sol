@@ -1881,13 +1881,14 @@ contract JBRouterTerminal is
                 address contextToken = contexts[j].token;
 
                 if (preferredToken != address(0) && contextToken == preferredToken) {
-                    IJBTerminal preferredTerminal = _primaryTerminalOf({projectId: destProjectId, token: contextToken});
+                    // Only treat the preferred token as a direct completion when its destination terminal is usable.
+                    IJBTerminal preferredTerminal =
+                        _usablePrimaryTerminalOf({projectId: destProjectId, token: contextToken});
                     if (address(preferredTerminal) != address(0)) return (contextToken, terminal);
                 }
 
-                // Priority 1: Does the destination project directly accept this token?
-                // slither-disable-next-line calls-loop
-                IJBTerminal destTerminal = _primaryTerminalOf({projectId: destProjectId, token: contextToken});
+                // Priority 1: Does the destination project directly accept this token through a usable terminal?
+                IJBTerminal destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: contextToken});
                 candidates = _recordCashOutPathCandidate({
                     candidates: candidates, contextToken: contextToken, terminal: terminal, destTerminal: destTerminal
                 });
@@ -1931,7 +1932,7 @@ contract JBRouterTerminal is
     {
         updatedCandidates = candidates;
 
-        // Record the first directly accepted token so the router can stop cashout recursion immediately if needed.
+        // Record the first directly accepted token only when its destination terminal is actually usable.
         if (address(destTerminal) != address(0) && address(updatedCandidates.directFallbackTerminal) == address(0)) {
             updatedCandidates.directFallbackToken = contextToken;
             updatedCandidates.directFallbackTerminal = terminal;
