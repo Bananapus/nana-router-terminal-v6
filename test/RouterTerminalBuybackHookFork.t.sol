@@ -188,6 +188,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,
             buybackHook: address(buybackHook),
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
 

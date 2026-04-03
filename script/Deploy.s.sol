@@ -6,6 +6,10 @@ import {
     BuybackDeploymentLib
 } from "@bananapus/buyback-hook-v6/script/helpers/BuybackDeploymentLib.sol";
 import {CoreDeployment, CoreDeploymentLib} from "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
+import {
+    Univ4RouterDeployment,
+    Univ4RouterDeploymentLib
+} from "@bananapus/univ4-router-v6/script/helpers/Univ4RouterDeploymentLib.sol";
 import {Sphinx} from "@sphinx-labs/contracts/contracts/foundry/SphinxPlugin.sol";
 import {Script} from "forge-std/Script.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
@@ -37,6 +41,9 @@ contract DeployScript is Script, Sphinx {
 
     /// @notice Tracks the deployment of the buyback-hook contracts for the chain being deployed to.
     BuybackDeployment buyback;
+
+    /// @notice Tracks the deployment of the canonical Uniswap V4 router hook for the chain being deployed to.
+    Univ4RouterDeployment univ4Router;
 
     /// @notice The wrapped native token address for the active deployment network.
     address weth;
@@ -83,6 +90,14 @@ contract DeployScript is Script, Sphinx {
             vm.envOr({
                 name: "NANA_BUYBACK_HOOK_DEPLOYMENT_PATH",
                 defaultValue: string("node_modules/@bananapus/buyback-hook-v6/deployments/")
+            })
+        );
+
+        // Read the canonical Uniswap V4 router-hook deployment bundle used by supported hooked pools.
+        univ4Router = Univ4RouterDeploymentLib.getDeployment(
+            vm.envOr({
+                name: "NANA_UNIV4_ROUTER_DEPLOYMENT_PATH",
+                defaultValue: string("node_modules/@bananapus/univ4-router-v6/deployments/")
             })
         );
 
@@ -166,6 +181,7 @@ contract DeployScript is Script, Sphinx {
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),
             buybackHook: address(buyback.hook),
+            univ4Hook: address(univ4Router.hook),
             trustedForwarder: trustedForwarder
         });
 

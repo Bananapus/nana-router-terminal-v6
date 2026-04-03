@@ -95,6 +95,7 @@ The following values are set at deploy time and cannot be changed:
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 | `WETH` | Constructor | No | Wrapped ETH contract |
 | `BUYBACK_HOOK` | Constructor | No | Canonical buyback hook whose metadata this router understands |
+| `UNIV4_HOOK` | Constructor | No | Canonical Uniswap V4 hook address searched during hooked-pool discovery |
 | `DEFAULT_TWAP_WINDOW` | Compile-time constant | No | 10 minutes (600 seconds) |
 | `SLIPPAGE_DENOMINATOR` | Compile-time constant | No | 10,000 (basis points) |
 | `_FEE_TIERS` | Storage (initialized) | No | `[3000, 500, 10000, 100]` -- V3 fee tiers |

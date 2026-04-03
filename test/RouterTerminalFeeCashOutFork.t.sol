@@ -121,6 +121,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,
             buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: trustedForwarder
         });
 

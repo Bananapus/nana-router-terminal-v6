@@ -475,6 +475,31 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         return address(terminal) == address(router);
     }
 
+    /// @notice Resolve the usable primary terminal for a discovered candidate token.
+    /// @param router The router whose circular-terminal rule should be applied.
+    /// @param directory The directory used to resolve primary terminals.
+    /// @param projectId The destination project being inspected.
+    /// @param candidateToken The discovered accepted token candidate.
+    /// @return candidateTerminal The candidate token's primary terminal, or address(0) if unusable.
+    function _usablePrimaryTerminalForCandidate(
+        IJBPayRoutePreviewer router,
+        IJBDirectory directory,
+        uint256 projectId,
+        address candidateToken
+    )
+        internal
+        view
+        returns (IJBTerminal candidateTerminal)
+    {
+        // Resolve the primary terminal for the candidate token so fallback discovery agrees with preview/execution.
+        candidateTerminal = directory.primaryTerminalOf({projectId: projectId, token: candidateToken});
+
+        // Drop candidates whose primary terminal disappeared or would route straight back into the router.
+        if (address(candidateTerminal) == address(0) || _isCircularTerminal(router, candidateTerminal)) {
+            return IJBTerminal(address(0));
+        }
+    }
+
     /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with `tokenIn`.
     /// @dev Falls back to the first accepted token if no pool exists.
     /// @param router The router whose normalization and pool-discovery helpers should be used.
@@ -492,11 +517,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
+        // Cache the directory once so fallback candidates can be resolved back to their primary terminals.
+        IJBDirectory directory = router.DIRECTORY();
+
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
         address normalizedTokenIn = _normalizedTokenOf(router, tokenIn);
 
         // Read the destination project's currently known terminals directly from the directory.
-        IJBTerminal[] memory terminals = router.DIRECTORY().terminalsOf(projectId);
+        IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
 
         // Track the best liquidity discovered so far across all accepted candidate tokens.
         uint128 bestLiquidity;
@@ -518,10 +546,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
                 if (normalizedCandidate == normalizedTokenIn) continue;
 
+                // Resolve the candidate token back to its usable primary terminal so discovery agrees with
+                // preview/execution terminal selection.
+                IJBTerminal candidateTerminal =
+                    _usablePrimaryTerminalForCandidate(router, directory, projectId, candidateToken);
+                if (address(candidateTerminal) == address(0)) continue;
+
                 // Keep the first viable candidate as a fallback in case no pool-backed route exists.
                 if (!hasFallback) {
                     tokenOut = candidateToken;
-                    destTerminal = terminals[i];
+                    destTerminal = candidateTerminal;
                     hasFallback = true;
                 }
 
@@ -531,7 +565,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     // Replace the fallback with the candidate backed by the deepest discovered pool so far.
                     bestLiquidity = candidateLiquidity;
                     tokenOut = candidateToken;
-                    destTerminal = terminals[i];
+                    destTerminal = candidateTerminal;
                 }
             }
         }

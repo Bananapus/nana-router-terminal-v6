@@ -17,6 +17,7 @@
 ## High-Risk Areas
 
 - Preview and execution parity: changes to quote selection or route discovery should be checked against both preview and mutative paths.
+- V4 discovery scope: the router now searches both vanilla V4 pools and pools using the configured canonical `UNIV4_HOOK`.
 - Cash-out loop behavior: recursive routing through project tokens can create subtle loop or slippage issues.
 - Callback validation: V3 and V4 callback guards are security-critical and should not drift.
 - Leftover/refund handling: refunds can route to the original payer or fallback recipient depending on context.

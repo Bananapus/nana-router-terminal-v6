@@ -16,6 +16,7 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
+import {JBPayRouteResolver} from "../../src/JBPayRouteResolver.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 contract AuditMismatchToken {
@@ -114,6 +115,7 @@ contract AuditPreviewTerminal {
 
 contract PreviewPrimaryTerminalMismatchTest is Test {
     JBRouterTerminal internal router;
+    JBPayRouteResolver internal resolver;
 
     IJBDirectory internal directory;
     IJBTokens internal tokens;
@@ -123,6 +125,7 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
     IPoolManager internal poolManager;
 
     AuditMismatchToken internal token;
+    AuditMismatchToken internal inputToken;
     AuditPreviewTerminal internal fakePreviewTerminal;
     AuditPreviewTerminal internal primaryTerminal;
 
@@ -152,10 +155,13 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             factory: factory,
             poolManager: poolManager,
             buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
+        resolver = new JBPayRouteResolver();
 
         token = new AuditMismatchToken();
+        inputToken = new AuditMismatchToken();
         fakePreviewTerminal = new AuditPreviewTerminal(address(token), 1000e18);
         primaryTerminal = new AuditPreviewTerminal(address(token), 1e18);
 
@@ -189,5 +195,45 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         assertEq(minted, 1e18, "execution should use the primary terminal too");
         assertEq(primaryTerminal.totalReceived(), 100e18, "payment should be forwarded to the primary terminal");
         assertEq(fakePreviewTerminal.totalReceived(), 0, "non-primary preview terminal should never receive funds");
+    }
+
+    function test_resolveTokenOut_fallbackUsesPrimaryTerminal() public {
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, address(inputToken))),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(inputToken), address(token), 3000)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(inputToken), address(token), 500)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(inputToken), address(token), 10_000)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(factory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (address(inputToken), address(token), 100)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(router),
+            abi.encodeCall(JBRouterTerminal.bestPoolLiquidityOf, (address(inputToken), address(token))),
+            abi.encode(uint128(0))
+        );
+
+        (address tokenOut, IJBTerminal destTerminal) = resolver.resolveTokenOut(router, 1, address(inputToken), "");
+
+        assertEq(tokenOut, address(token), "fallback discovery should still pick the accepted token");
+        assertEq(
+            address(destTerminal), address(primaryTerminal), "fallback discovery should resolve the primary terminal"
+        );
     }
 }

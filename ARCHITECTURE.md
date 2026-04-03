@@ -48,6 +48,7 @@ router pay call
 - The router composes multiple route families: direct, wrap/unwrap, recursive JB cash-out, and DEX swaps.
 - Native-asset handling and refund handling are the most failure-prone parts of the implementation.
 - Liquidity discovery across V3 and V4 is simple to describe but easy to desynchronize between preview and live execution.
+- V4 discovery intentionally searches both vanilla pools and pools using the canonical `UNIV4_HOOK`, because buyback-hook and LP-split integrations rely on that hook-backed oracle path.
 - “Best route” in this system means the best route under the router's discovery heuristic, not a guarantee of globally optimal output across every live pool.
 - Fee-on-transfer or otherwise lossy ERC-20s are only tolerated on ingress where the router can reconcile the received balance delta. They are rejected on the final terminal-facing hop.
 - The preview candidate fanout lives in `JBPayRouteResolver`, but downstream `previewPayFor(...)` calls still originate from the router so payer-sensitive previews match execution context.

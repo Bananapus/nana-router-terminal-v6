@@ -248,6 +248,7 @@ contract V4QuoteAndSettlementForkTest is Test {
             factory: IUniswapV3Factory(address(noV3Factory)),
             poolManager: V4_POOL_MANAGER,
             buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: trustedForwarder
         });
 

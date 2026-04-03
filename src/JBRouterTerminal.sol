@@ -20,7 +20,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {mulDiv} from "@prb/math/src/Common.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -119,6 +118,9 @@ contract JBRouterTerminal is
     /// @notice The canonical buyback hook whose preview hook specification metadata this router understands.
     address public immutable BUYBACK_HOOK;
 
+    /// @notice The canonical Uniswap V4 router hook address used by supported hooked pools.
+    address public immutable UNIV4_HOOK;
+
     /// @notice The directory of terminals and controllers for projects.
     IJBDirectory public immutable DIRECTORY;
 
@@ -169,6 +171,7 @@ contract JBRouterTerminal is
     /// @param weth A contract which wraps the native token.
     /// @param factory The Uniswap V3 factory for pool discovery.
     /// @param poolManager The Uniswap V4 PoolManager (address(0) if V4 not available).
+    /// @param univ4Hook The canonical Uniswap V4 router hook used by supported hooked pools.
     /// @param trustedForwarder The trusted forwarder for the contract.
     // slither-disable-next-line missing-zero-check
     constructor(
@@ -179,6 +182,7 @@ contract JBRouterTerminal is
         IUniswapV3Factory factory,
         IPoolManager poolManager,
         address buybackHook,
+        address univ4Hook,
         address trustedForwarder
     )
         ERC2771Context(trustedForwarder)
@@ -191,6 +195,7 @@ contract JBRouterTerminal is
         WETH = weth;
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
+        UNIV4_HOOK = univ4Hook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver()));
     }
 
@@ -1056,11 +1061,14 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
-        // Check for a user-provided minimum cashout reclaim amount (slippage protection).
+        // Apply the caller's reclaim minimum only to the first cashout hop.
+        // The metadata encodes one concrete token amount, so carrying it across later hops would mix incompatible
+        // units once the route changes assets (for example, project token -> ETH -> USDC).
+        // That means later hops intentionally run without this metadata-level reclaim floor.
         uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
-        // Propagate proportional slippage protection across multi-hop cashouts. Each intermediate step scales the
-        // minimum by the ratio of actual output to expected input, maintaining end-to-end slippage guarantees.
+        // Walk the cashout path hop by hop until we reach a directly acceptable destination asset or exhaust the
+        // bounded iteration limit.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             // When a preferred token was supplied, check whether the route can already finish into it before taking
             // another cashout hop.
@@ -1099,20 +1107,20 @@ contract JBRouterTerminal is
                 sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
             });
 
-            // Track the expected amount before cashout so we can scale the minimum proportionally.
-            uint256 previousExpectedAmount = amount;
             uint256 balanceBefore = _balanceOf({token: tokenToReclaim, account: address(this)});
 
             // Cash out the source project's tokens.
             // Don't rely on the terminal return value here. Buyback-hook sell-side execution returns 0 reclaimAmount
             // from nana-core, then transfers the real proceeds during the hook callback.
+            // Pass the metadata-level minimum only on the first hop, while the amount is still expressed in the unit
+            // the caller supplied. Later hops may reclaim different assets, so reusing this floor would be unsound.
             // slither-disable-next-line unused-return,calls-loop
             cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
-                cashOutCount: previousExpectedAmount,
+                cashOutCount: amount,
                 tokenToReclaim: tokenToReclaim,
-                minTokensReclaimed: 0,
+                minTokensReclaimed: minTokensReclaimed,
                 beneficiary: payable(address(this)),
                 metadata: ""
             });
@@ -1120,13 +1128,10 @@ contract JBRouterTerminal is
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
             if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
 
-            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
-            // This propagates slippage protection through multi-hop cashouts instead of dropping it.
-            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
-                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
-                // minTokensReclaimed may round to 0 here — that is intentional.
-                // A 0 minimum is valid and means no slippage protection for this hop.
-            }
+            // Clear the reclaim minimum after the first hop.
+            // Multi-hop routes can change token units between hops, so there is no sound generic way to rescale a
+            // single metadata amount across the remaining path.
+            minTokensReclaimed = 0;
 
             // Update for next iteration.
             token = tokenToReclaim;
@@ -1771,12 +1776,13 @@ contract JBRouterTerminal is
         bestPool = _discoverV4Pool(normalizedTokenIn, normalizedTokenOut, bestLiquidity, bestPool);
     }
 
-    /// @notice Search V4 vanilla pools and update the best pool candidate if a deeper V4 pool exists.
+    /// @notice Search supported V4 pools and update the best pool candidate if a deeper V4 pool exists.
     /// @param normalizedTokenIn The normalized input token used for pool discovery.
     /// @param normalizedTokenOut The normalized output token used for pool discovery.
     /// @param currentBestLiquidity The highest liquidity found so far from prior discovery passes.
     /// @param bestPool The current best pool candidate to preserve unless a better V4 pool is found.
-    /// @return updatedBestPool The winning pool after evaluating all supported V4 fee and tick-spacing pairings.
+    /// @return updatedBestPool The winning pool after evaluating all supported V4 fee, tick-spacing, and hook
+    /// combinations.
     function _discoverV4Pool(
         address normalizedTokenIn,
         address normalizedTokenOut,
@@ -1801,28 +1807,34 @@ contract JBRouterTerminal is
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
 
         for (uint256 i; i < 4; i++) {
-            // Build the vanilla V4 pool key for the current fee / tick-spacing pairing.
-            PoolKey memory key = PoolKey({
-                currency0: _wrapCurrency(sorted0),
-                currency1: _wrapCurrency(sorted1),
-                fee: _V4_FEES[i],
-                tickSpacing: _V4_TICK_SPACINGS[i],
-                hooks: IHooks(address(0))
-            });
+            for (uint256 j; j < 2; j++) {
+                // Probe vanilla pools first, then the configured hooked-pool family if one exists.
+                IHooks hooks = j == 0 ? IHooks(address(0)) : IHooks(UNIV4_HOOK);
+                if (j != 0 && address(hooks) == address(0)) continue;
 
-            // Probe slot0 first so uninitialized pools can be skipped without treating them as valid candidates.
-            // slither-disable-next-line unused-return,calls-loop
-            (uint160 sqrtPriceX96,,,) = _getSlot0(key.toId());
-            // slither-disable-next-line incorrect-equality
-            if (sqrtPriceX96 == 0) continue;
+                // Build the V4 pool key for the current fee / tick-spacing / hook combination.
+                PoolKey memory key = PoolKey({
+                    currency0: _wrapCurrency(sorted0),
+                    currency1: _wrapCurrency(sorted1),
+                    fee: _V4_FEES[i],
+                    tickSpacing: _V4_TICK_SPACINGS[i],
+                    hooks: hooks
+                });
 
-            // Read the current in-range liquidity for the initialized pool.
-            // slither-disable-next-line calls-loop
-            uint128 poolLiquidity = _getLiquidity(key.toId());
-            if (poolLiquidity > currentBestLiquidity) {
-                // Promote this V4 pool when it beats every candidate seen so far.
-                currentBestLiquidity = poolLiquidity;
-                updatedBestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
+                // Probe slot0 first so uninitialized pools can be skipped without treating them as valid candidates.
+                // slither-disable-next-line unused-return,calls-loop
+                (uint160 sqrtPriceX96,,,) = _getSlot0(key.toId());
+                // slither-disable-next-line incorrect-equality
+                if (sqrtPriceX96 == 0) continue;
+
+                // Read the current in-range liquidity for the initialized pool.
+                // slither-disable-next-line calls-loop
+                uint128 poolLiquidity = _getLiquidity(key.toId());
+                if (poolLiquidity > currentBestLiquidity) {
+                    // Promote this V4 pool when it beats every candidate seen so far.
+                    currentBestLiquidity = poolLiquidity;
+                    updatedBestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
+                }
             }
         }
     }
@@ -2257,6 +2269,8 @@ contract JBRouterTerminal is
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
     {
         // Track the one-time minimum reclaim amount that the caller may require on the first hop.
+        // Preview mirrors execution by not attempting to rescale this amount across later hops once the route changes
+        // token units.
         uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
@@ -2293,26 +2307,19 @@ contract JBRouterTerminal is
             // Hold the token produced by the next previewed cashout hop.
             address tokenToReclaim;
 
-            // Track the expected amount before cashout so we can scale the minimum proportionally.
-            uint256 previousExpectedAmount = amount;
-
             // Preview the next cashout hop to learn which base token and amount would come out.
             (tokenToReclaim, amount) = _previewCashOutStep({
                 sourceProjectId: sourceProjectId,
                 destProjectId: destProjectId,
-                amount: previousExpectedAmount,
+                amount: amount,
                 preferredToken: preferredToken
             });
 
-            // Enforce the caller's minimum reclaim amount on this hop.
+            // Enforce the caller's minimum reclaim amount only on the first hop.
             if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
 
-            // Scale the minimum proportionally for the next step based on the actual cashout ratio.
-            if (minTokensReclaimed != 0 && previousExpectedAmount != 0) {
-                minTokensReclaimed = mulDiv(minTokensReclaimed, amount, previousExpectedAmount);
-                // minTokensReclaimed may round to 0 here — that is intentional.
-                // A 0 minimum is valid and means no slippage protection for this hop.
-            }
+            // Clear the reclaim minimum after the first hop because later hops may operate in different token units.
+            minTokensReclaimed = 0;
 
             // Continue previewing from the token reclaimed in this hop.
             token = tokenToReclaim;

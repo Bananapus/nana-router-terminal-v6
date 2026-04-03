@@ -170,6 +170,7 @@ contract RouterRegistryReceiptMismatchTest is Test {
             factory: factory,
             poolManager: poolManager,
             buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
 

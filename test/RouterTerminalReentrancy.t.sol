@@ -272,7 +272,15 @@ contract RouterTerminalReentrancyTest is Test {
         terminalOwner = makeAddr("terminalOwner");
 
         routerTerminal = new JBRouterTerminal(
-            mockDirectory, mockTokens, mockPermit2, mockWeth, mockFactory, mockPoolManager, address(0), address(0)
+            mockDirectory,
+            mockTokens,
+            mockPermit2,
+            mockWeth,
+            mockFactory,
+            mockPoolManager,
+            address(0),
+            address(0),
+            address(0)
         );
     }
 

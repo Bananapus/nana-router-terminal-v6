@@ -155,7 +155,15 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             terminalOwner = makeAddr("terminalOwner");
 
             routerTerminal = new JBRouterTerminal(
-                mockDirectory, mockTokens, mockPermit2, mockWeth, mockFactory, mockPoolManager, address(0), address(0)
+                mockDirectory,
+                mockTokens,
+                mockPermit2,
+                mockWeth,
+                mockFactory,
+                mockPoolManager,
+                address(0),
+                address(0),
+                address(0)
             );
         }
 
@@ -484,7 +492,7 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
         // ═══════════════════════════════════════════════════════════════════════
 
         /// @notice When both cashOutSource and cashOutMinReclaimed are in the metadata,
-        /// the router should enforce slippage locally from the actual balance delta.
+        /// the router should apply the reclaim floor on the first cashout hop only.
         function test_creditCashout_withMinReclaimed() public {
             address payer = makeAddr("payer");
             address controller = makeAddr("controller");
@@ -546,7 +554,11 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);
 
             assertEq(result, 200, "pay should return dest terminal token count");
-            assertEq(cashOutTerminal.lastMinTokensReclaimed(), 0, "router should forward zero and enforce min locally");
+            assertEq(
+                cashOutTerminal.lastMinTokensReclaimed(),
+                minReclaimed,
+                "router should forward the metadata floor on the first hop"
+            );
             assertEq(destTerminal.lastAmount(), 60e18, "dest terminal should receive the reclaimed amount");
             assertEq(destTerminal.lastValue(), 60e18, "dest terminal should receive ETH value");
         }

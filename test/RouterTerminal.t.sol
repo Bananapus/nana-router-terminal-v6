@@ -458,9 +458,12 @@ contract RouterTerminalHarness is JBRouterTerminal {
         IUniswapV3Factory factory,
         IPoolManager poolManager,
         address buybackHook,
+        address univ4Hook,
         address trustedForwarder
     )
-        JBRouterTerminal(directory, tokens, permit2, weth, factory, poolManager, buybackHook, trustedForwarder)
+        JBRouterTerminal(
+            directory, tokens, permit2, weth, factory, poolManager, buybackHook, univ4Hook, trustedForwarder
+        )
     {}
 
     function exposedResolveTokenOut(
@@ -541,6 +544,7 @@ contract RouterTerminalTest is Test {
             mockFactory,
             mockPoolManager,
             buybackHook,
+            address(0),
             address(0)
         );
     }
@@ -685,6 +689,11 @@ contract RouterTerminalTest is Test {
             address(mockDirectory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
             abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, acceptedToken)),
+            abi.encode(mockTerminal)
         );
 
         // Set up terminals with accounting contexts.
@@ -2127,6 +2136,7 @@ contract RouterTerminalTest is Test {
             mockFactory,
             IPoolManager(address(0)),
             buybackHook,
+            address(0),
             address(0)
         );
 
@@ -2459,8 +2469,8 @@ contract RouterTerminalTest is Test {
             );
         }
 
-        // Router now enforces the reclaim minimum locally from the actual tokens it receives, so it must call the
-        // source terminal with minTokensReclaimed = 0 to remain compatible with buyback-hook sell-side cashouts.
+        // Router now applies the reclaim minimum on the first concrete cashout hop only.
+        // Later hops intentionally drop the floor because the route may change token units.
         vm.expectCall(
             address(mockCashOutTerminal),
             abi.encodeCall(
@@ -2470,7 +2480,7 @@ contract RouterTerminalTest is Test {
                     2, // sourceProjectId
                     100e18, // amount
                     JBConstants.NATIVE_TOKEN,
-                    0, // router enforces min reclaim locally using the balance delta
+                    50e18, // first hop receives the user-specified reclaim minimum directly
                     payable(address(routerTerminal)),
                     bytes("")
                 )
@@ -2529,6 +2539,7 @@ contract SettleV4DeficitTest is Test {
             IWETH9(address(weth)),
             mockFactory,
             IPoolManager(address(poolManager)),
+            address(0),
             address(0),
             address(0)
         );

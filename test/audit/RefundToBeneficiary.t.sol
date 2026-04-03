@@ -60,6 +60,7 @@ contract HarnessRouterTerminal is JBRouterTerminal {
             IUniswapV3Factory(address(0)),
             IPoolManager(address(0)),
             address(0),
+            address(0),
             address(0)
         )
     {}

@@ -266,6 +266,7 @@ contract DeployBuybackHookZeroTest is Test {
             factory: factory,
             poolManager: poolManager,
             buybackHook: buybackHook,
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
 
@@ -277,6 +278,7 @@ contract DeployBuybackHookZeroTest is Test {
             factory: factory,
             poolManager: poolManager,
             buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
 
