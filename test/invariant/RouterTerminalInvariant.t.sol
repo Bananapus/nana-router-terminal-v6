@@ -510,10 +510,8 @@ contract RouterTerminalInvariant is Test {
         // Deploy the router terminal.
         router = new JBRouterTerminal(
             IJBDirectory(mockDirectory),
-            IJBPermissions(mockPermissions),
             IJBTokens(mockTokens),
             IPermit2(mockPermit2),
-            address(this), // owner
             IWETH9(address(weth)),
             IUniswapV3Factory(mockFactory),
             IPoolManager(mockPoolManager),

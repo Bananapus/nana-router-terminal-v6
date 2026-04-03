@@ -269,10 +269,8 @@ contract RouterTerminalReentrancyTest is Test {
 
         routerTerminal = new JBRouterTerminal(
             mockDirectory,
-            mockPermissions,
             mockTokens,
             mockPermit2,
-            terminalOwner,
             mockWeth,
             mockFactory,
             mockPoolManager,

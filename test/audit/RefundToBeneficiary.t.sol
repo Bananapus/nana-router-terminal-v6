@@ -55,10 +55,8 @@ contract HarnessRouterTerminal is JBRouterTerminal {
     constructor()
         JBRouterTerminal(
             IJBDirectory(address(0)),
-            IJBPermissions(address(0)),
             IJBTokens(address(0)),
             IPermit2(address(0)),
-            address(this),
             IWETH9(address(new MockWETH())),
             IUniswapV3Factory(address(0)),
             IPoolManager(address(0)),

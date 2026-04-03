@@ -313,10 +313,8 @@ contract LeftoverRefundTest is Test {
 
         router = new JBRouterTerminal(
             directory,
-            permissions,
             tokens,
             permit2,
-            makeAddr("owner"),
             weth,
             factory,
             IPoolManager(address(0)),

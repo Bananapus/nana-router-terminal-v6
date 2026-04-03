@@ -115,10 +115,8 @@ contract RouterTerminalFeeCashOutForkTest is Test {
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
-            permissions: jbPermissions,
             tokens: jbTokens,
             permit2: PERMIT2,
-            owner: multisig,
             weth: WETH,
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,

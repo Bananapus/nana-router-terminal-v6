@@ -339,9 +339,7 @@ contract RouterTerminalEdgeCasesTest is Test {
         vm.etch(address(permit2), hex"00");
         vm.etch(address(factory), hex"00");
 
-        router = new JBRouterTerminal(
-            directory, permissions, tokens, permit2, owner, weth, factory, poolManager, address(0), address(0)
-        );
+        router = new JBRouterTerminal(directory, tokens, permit2, weth, factory, poolManager, address(0), address(0));
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
     }
 

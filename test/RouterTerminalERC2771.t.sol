@@ -132,10 +132,8 @@ contract RouterTerminalERC2771Test is Test {
         // Deploy with a REAL trusted forwarder (not address(0)).
         routerTerminal = new JBRouterTerminal(
             mockDirectory,
-            mockPermissions,
             mockTokens,
             mockPermit2,
-            terminalOwner,
             IWETH9(address(weth)),
             mockFactory,
             mockPoolManager,

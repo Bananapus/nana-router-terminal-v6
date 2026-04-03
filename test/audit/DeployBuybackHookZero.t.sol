@@ -260,10 +260,8 @@ contract DeployBuybackHookZeroTest is Test {
 
         configuredRouter = new JBRouterTerminal({
             directory: directory,
-            permissions: permissions,
             tokens: tokens,
             permit2: permit2,
-            owner: makeAddr("ownerConfigured"),
             weth: weth,
             factory: factory,
             poolManager: poolManager,
@@ -273,10 +271,8 @@ contract DeployBuybackHookZeroTest is Test {
 
         zeroHookRouter = new JBRouterTerminal({
             directory: directory,
-            permissions: permissions,
             tokens: tokens,
             permit2: permit2,
-            owner: makeAddr("ownerZero"),
             weth: weth,
             factory: factory,
             poolManager: poolManager,

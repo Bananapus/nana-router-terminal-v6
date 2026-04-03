@@ -155,10 +155,8 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
 
             routerTerminal = new JBRouterTerminal(
                 mockDirectory,
-                mockPermissions,
                 mockTokens,
                 mockPermit2,
-                terminalOwner,
                 mockWeth,
                 mockFactory,
                 mockPoolManager,

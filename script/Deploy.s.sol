@@ -160,10 +160,8 @@ contract DeployScript is Script, Sphinx {
         // Deploy the router terminal using the resolved network-specific Uniswap and buyback-hook addresses.
         JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
             directory: core.directory,
-            permissions: core.permissions,
             tokens: core.tokens,
             permit2: IPermit2(permit2),
-            owner: safeAddress(),
             weth: IWETH9(weth),
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),

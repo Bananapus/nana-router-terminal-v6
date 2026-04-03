@@ -673,6 +673,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             JBPayHookSpecification[] memory hookSpecifications
         )
     {
+        // Cache a self-interface once because candidate isolation requires an external call that can be caught.
+        IJBPayRouteResolver self = IJBPayRouteResolver(address(this));
+
         // Cache the directory once because every route-selection branch uses it.
         IJBDirectory directory = router.DIRECTORY();
 
@@ -722,7 +725,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             if (_isCircularTerminal(router, projectId, candidateTerminal)) continue;
 
             // Isolate each candidate preview so one broken route does not brick the whole search.
-            try this.previewPayRouteForCandidate(
+            try self.previewPayRouteForCandidate(
                 router, projectId, tokenIn, amount, beneficiary, metadata, candidateTokens[i], candidateTerminal
             ) returns (
                 IJBTerminal candidateDestTerminal,

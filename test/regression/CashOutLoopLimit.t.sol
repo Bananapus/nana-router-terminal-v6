@@ -82,10 +82,8 @@ contract CashOutLoopLimitTest is Test {
 
         routerTerminal = new JBRouterTerminal(
             directory,
-            permissions,
             tokens,
             permit2,
-            owner,
             weth,
             factory,
             IPoolManager(address(0)), // no V4

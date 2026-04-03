@@ -77,10 +77,8 @@ contract RouterTerminalPreviewForkTest is Test {
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
-            permissions: IJBPermissions(address(jbPermissions)),
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
-            owner: multisig,
             weth: WETH,
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,

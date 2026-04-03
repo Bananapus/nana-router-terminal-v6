@@ -31,9 +31,7 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         address buybackHook,
         address trustedForwarder
     )
-        JBRouterTerminal(
-            directory, permissions, tokens, permit2, owner, weth, factory, poolManager, buybackHook, trustedForwarder
-        )
+        JBRouterTerminal(directory, tokens, permit2, weth, factory, poolManager, buybackHook, trustedForwarder)
     {}
 
     /// @notice Public wrapper so tests can call `_resolveRefundWithBackupRecipient` directly.

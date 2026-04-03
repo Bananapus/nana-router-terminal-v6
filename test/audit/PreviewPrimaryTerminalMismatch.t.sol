@@ -149,10 +149,8 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
 
         router = new JBRouterTerminal({
             directory: directory,
-            permissions: permissions,
             tokens: tokens,
             permit2: permit2,
-            owner: makeAddr("owner"),
             weth: weth,
             factory: factory,
             poolManager: poolManager,
