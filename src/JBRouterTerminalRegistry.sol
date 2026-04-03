@@ -66,20 +66,20 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice The default terminal to use.
     IJBTerminal public override defaultTerminal;
 
-    /// @notice Whether the terminal for the given project is locked.
-    /// @custom:param projectId The ID of the project to get the locked terminal for.
+    /// @notice Whether the terminal for a given project has been locked against future updates.
+    /// @custom:param projectId The ID of the project whose lock state is being tracked.
     mapping(uint256 projectId => bool) public override hasLockedTerminal;
 
-    /// @notice Whether the given terminal is allowed to be set for projects.
-    /// @custom:param terminal The terminal to check.
+    /// @notice Whether a terminal is allowlisted for project-level selection.
+    /// @custom:param terminal The terminal whose allowlist status is being tracked.
     mapping(IJBTerminal terminal => bool) public override isTerminalAllowed;
 
     //*********************************************************************//
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
 
-    /// @notice The terminal explicitly set for the given project.
-    /// @custom:param projectId The ID of the project to get the terminal for.
+    /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
+    /// @custom:param projectId The ID of the project whose explicit terminal assignment is being tracked.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
     //*********************************************************************//
@@ -205,8 +205,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param projectId The ID of the project to get the terminal for.
     /// @return terminal The terminal for the project.
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
-        terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        return _resolvedTerminalOf(projectId);
     }
 
     //*********************************************************************//
@@ -240,6 +239,61 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @return sender The address which sent this call.
     function _msgSender() internal view override(ERC2771Context, Context) returns (address sender) {
         return ERC2771Context._msgSender();
+    }
+
+    /// @notice Resolve the effective terminal for a project, falling back to the default terminal when unset.
+    /// @param projectId The project whose terminal should be resolved.
+    /// @return terminal The project-specific terminal, or the default terminal if no override exists.
+    function _resolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        // Start from the project-specific override, if one was configured.
+        terminal = _terminalOf[projectId];
+
+        // Fall back to the default terminal when no project-specific terminal has been set.
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+    }
+
+    /// @notice Snapshot a downstream terminal's ERC-20 balance when receipt enforcement applies.
+    /// @param terminal The terminal that is about to receive forwarded funds.
+    /// @param token The token that will be forwarded.
+    /// @return balanceBefore The terminal's pre-forward ERC-20 balance, or 0 when receipt enforcement is skipped.
+    function _terminalBalanceBefore(IJBTerminal terminal, address token) internal view returns (uint256 balanceBefore) {
+        // Skip ERC-20 receipt snapshots for native-token forwards.
+        if (token == JBConstants.NATIVE_TOKEN) return 0;
+
+        // Skip ERC-20 receipt snapshots for router-like terminals that may immediately forward again.
+        if (_isTerminalLikeRouter(terminal)) return 0;
+
+        // Snapshot the terminal's ERC-20 balance so the post-forward delta can be checked precisely.
+        return IERC20(token).balanceOf(address(terminal));
+    }
+
+    /// @notice Enforce that a downstream terminal received the exact nominal ERC-20 amount it was forwarded.
+    /// @param terminal The terminal that just received funds.
+    /// @param token The token that was forwarded.
+    /// @param amount The nominal amount the registry forwarded.
+    /// @param balanceBefore The terminal's ERC-20 balance before the forward.
+    function _enforceStandardTerminalReceipt(
+        IJBTerminal terminal,
+        address token,
+        uint256 amount,
+        uint256 balanceBefore
+    )
+        internal
+        view
+    {
+        // Skip receipt enforcement for native-token forwards because this check is ERC-20 specific.
+        if (token == JBConstants.NATIVE_TOKEN) return;
+
+        // Skip receipt enforcement for router-like terminals because they may forward internally again.
+        if (_isTerminalLikeRouter(terminal)) return;
+
+        // Measure the exact ERC-20 amount the terminal received during the forward.
+        uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - balanceBefore;
+
+        // Reject lossy terminal-facing ERC-20s when the received amount differs from the nominal forward.
+        if (amountReceived != amount) {
+            revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
+        }
     }
 
     //*********************************************************************//
@@ -277,17 +331,15 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         override
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Resolve the terminal that should receive this forwarded add-to-balance call.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
         // Snapshot the terminal balance so lossy terminal-facing ERC-20 pulls can be detected after the forward.
-        uint256 terminalBalanceBefore = token == JBConstants.NATIVE_TOKEN || _isTerminalLikeRouter(terminal)
-            ? 0
-            : IERC20(token).balanceOf(address(terminal));
+        uint256 terminalBalanceBefore = _terminalBalanceBefore({terminal: terminal, token: token});
+
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -306,12 +358,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         });
 
         // Reject lossy terminal-facing ERC-20s when the terminal received less than the nominal forwarded amount.
-        if (token != JBConstants.NATIVE_TOKEN && !_isTerminalLikeRouter(terminal)) {
-            uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - terminalBalanceBefore;
-            if (amountReceived != amount) {
-                revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
-            }
-        }
+        _enforceStandardTerminalReceipt({
+            terminal: terminal, token: token, amount: amount, balanceBefore: terminalBalanceBefore
+        });
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -321,8 +370,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev Only the owner can allow a terminal.
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external onlyOwner {
+        // Mark the terminal as selectable for future project-level configuration.
         isTerminalAllowed[terminal] = true;
 
+        // Emit the allowlist update for off-chain consumers and audit trails.
         emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
     }
 
@@ -336,8 +387,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             revert JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(terminal);
         }
 
+        // Remove the terminal from the allowlist so future projects cannot select it.
         isTerminalAllowed[terminal] = false;
 
+        // Emit the allowlist update for off-chain consumers and audit trails.
         emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
 
@@ -408,16 +461,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256 result)
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Resolve the terminal that should receive this forwarded payment.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
-        uint256 terminalBalanceBefore = token == JBConstants.NATIVE_TOKEN || _isTerminalLikeRouter(terminal)
-            ? 0
-            : IERC20(token).balanceOf(address(terminal));
+        uint256 terminalBalanceBefore = _terminalBalanceBefore({terminal: terminal, token: token});
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -436,12 +486,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             metadata: metadata
         });
 
-        if (token != JBConstants.NATIVE_TOKEN && !_isTerminalLikeRouter(terminal)) {
-            uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - terminalBalanceBefore;
-            if (amountReceived != amount) {
-                revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
-            }
-        }
+        _enforceStandardTerminalReceipt({
+            terminal: terminal, token: token, amount: amount, balanceBefore: terminalBalanceBefore
+        });
 
         // Clear transient storage.
         originalPayer = address(0);

@@ -56,6 +56,7 @@ library JBSwapLib {
         uint256 range = MAX_SLIPPAGE - minSlippage;
         uint256 tolerance = minSlippage + mulDiv({x: range, y: impact, denominator: impact + SIGMOID_K});
 
+        // Return the bounded tolerance implied by the sigmoid curve.
         return tolerance;
     }
 
@@ -80,10 +81,13 @@ library JBSwapLib {
         pure
         returns (uint256 impact)
     {
+        // Treat empty-liquidity or zero-price inputs as having no meaningful impact estimate.
         if (liquidity == 0 || sqrtP == 0) return 0;
 
+        // Scale the input amount against the pool liquidity so impact is expressed in the library's precision space.
         uint256 base = mulDiv({x: amountIn, y: IMPACT_PRECISION, denominator: uint256(liquidity)});
 
+        // Convert the liquidity-scaled input into a direction-aware price impact estimate.
         impact = zeroForOne
             ? mulDiv({x: base, y: uint256(sqrtP), denominator: uint256(1) << 96})
             : mulDiv({x: base, y: uint256(1) << 96, denominator: uint256(sqrtP)});
@@ -109,10 +113,12 @@ library JBSwapLib {
         pure
         returns (uint160 sqrtPriceLimit)
     {
+        // Without a positive minimum output and input amount, the safest behavior is to leave the price unlimited.
         if (minimumAmountOut == 0 || amountIn == 0) {
             return zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
         }
 
+        // Arrange the ratio so the square-root price limit can be derived in the correct swap direction.
         uint256 num;
         uint256 den;
         if (zeroForOne) {
@@ -139,6 +145,7 @@ library JBSwapLib {
         }
 
         if (zeroForOne) {
+            // Clamp into the valid V3 range for downward price movement limits.
             if (sqrtResult <= uint256(TickMath.MIN_SQRT_RATIO)) {
                 return TickMath.MIN_SQRT_RATIO + 1;
             }
@@ -148,6 +155,7 @@ library JBSwapLib {
             // forge-lint: disable-next-line(unsafe-typecast)
             return uint160(sqrtResult);
         } else {
+            // Clamp into the valid V3 range for upward price movement limits.
             if (sqrtResult >= uint256(TickMath.MAX_SQRT_RATIO)) {
                 return TickMath.MAX_SQRT_RATIO - 1;
             }

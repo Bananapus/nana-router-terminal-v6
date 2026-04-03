@@ -312,14 +312,7 @@ contract LeftoverRefundTest is Test {
         vm.etch(address(factory), hex"00");
 
         router = new JBRouterTerminal(
-            directory,
-            tokens,
-            permit2,
-            weth,
-            factory,
-            IPoolManager(address(0)),
-            address(0),
-            address(0)
+            directory, tokens, permit2, weth, factory, IPoolManager(address(0)), address(0), address(0)
         );
     }
 

@@ -52,7 +52,14 @@ import {PoolInfo} from "./structs/PoolInfo.sol";
 /// accepts, then routes the payment there — via direct forwarding, Uniswap swap, JB token cashout, or a combination.
 /// Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
 /// @custom:benediction DEVS BENEDICAT ET PROTEGAT CONTRACTVS MEAM
-contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCallback, IUnlockCallback, IJBRouterTerminal, IJBPayRoutePreviewer {
+contract JBRouterTerminal is
+    ERC2771Context,
+    IJBPermitTerminal,
+    IUniswapV3SwapCallback,
+    IUnlockCallback,
+    IJBRouterTerminal,
+    IJBPayRoutePreviewer
+{
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;
@@ -169,7 +176,9 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         IPoolManager poolManager,
         address buybackHook,
         address trustedForwarder
-    ) ERC2771Context(trustedForwarder) {
+    )
+        ERC2771Context(trustedForwarder)
+    {
         DIRECTORY = directory;
         TOKENS = tokens;
         FACTORY = factory;
@@ -747,6 +756,18 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         });
     }
 
+    /// @notice Check whether two tokens share the same routing representation.
+    /// @param tokenA The first token to compare.
+    /// @param tokenB The second token to compare.
+    /// @return hasSameAsset A flag indicating whether the router treats both tokens as the same asset.
+    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
+        // Treat exact-token matches as the same asset without doing any normalization work.
+        if (tokenA == tokenB) return true;
+
+        // Otherwise compare normalized representations so ETH and WETH share one routing identity.
+        return _normalize(tokenA) == _normalize(tokenB);
+    }
+
     /// @notice Whether routing through a terminal would immediately cycle back into the router.
     /// @param projectId The destination project whose terminal topology is being checked.
     /// @param terminal The terminal that would receive the route.
@@ -762,8 +783,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
     /// @return The amount of tokens that have been accepted.
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // Check for credit cash-out metadata.
-        (bool creditExists, bytes memory creditData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
+        (bool creditExists, bytes memory creditData) = _getDataFor({metadata: metadata, key: "cashOutSource"});
 
         if (creditExists) {
             // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
@@ -791,8 +811,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
 
         // Unpack the `JBSingleAllowance` to use given by the frontend.
-        (bool exists, bytes memory parsedMetadata) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("permit2"), metadata: metadata});
+        (bool exists, bytes memory parsedMetadata) = _getDataFor({metadata: metadata, key: "permit2"});
 
         // If the metadata contained permit data, use it to set the allowance.
         if (exists) {
@@ -846,6 +865,18 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         return 0;
     }
 
+    /// @notice Snapshot the normalized input-token balance used to measure refundable leftovers for one route.
+    /// @param tokenIn The token currently being routed.
+    /// @param amount The fresh route input amount currently held by the router.
+    /// @return baseline The normalized input-token balance attributable only to pre-existing funds.
+    function _refundBalanceBaselineOf(address tokenIn, uint256 amount) internal view returns (uint256 baseline) {
+        // Start from the router's normalized input-token balance before the route consumes any of it.
+        baseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
+
+        // Exclude the fresh ERC-20 route input so only pre-existing balances count toward refundable leftovers.
+        if (tokenIn != JBConstants.NATIVE_TOKEN) baseline -= amount;
+    }
+
     /// @notice Recursively cash out JB project tokens until reaching a token the destination accepts or a base token.
     /// @param destProjectId The ID of the destination project.
     /// @param token The current token being processed.
@@ -874,13 +905,28 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         // minimum by the ratio of actual output to expected input, maintaining end-to-end slippage guarantees.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             if (preferredToken != address(0)) {
-                if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
+                if (token == preferredToken) {
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
                             && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
                     ) {
                         return (destTerminal, preferredToken, amount);
+                    }
+                }
+
+                // If the cashout produced the normalized counterpart of the preferred token, convert into the exact
+                // asset the destination terminal expects before surfacing the route as complete.
+                if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+                    destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
+                    if (
+                        address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                    ) {
+                        (token, amount) = _alignTokenToPreferredToken({
+                            token: token, amount: amount, preferredToken: preferredToken
+                        });
+                        return (destTerminal, token, amount);
                     }
                 }
             }
@@ -1083,7 +1129,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
-        bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
+        bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
 
         // Use sqrtPriceLimitFromAmounts for partial-fill protection, consistent with V3 path.
         uint160 sqrtPriceLimitX96 = JBSwapLib.sqrtPriceLimitFromAmounts({
@@ -1189,8 +1235,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
             router: IJBPayRoutePreviewer(address(this)), projectId: destProjectId, tokenIn: tokenIn, metadata: metadata
         });
 
-        uint256 refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
-        if (tokenIn != JBConstants.NATIVE_TOKEN) refundBalanceBaseline -= amount;
+        uint256 refundBalanceBaseline = _refundBalanceBaselineOf({tokenIn: tokenIn, amount: amount});
 
         // Convert tokenIn -> tokenOut (no-op if they match, wrap/unwrap, or swap).
         amountOut = _convert({
@@ -1236,12 +1281,9 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         // Return early when the source cashout path already reached the final destination terminal.
         if (address(cashOutResolvedTerminal) != address(0)) return (cashOutResolvedTerminal, tokenOut, amount);
 
-        // Snapshot the normalized input-token balance so leftover swap input can be refunded relative to this route only.
-        uint256 refundBalanceBaseline = IERC20(_normalize(tokenIn)).balanceOf(address(this));
-
-        // Exclude the fresh route input from the baseline for ERC20 inputs because it is about to be consumed by the
-        // swap.
-        if (tokenIn != JBConstants.NATIVE_TOKEN) refundBalanceBaseline -= amount;
+        // Snapshot the normalized input-token balance so leftover swap input can be refunded relative to this route
+        // only.
+        uint256 refundBalanceBaseline = _refundBalanceBaselineOf({tokenIn: tokenIn, amount: amount});
 
         // Convert the routed input into the resolved destination token, refunding any leftover input above the
         // baseline.
@@ -1295,7 +1337,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
     function _settleV4(Currency currency, uint256 amount) internal {
-        if (Currency.unwrap(currency) == address(0)) {
+        if (_unwrapCurrency(currency) == address(0)) {
             // Unwrap only the WETH deficit (caller may hold partial ETH + partial WETH).
             uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
             if (deficit > 0) _wethWithdraw(deficit);
@@ -1304,7 +1346,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         } else {
             // ERC20: sync then transfer then settle.
             POOL_MANAGER.sync(currency);
-            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
+            IERC20(_unwrapCurrency(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle();
         }
@@ -1315,7 +1357,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
-        if (Currency.unwrap(currency) == address(0)) _wethDeposit(amount);
+        if (_unwrapCurrency(currency) == address(0)) _wethDeposit(amount);
     }
 
     /// @notice Transfers tokens.
@@ -1341,6 +1383,39 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         if (amount > type(uint160).max) revert JBRouterTerminal_AmountOverflow(amount);
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
+    }
+
+    /// @notice Convert native ETH and WETH into the preferred concrete asset when both normalize to the same token.
+    /// @param token The token currently held by the router.
+    /// @param amount The amount of `token` currently held.
+    /// @param preferredToken The exact token the downstream route expects.
+    /// @return alignedToken The token to surface to downstream routing.
+    /// @return alignedAmount The amount of `alignedToken`.
+    function _alignTokenToPreferredToken(
+        address token,
+        uint256 amount,
+        address preferredToken
+    )
+        internal
+        returns (address alignedToken, uint256 alignedAmount)
+    {
+        // Leave exact-token matches untouched.
+        if (token == preferredToken) return (token, amount);
+
+        // Wrap ETH into WETH when the preferred token is the ERC20 wrapper.
+        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WETH)) {
+            _wethDeposit(amount);
+            return (preferredToken, amount);
+        }
+
+        // Unwrap WETH into ETH when the preferred token is the native-token sentinel.
+        if (token == address(WETH) && preferredToken == JBConstants.NATIVE_TOKEN) {
+            _wethWithdraw(amount);
+            return (preferredToken, amount);
+        }
+
+        // Return all other token pairs unchanged.
+        return (token, amount);
     }
 
     /// @notice Deposit native tokens into WETH.
@@ -1423,14 +1498,15 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         // Use the direct directory view when failures should surface to the caller.
         if (!shouldIgnoreFailure) return DIRECTORY.terminalsOf(projectId);
 
-        // Try the directory lookup, but degrade failures into the default empty array for best-effort callers.
-        try DIRECTORY.terminalsOf(projectId) returns (IJBTerminal[] memory foundTerminals) {
-            // Return the directory-provided terminal list when the lookup succeeds.
-            return foundTerminals;
-        } catch {
-            // Return the default empty array when the best-effort lookup reverts.
-            return terminals;
-        }
+        // Fall back to a low-level staticcall so no-code or reverting directories degrade into an empty list.
+        (bool success, bytes memory data) =
+            address(DIRECTORY).staticcall(abi.encodeCall(IJBDirectory.terminalsOf, (projectId)));
+
+        // Return the default empty array when the best-effort lookup failed or returned no payload.
+        if (!success || data.length == 0) return terminals;
+
+        // Decode and return the terminal list when the best-effort lookup succeeded.
+        return abi.decode(data, (IJBTerminal[]));
     }
 
     /// @notice Find the highest liquidity across all V3 fee tiers and V4 pools for a token pair.
@@ -1454,8 +1530,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         returns (uint256 sourceProjectId, uint256 amount)
     {
         // Read the optional cash-out source payload from the metadata blob.
-        (bool exists, bytes memory creditData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutSource"), metadata: metadata});
+        (bool exists, bytes memory creditData) = _getDataFor({metadata: metadata, key: "cashOutSource"});
 
         // Decode the source project and credit amount if the payload is present.
         if (exists) (sourceProjectId, amount) = abi.decode(creditData, (uint256, uint256));
@@ -1497,8 +1572,8 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
                     isV4: false,
                     v3Pool: IUniswapV3Pool(poolAddr),
                     v4Key: PoolKey({
-                        currency0: Currency.wrap(address(0)),
-                        currency1: Currency.wrap(address(0)),
+                        currency0: _wrapCurrency(address(0)),
+                        currency1: _wrapCurrency(address(0)),
                         fee: 0,
                         tickSpacing: 0,
                         hooks: IHooks(address(0))
@@ -1511,7 +1586,12 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         bestPool = _discoverV4Pool(normalizedTokenIn, normalizedTokenOut, bestLiquidity, bestPool);
     }
 
-    /// @notice Search V4 vanilla pools and update bestPool if a V4 pool has higher liquidity.
+    /// @notice Search V4 vanilla pools and update the best pool candidate if a deeper V4 pool exists.
+    /// @param normalizedTokenIn The normalized input token used for pool discovery.
+    /// @param normalizedTokenOut The normalized output token used for pool discovery.
+    /// @param currentBestLiquidity The highest liquidity found so far from prior discovery passes.
+    /// @param bestPool The current best pool candidate to preserve unless a better V4 pool is found.
+    /// @return updatedBestPool The winning pool after evaluating all supported V4 fee and tick-spacing pairings.
     function _discoverV4Pool(
         address normalizedTokenIn,
         address normalizedTokenOut,
@@ -1520,9 +1600,13 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
     )
         internal
         view
-        returns (PoolInfo memory)
+        returns (PoolInfo memory updatedBestPool)
     {
-        if (address(POOL_MANAGER) == address(0)) return bestPool;
+        // Preserve the caller's current best pool unless a deeper V4 pool is found below.
+        updatedBestPool = bestPool;
+
+        // Exit early on chains where V4 is not deployed.
+        if (address(POOL_MANAGER) == address(0)) return updatedBestPool;
 
         // Convert WETH -> address(0) for V4 native ETH representation.
         address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
@@ -1532,28 +1616,30 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
 
         for (uint256 i; i < 4; i++) {
+            // Build the vanilla V4 pool key for the current fee / tick-spacing pairing.
             PoolKey memory key = PoolKey({
-                currency0: Currency.wrap(sorted0),
-                currency1: Currency.wrap(sorted1),
+                currency0: _wrapCurrency(sorted0),
+                currency1: _wrapCurrency(sorted1),
                 fee: _V4_FEES[i],
                 tickSpacing: _V4_TICK_SPACINGS[i],
                 hooks: IHooks(address(0))
             });
 
+            // Probe slot0 first so uninitialized pools can be skipped without treating them as valid candidates.
             // slither-disable-next-line unused-return,calls-loop
             (uint160 sqrtPriceX96,,,) = _getSlot0(key.toId());
             // slither-disable-next-line incorrect-equality
             if (sqrtPriceX96 == 0) continue;
 
+            // Read the current in-range liquidity for the initialized pool.
             // slither-disable-next-line calls-loop
             uint128 poolLiquidity = _getLiquidity(key.toId());
             if (poolLiquidity > currentBestLiquidity) {
+                // Promote this V4 pool when it beats every candidate seen so far.
                 currentBestLiquidity = poolLiquidity;
-                bestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
+                updatedBestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
             }
         }
-
-        return bestPool;
     }
 
     /// @notice Find which terminal to cash out from and which token to reclaim.
@@ -1826,8 +1912,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
     /// @param metadata The metadata to inspect for a minimum reclaim amount.
     /// @return minTokensReclaimed The minimum reclaim amount, or 0 if none is specified.
     function _minReclaimedFrom(bytes calldata metadata) internal view returns (uint256 minTokensReclaimed) {
-        (bool exists, bytes memory minData) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("cashOutMinReclaimed"), metadata: metadata});
+        (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, key: "cashOutMinReclaimed"});
         if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
     }
 
@@ -1844,12 +1929,19 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
     }
 
     /// @notice Return the balance of an account for a token, using ETH balance for the native token sentinel.
+    /// @param token The token whose balance should be read.
+    /// @param account The account whose balance should be returned.
+    /// @return balance The account's balance in `token`.
     function _balanceOf(address token, address account) internal view returns (uint256) {
+        // Read raw ETH balance for the native-token sentinel and ERC20 balance otherwise.
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
     }
 
     /// @notice Normalize a token address by replacing the native token sentinel with WETH.
+    /// @param token The token to normalize for internal routing comparisons.
+    /// @return normalizedToken The normalized token address.
     function _normalize(address token) internal view returns (address) {
+        // Replace the native-token sentinel with WETH so ETH and WETH share one routing representation.
         return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
     }
 
@@ -1888,8 +1980,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         }
 
         // Check for a user-provided quote.
-        (bool exists, bytes memory quote) =
-            JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId("quoteForSwap"), metadata: metadata});
+        (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, key: "quoteForSwap"});
 
         if (exists) {
             (minAmountOut) = abi.decode(quote, (uint256));
@@ -1960,7 +2051,19 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
             if (preferredToken != address(0)) {
-                if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
+                if (token == preferredToken) {
+                    destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
+                    if (
+                        address(destTerminal) != address(0) && address(destTerminal) != address(this)
+                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                    ) {
+                        return (destTerminal, preferredToken, amount);
+                    }
+                }
+
+                // Mirror execution by treating the normalized counterpart as satisfiable only after converting into the
+                // preferred concrete asset.
+                if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
@@ -2084,6 +2187,7 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
         pure
         returns (uint256 minAmountOut)
     {
+        // Derive the sigmoid slippage tolerance for this quoted trade shape.
         uint256 slippageTolerance = _getSlippageTolerance({
             amountIn: amount,
             liquidity: liquidity,
@@ -2093,10 +2197,13 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
             poolFeeBps: poolFeeBps
         });
 
+        // Treat a full-denominator slippage tolerance as "no safe output" and surface 0 immediately.
         if (slippageTolerance >= _SLIPPAGE_DENOMINATOR) return 0;
 
+        // Uniswap's quote helper accepts only uint128 base amounts.
         if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
 
+        // Quote the gross output at the supplied tick before applying the router's slippage buffer.
         minAmountOut = OracleLibrary.getQuoteAtTick({
             tick: tick,
             // forge-lint: disable-next-line(unsafe-typecast)
@@ -2105,6 +2212,37 @@ contract JBRouterTerminal is ERC2771Context, IJBPermitTerminal, IUniswapV3SwapCa
             quoteToken: tokenOut
         });
 
+        // Discount the gross quote by the computed slippage tolerance to get the enforceable minimum.
         minAmountOut -= (minAmountOut * slippageTolerance) / _SLIPPAGE_DENOMINATOR;
+    }
+
+    /// @notice Read a metadata entry from the router's metadata namespace.
+    /// @param metadata The metadata blob to query.
+    /// @param key The metadata key to resolve.
+    /// @return exists A flag indicating whether the metadata entry was present.
+    /// @return data The raw metadata payload for `key`.
+    function _getDataFor(
+        bytes calldata metadata,
+        string memory key
+    )
+        internal
+        view
+        returns (bool exists, bytes memory data)
+    {
+        return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key), metadata: metadata});
+    }
+
+    /// @notice Wrap an address into a Uniswap V4 `Currency`.
+    /// @param token The token address to wrap.
+    /// @return currency The wrapped currency value.
+    function _wrapCurrency(address token) internal pure returns (Currency currency) {
+        return Currency.wrap(token);
+    }
+
+    /// @notice Unwrap a Uniswap V4 `Currency` back into an address.
+    /// @param currency The currency value to unwrap.
+    /// @return token The unwrapped token address.
+    function _unwrapCurrency(Currency currency) internal pure returns (address token) {
+        return Currency.unwrap(currency);
     }
 }

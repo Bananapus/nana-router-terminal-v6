@@ -332,10 +332,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
 
         // Return early when the routed token already matches the desired destination token.
-        if (
-            routedTokenIn == tokenOut
-                || _normalizedTokenOf(router, routedTokenIn) == _normalizedTokenOf(router, tokenOut)
-        ) return (tokenOut, routedAmountIn);
+        if (_hasSameRoutingAsset({router: router, tokenA: routedTokenIn, tokenB: tokenOut})) {
+            return (tokenOut, routedAmountIn);
+        }
 
         // Otherwise preview the final swap into the candidate destination token.
         routedAmountIn = router.previewSwapAmountOutOf({
@@ -384,7 +383,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             _resolveTokenOut({router: router, projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
 
         // Return the current amount unchanged when no swap is needed after token resolution.
-        if (tokenIn == tokenOut || _normalizedTokenOf(router, tokenIn) == _normalizedTokenOf(router, tokenOut)) {
+        if (_hasSameRoutingAsset({router: router, tokenA: tokenIn, tokenB: tokenOut})) {
             return (destTerminal, tokenOut, amount);
         }
 
@@ -409,9 +408,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (uint256 sourceProjectIdOverride, uint256 sourceProjectId)
     {
         // Read the router-scoped cashout-source metadata so preview matches the router's own metadata namespace.
-        (bool exists, bytes memory creditData) = JBMetadataResolver.getDataFor({
-            id: JBMetadataResolver.getId("cashOutSource", address(router)), metadata: metadata
-        });
+        (bool exists, bytes memory creditData) = _getDataFor({router: router, metadata: metadata, key: "cashOutSource"});
 
         // Decode the explicit source-project override when the caller supplied one.
         if (exists) (sourceProjectIdOverride,) = abi.decode(creditData, (uint256, uint256));
@@ -438,6 +435,27 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (address normalizedToken)
     {
         return token == JBConstants.NATIVE_TOKEN ? address(router.WETH()) : token;
+    }
+
+    /// @notice Check whether two tokens share the same routing representation for the router.
+    /// @param router The router whose normalization rules should be used.
+    /// @param tokenA The first token to compare.
+    /// @param tokenB The second token to compare.
+    /// @return hasSameAsset A flag indicating whether the router would treat both tokens as the same asset.
+    function _hasSameRoutingAsset(
+        IJBPayRoutePreviewer router,
+        address tokenA,
+        address tokenB
+    )
+        internal
+        view
+        returns (bool hasSameAsset)
+    {
+        // Treat exact-token matches as the same routing asset without extra normalization work.
+        if (tokenA == tokenB) return true;
+
+        // Otherwise compare normalized representations so ETH and WETH share one routing identity.
+        return _normalizedTokenOf(router, tokenA) == _normalizedTokenOf(router, tokenB);
     }
 
     /// @notice Whether previewing through a terminal would immediately cycle back into the router.
@@ -556,9 +574,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         IJBDirectory directory = router.DIRECTORY();
 
         // Respect explicit token-out overrides before any direct-acceptance or discovery logic runs.
-        (bool exists, bytes memory routeData) = JBMetadataResolver.getDataFor({
-            id: JBMetadataResolver.getId("routeTokenOut", address(router)), metadata: metadata
-        });
+        (bool exists, bytes memory routeData) = _getDataFor({router: router, metadata: metadata, key: "routeTokenOut"});
         if (exists) {
             // Decode the caller-specified destination token.
             tokenOut = abi.decode(routeData, (address));
@@ -652,6 +668,24 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         return abi.decode(data, (IJBTerminal[]));
     }
 
+    /// @notice Read a metadata entry from the router-scoped metadata namespace.
+    /// @param router The router whose metadata namespace should be used.
+    /// @param metadata The metadata blob to query.
+    /// @param key The metadata key to resolve.
+    /// @return exists A flag indicating whether the metadata entry was present.
+    /// @return data The raw metadata payload for `key`.
+    function _getDataFor(
+        IJBPayRoutePreviewer router,
+        bytes calldata metadata,
+        string memory key
+    )
+        internal
+        pure
+        returns (bool exists, bytes memory data)
+    {
+        return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key, address(router)), metadata: metadata});
+    }
+
     /// @inheritdoc IJBPayRouteResolver
     function previewBestPayRoute(
         IJBPayRoutePreviewer router,
@@ -680,9 +714,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         IJBDirectory directory = router.DIRECTORY();
 
         // Respect explicit route-token overrides before scanning candidate tokens.
-        (bool routeOverrideExists, bytes memory routeData) = JBMetadataResolver.getDataFor({
-            id: JBMetadataResolver.getId("routeTokenOut", address(router)), metadata: metadata
-        });
+        (bool routeOverrideExists, bytes memory routeData) =
+            _getDataFor({router: router, metadata: metadata, key: "routeTokenOut"});
         if (routeOverrideExists) {
             // Decode the requested token-out override.
             tokenOut = abi.decode(routeData, (address));

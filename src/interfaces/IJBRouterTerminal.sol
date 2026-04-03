@@ -11,7 +11,7 @@ interface IJBRouterTerminal is IJBTerminal {
     /// @notice Discover the best pool across both V3 and V4 for a token pair.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).
-    /// @return pool The best pool found.
+    /// @return pool The best pool found across the supported V3 and V4 search spaces.
     function discoverBestPool(
         address normalizedTokenIn,
         address normalizedTokenOut
@@ -23,7 +23,7 @@ interface IJBRouterTerminal is IJBTerminal {
     /// @notice Search the Uniswap V3 factory for a pool between two tokens across common fee tiers.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).
-    /// @return pool The pool with the highest liquidity.
+    /// @return pool The V3 pool with the highest liquidity across the searched fee tiers.
     function discoverPool(
         address normalizedTokenIn,
         address normalizedTokenOut
