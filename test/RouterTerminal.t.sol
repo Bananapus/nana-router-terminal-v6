@@ -453,7 +453,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        return PAY_ROUTE_RESOLVER.resolveTokenOut({
+        return _PAY_ROUTE_RESOLVER.resolveTokenOut({
             router: IJBPayRoutePreviewer(address(this)), projectId: projectId, tokenIn: tokenIn, metadata: metadata
         });
     }
