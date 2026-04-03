@@ -120,6 +120,10 @@ contract MockDestTerminal is IJBTerminal {
         payable
         override
     {
+        // Pull the ERC20 into the terminal so the router's final-hop receipt check observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) MockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
     }
@@ -160,9 +164,17 @@ contract MockDestTerminal is IJBTerminal {
         override
         returns (uint256)
     {
+        // Pull the ERC20 into the terminal so the router's final-hop receipt check observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) MockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
         return amount;
+    }
+
+    function forwardsTerminalPayments() external pure returns (bool) {
+        return false;
     }
 
     function previewPayFor(

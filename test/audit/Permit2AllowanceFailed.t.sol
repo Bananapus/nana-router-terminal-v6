@@ -28,6 +28,29 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 // Contract under test.
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
+import {IJBForwardingTerminal} from "../../src/interfaces/IJBForwardingTerminal.sol";
+
+contract MockPermitToken {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
 
 /// @notice Regression test: when the PERMIT2.permit() call reverts during
 ///         `_acceptFundsFor`, the registry must emit `Permit2AllowanceFailed`
@@ -43,7 +66,7 @@ contract Permit2AllowanceFailedTest is Test {
     IJBProjects projects = IJBProjects(makeAddr("projects"));
 
     // A mock ERC-20 token used as the payment token.
-    address token = makeAddr("mockToken");
+    MockPermitToken token;
 
     // A mock destination terminal that the registry forwards to.
     IJBTerminal destTerminal = IJBTerminal(makeAddr("destTerminal"));
@@ -68,9 +91,10 @@ contract Permit2AllowanceFailedTest is Test {
         // Etch minimal code so mocked addresses behave as contracts.
         vm.etch(address(permissions), hex"00");
         vm.etch(address(projects), hex"00");
-        vm.etch(address(token), hex"00");
         vm.etch(address(destTerminal), hex"00");
         vm.etch(address(permit2), hex"00");
+
+        token = new MockPermitToken();
 
         // Deploy the registry with the mocked permit2.
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, registryOwner, address(0));
@@ -118,12 +142,10 @@ contract Permit2AllowanceFailedTest is Test {
             abi.encode(payAmount)
         );
 
-        // Mock the ERC-20 safeTransferFrom to succeed (returns true).
-        vm.mockCall(
-            address(token),
-            abi.encodeWithSelector(IERC20.transferFrom.selector, payer, address(registry), payAmount),
-            abi.encode(true)
-        );
+        // Give the payer a real token balance and approval so `_acceptFundsFor` can observe balance deltas.
+        token.mint(payer, payAmount);
+        vm.prank(payer);
+        token.approve(address(registry), payAmount);
 
         // Mock the ERC-20 allowance for the registry -> destTerminal approval.
         vm.mockCall(
@@ -137,17 +159,22 @@ contract Permit2AllowanceFailedTest is Test {
 
         // Mock the destination terminal's pay call to succeed.
         vm.mockCall(address(destTerminal), abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(1e18)));
+        vm.mockCall(
+            address(destTerminal),
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
+            abi.encode(true)
+        );
 
         // Expect the Permit2AllowanceFailed event to be emitted.
         // The event is: Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)
         vm.expectEmit(true, true, false, false, address(registry));
-        emit IJBPermitTerminal.Permit2AllowanceFailed(token, payer, revertReason);
+        emit IJBPermitTerminal.Permit2AllowanceFailed(address(token), payer, revertReason);
 
         // Call pay as the payer. The permit2 will fail, event emits, and fallback transfer completes.
         vm.prank(payer);
         registry.pay({
             projectId: projectId,
-            token: token,
+            token: address(token),
             amount: payAmount,
             beneficiary: beneficiary,
             minReturnedTokens: 0,

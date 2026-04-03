@@ -23,7 +23,7 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
-import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 
@@ -218,7 +218,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @return supported A flag indicating whether `interfaceId` is implemented.
     function supportsInterface(bytes4 interfaceId) public pure override returns (bool supported) {
         supported = interfaceId == type(IJBRouterTerminalRegistry).interfaceId
-            || interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+            || interfaceId == type(IJBForwardingTerminal).interfaceId || interfaceId == type(IJBTerminal).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @inheritdoc IJBForwardingTerminal
+    function forwardsTerminalPayments() external pure returns (bool isForwarding) {
+        return true;
     }
 
     //*********************************************************************//
@@ -261,8 +267,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Skip ERC-20 receipt snapshots for native-token forwards.
         if (token == JBConstants.NATIVE_TOKEN) return 0;
 
-        // Skip ERC-20 receipt snapshots for router-like terminals that may immediately forward again.
-        if (_isTerminalLikeRouter(terminal)) return 0;
+        // Skip ERC-20 receipt snapshots for forwarding terminals that may immediately forward again.
+        if (_isForwardingTerminal(terminal)) return 0;
 
         // Snapshot the terminal's ERC-20 balance so the post-forward delta can be checked precisely.
         return IERC20(token).balanceOf(address(terminal));
@@ -285,8 +291,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Skip receipt enforcement for native-token forwards because this check is ERC-20 specific.
         if (token == JBConstants.NATIVE_TOKEN) return;
 
-        // Skip receipt enforcement for router-like terminals because they may forward internally again.
-        if (_isTerminalLikeRouter(terminal)) return;
+        // Skip receipt enforcement for forwarding terminals because they enforce the final terminal-facing hop.
+        if (_isForwardingTerminal(terminal)) return;
 
         // Measure the exact ERC-20 amount the terminal received during the forward.
         uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - balanceBefore;
@@ -617,12 +623,12 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return 0;
     }
 
-    /// @notice Whether a terminal is another router-style forwarding hop that enforces its own final ERC-20 receipt.
+    /// @notice Whether a terminal forwards terminal-facing calls onward instead of acting as the final receiver.
     /// @param terminal The terminal being checked.
-    /// @return isRouterTerminal A flag indicating whether `terminal` supports `IJBRouterTerminal`.
-    function _isTerminalLikeRouter(IJBTerminal terminal) internal view returns (bool isRouterTerminal) {
-        try IERC165(address(terminal)).supportsInterface(type(IJBRouterTerminal).interfaceId) returns (bool supported) {
-            return supported;
+    /// @return isForwarding A flag indicating whether `terminal` advertises forwarding-terminal behavior.
+    function _isForwardingTerminal(IJBTerminal terminal) internal view returns (bool isForwarding) {
+        try IJBForwardingTerminal(address(terminal)).forwardsTerminalPayments() returns (bool forwardsPayments) {
+            return forwardsPayments;
         } catch {
             return false;
         }

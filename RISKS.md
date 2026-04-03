@@ -39,7 +39,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 ## 3. Access Control
 
 - **No access control on `pay` / `addToBalanceOf`.** Anyone can route payments. This is by design but means the contract processes arbitrary token types and amounts.
-- **Lossy terminal-facing ERC-20s unsupported.** Ingress into the router or registry is balance-delta reconciled, but the final forwarded ERC-20 hop must still be standard. The registry now enforces this on direct terminal forwards, and the router documents the same requirement for routed output tokens because a generic in-router receipt check exceeds the current EIP-170 size budget.
+- **Lossy terminal-facing ERC-20s unsupported.** Ingress into the router or registry is balance-delta reconciled, and the final forwarded ERC-20 hop is now enforced on both surfaces by checking that the destination terminal actually received the full nominal ERC-20 amount. Fee-on-transfer or otherwise lossy terminal-facing ERC-20 pulls revert.
 - **Credit cashout path.** `_acceptFundsFor` processes `cashOutSource` metadata to transfer credits from `_msgSender()`. Requires `TRANSFER_CREDITS` permission. If a user has this permission set broadly, any caller through the trusted forwarder could drain their credits.
 - **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing the current default terminal now reverts with `CannotDisallowDefaultTerminal` instead of silently clearing it. Per-project terminal settings already set to a disallowed terminal are NOT cleared.
 - **Synthetic accounting contexts.** `JBRouterTerminal.accountingContextForTokenOf()` uses best-effort decimals for
@@ -47,8 +47,6 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
   non-standard tokens fall back to `18`. `JBRouterTerminalRegistry` simply forwards that context. This is safe for
   routing discovery but unsafe for integrations that treat the router or registry as a truthful accounting source for
   non-18-decimal assets. Lending and debt-normalization flows must point at a real terminal, not the router layer.
-  The router now refuses to treat a primary terminal as direct acceptance unless that terminal also exposes non-empty
-  accounting contexts for the project, so router-stack terminals do not win the direct-forward fast path.
   For example, a USDC terminal (6 decimals) routed through the router reports `decimals: 6` correctly. But if the router cannot probe `IERC20Metadata.decimals()` (non-standard token, or reverting `decimals()` function), it falls back to 18 decimals — a 1e12 scaling error. This only affects routing discovery heuristics, not actual fund transfers, but could cause suboptimal pool selection in `_discoverPool`.
 
 ## 4. DoS Vectors
@@ -58,7 +56,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 - **Cashout loop limit.** Circular or deep token dependency chains hit `_MAX_CASHOUT_ITERATIONS = 20` and revert.
 - **Pool with zero liquidity.** Pools with zero in-range liquidity cause reverts.
 - **External terminal reverts.** The final `destTerminal.pay()` or `destTerminal.addToBalanceOf()` call is not wrapped in try-catch. A reverting destination terminal blocks the entire payment.
-- **Non-standard final ERC-20 transfer behavior.** Registry-mediated terminal-facing ERC-20 hops are enforced to settle exactly. Routed output tokens are also expected to be standard ERC-20s, but that requirement is currently documented rather than generically re-checked in-router because of contract-size constraints.
+- **Non-standard final ERC-20 transfer behavior.** Terminal-facing ERC-20 hops are enforced to settle exactly on both the router and registry paths. Tokens that burn, tax, or otherwise reduce the amount actually received by the destination terminal will revert on the final forwarded hop.
 
 ## 5. Integration Risks
 
@@ -98,6 +96,10 @@ Verified in `RouterTerminalReentrancy.t.sol`: re-entrant calls via both `pay()` 
 ### 8.2 Router trusts `originalPayer()` from any `msg.sender` that implements it
 
 `_resolveRefundWithBackupRecipient` calls `IJBPayerTracker(msg.sender).originalPayer()` in a try-catch. If the call succeeds and returns a non-zero address, leftover tokens from partial swap fills are sent to that address instead of the beneficiary or `_msgSender()`. The router does not verify that `msg.sender` is the registry or any specific contract -- it trusts any caller that implements the interface. This is accepted because: (1) the caller (`msg.sender`) is the entity that supplied the funds, so redirecting its own leftovers is a legitimate operation, (2) if the call reverts or returns `address(0)`, the router falls back to the normal beneficiary/`_msgSender()` logic, and (3) decoupling from the registry allows other intermediary contracts (e.g. batch payers, aggregators) to participate in refund routing without requiring changes to the router terminal.
+
+### 8.5 Registry owns immediate circular-forward protection
+
+The router and resolver no longer contain registry-specific circular-resolution logic. Instead, `JBRouterTerminalRegistry` rejects forwarding back into its immediate caller. This preserves separation of concerns: the router only rejects direct self-routes, while the registry owns protection against `router -> registry -> same router` recursion.
 
 ### 8.3 Cashout loop slippage uses proportional scaling
 

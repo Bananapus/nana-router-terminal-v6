@@ -6,12 +6,15 @@ import {Test} from "forge-std/Test.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -23,6 +26,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
+import {IJBForwardingTerminal} from "../src/interfaces/IJBForwardingTerminal.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -241,6 +245,31 @@ contract TestAuditGaps is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         ctx[0] = JBAccountingContext({token: tokenOut, decimals: 18, currency: uint32(uint160(tokenOut))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(ctx));
+        vm.mockCall(
+            destTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
+            abi.encode(true)
+        );
+        vm.mockCall(
+            destTerminal,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
+        );
 
         // V3 pool at 0.3%.
         vm.mockCall(
@@ -315,6 +344,9 @@ contract TestAuditGaps is Test {
         // Mock approve for dest terminal (actual received amount = 4900).
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (dest, 4900)), abi.encode(true));
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
 
         // Expect that pay is called with the reduced amount (4900).
         vm.expectCall(dest, abi.encodeCall(IJBTerminal.pay, (1, tokenIn, 4900, payer, 0, "", "")));
@@ -488,6 +520,9 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(77)));
+        vm.mockCall(
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
         // safeIncreaseAllowance calls allowance() then approve().
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
@@ -670,6 +705,9 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
+        vm.mockCall(
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 99)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(99)));
@@ -739,6 +777,9 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
@@ -850,6 +891,9 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));

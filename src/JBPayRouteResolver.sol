@@ -31,6 +31,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param terminals The terminal list already fetched for the destination project.
     /// @return tokens The unique candidate tokens that can be paid into the project.
     /// @return count The number of populated entries in `tokens`.
+    // slither-disable-next-line calls-loop
     function _candidatePayRouteTokens(
         IJBDirectory directory,
         uint256 projectId,
@@ -481,6 +482,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param tokenIn The input token to find a route from.
     /// @return tokenOut The best accepted token found.
     /// @return destTerminal The terminal that accepts `tokenOut`.
+    // slither-disable-next-line calls-loop
     function _discoverAcceptedToken(
         IJBPayRoutePreviewer router,
         uint256 projectId,
@@ -653,10 +655,12 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (bool exists, bytes memory data)
     {
         // slither-disable-next-line unused-return
+        // slither-disable-next-line unused-return
         return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key, address(router)), metadata: metadata});
     }
 
     /// @inheritdoc IJBPayRouteResolver
+    // slither-disable-next-line calls-loop
     function previewBestPayRoute(
         IJBPayRoutePreviewer router,
         uint256 projectId,

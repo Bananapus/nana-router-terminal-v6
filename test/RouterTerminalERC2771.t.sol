@@ -15,6 +15,7 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
+import {IJBForwardingTerminal} from "../src/interfaces/IJBForwardingTerminal.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -171,6 +172,11 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
+            abi.encode(true)
+        );
 
         // Mint tokens to the REAL caller and have them approve the router.
         token.mint(realCaller, amount);
@@ -228,6 +234,11 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
+            abi.encode(true)
+        );
 
         // Mint tokens to the direct caller and have them approve the router.
         token.mint(directCaller, amount);

@@ -4,21 +4,24 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
+import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
+import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract AuditMismatchToken {
+contract CodexToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -46,15 +49,8 @@ contract AuditMismatchToken {
     }
 }
 
-contract AuditPreviewTerminal {
-    address public immutable ACCEPTED_TOKEN;
-    uint256 public immutable PREVIEW_COUNT;
+contract CodexTerminal {
     uint256 public totalReceived;
-
-    constructor(address acceptedToken_, uint256 previewCount_) {
-        ACCEPTED_TOKEN = acceptedToken_;
-        PREVIEW_COUNT = previewCount_;
-    }
 
     function pay(
         uint256,
@@ -68,21 +64,25 @@ contract AuditPreviewTerminal {
         external
         returns (uint256)
     {
-        // forge-lint: disable-next-line(erc20-unchecked-transfer)
-        AuditMismatchToken(token).transferFrom(msg.sender, address(this), amount);
+        require(CodexToken(token).transferFrom(msg.sender, address(this), amount), "CodexTerminal: transferFrom failed");
         totalReceived += amount;
-        return PREVIEW_COUNT;
+        return amount;
+    }
+
+    function addToBalanceOf(uint256, address token, uint256 amount, bool, string calldata, bytes calldata) external {
+        require(CodexToken(token).transferFrom(msg.sender, address(this), amount), "CodexTerminal: transferFrom failed");
+        totalReceived += amount;
     }
 
     function previewPayFor(
         uint256,
         address,
-        uint256,
+        uint256 amount,
         address,
         bytes calldata
     )
         external
-        view
+        pure
         returns (JBRuleset memory ruleset, uint256, uint256, JBPayHookSpecification[] memory hookSpecifications)
     {
         ruleset = JBRuleset({
@@ -97,14 +97,23 @@ contract AuditPreviewTerminal {
             metadata: 0
         });
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (ruleset, PREVIEW_COUNT, 0, hookSpecifications);
+        return (ruleset, amount, 0, hookSpecifications);
     }
 
-    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
-        contexts = new JBAccountingContext[](1);
-        contexts[0] =
+    function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](0);
+    }
+
+    function accountingContextForTokenOf(
+        uint256,
+        address token
+    )
+        external
+        pure
+        returns (JBAccountingContext memory context)
+    {
         // forge-lint: disable-next-line(unsafe-typecast)
-        JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+        context = JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -112,25 +121,32 @@ contract AuditPreviewTerminal {
     }
 }
 
-contract PreviewPrimaryTerminalMismatchTest is Test {
+contract RouterRegistryReceiptMismatchTest is Test {
+    uint256 internal constant PROJECT_ID = 1;
+    uint256 internal constant AMOUNT = 100e18;
+
     JBRouterTerminal internal router;
+    JBRouterTerminalRegistry internal registry;
 
     IJBDirectory internal directory;
+    IJBPermissions internal permissions;
+    IJBProjects internal projects;
     IJBTokens internal tokens;
     IPermit2 internal permit2;
     IWETH9 internal weth;
     IUniswapV3Factory internal factory;
     IPoolManager internal poolManager;
 
-    AuditMismatchToken internal token;
-    AuditPreviewTerminal internal fakePreviewTerminal;
-    AuditPreviewTerminal internal primaryTerminal;
+    CodexToken internal token;
+    CodexTerminal internal finalTerminal;
 
+    address internal owner = makeAddr("owner");
     address internal payer = makeAddr("payer");
-    address internal beneficiary = makeAddr("beneficiary");
 
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
+        permissions = IJBPermissions(makeAddr("permissions"));
+        projects = IJBProjects(makeAddr("projects"));
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         weth = IWETH9(makeAddr("weth"));
@@ -138,6 +154,8 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         poolManager = IPoolManager(makeAddr("poolManager"));
 
         vm.etch(address(directory), hex"00");
+        vm.etch(address(permissions), hex"00");
+        vm.etch(address(projects), hex"00");
         vm.etch(address(tokens), hex"00");
         vm.etch(address(permit2), hex"00");
         vm.etch(address(weth), hex"00");
@@ -155,39 +173,34 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             trustedForwarder: address(0)
         });
 
-        token = new AuditMismatchToken();
-        fakePreviewTerminal = new AuditPreviewTerminal(address(token), 1000e18);
-        primaryTerminal = new AuditPreviewTerminal(address(token), 1e18);
+        registry = new JBRouterTerminalRegistry({
+            permissions: permissions, projects: projects, permit2: permit2, owner: owner, trustedForwarder: address(0)
+        });
 
-        token.mint(payer, 100e18);
+        finalTerminal = new CodexTerminal();
+        token = new CodexToken();
+
+        vm.prank(owner);
+        registry.setDefaultTerminal(IJBTerminal(address(finalTerminal)));
+
+        token.mint(payer, AMOUNT);
         vm.prank(payer);
         token.approve(address(router), type(uint256).max);
 
         vm.mockCall(
             address(tokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(token)))), abi.encode(uint256(0))
         );
-
-        IJBTerminal[] memory terminals = new IJBTerminal[](2);
-        terminals[0] = IJBTerminal(address(fakePreviewTerminal));
-        terminals[1] = IJBTerminal(address(primaryTerminal));
-        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (1)), abi.encode(terminals));
-
         vm.mockCall(
             address(directory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, address(token))),
-            abi.encode(address(primaryTerminal))
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(token))),
+            abi.encode(address(registry))
         );
     }
 
-    function test_previewUsesPrimaryTerminalLikeExecution() public {
-        (, uint256 previewBeneficiaryTokenCount,,) = router.previewPayFor(1, address(token), 100e18, beneficiary, "");
-
+    function test_routerAllowsRegistryForwardingTerminalForErc20Payments() public {
         vm.prank(payer);
-        uint256 minted = router.pay(1, address(token), 100e18, beneficiary, 0, "", "");
+        router.pay(PROJECT_ID, address(token), AMOUNT, payer, 0, "", "");
 
-        assertEq(previewBeneficiaryTokenCount, 1e18, "preview should read the primary terminal");
-        assertEq(minted, 1e18, "execution should use the primary terminal too");
-        assertEq(primaryTerminal.totalReceived(), 100e18, "payment should be forwarded to the primary terminal");
-        assertEq(fakePreviewTerminal.totalReceived(), 0, "non-primary preview terminal should never receive funds");
+        assertEq(finalTerminal.totalReceived(), AMOUNT);
     }
 }

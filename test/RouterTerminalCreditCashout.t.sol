@@ -45,9 +45,9 @@ contract CreditCashoutHarnessTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
-            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
 
     function cashOutTokensOf(

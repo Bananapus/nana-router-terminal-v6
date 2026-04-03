@@ -94,7 +94,7 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
 
     function addToBalanceOf(
         uint256,
-        address,
+        address token,
         uint256 amount,
         bool,
         string calldata,
@@ -104,6 +104,14 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         payable
         override
     {
+        // Pull the ERC20 into the terminal so final-hop receipt enforcement observes real delivery.
+        if (token != JBConstants.NATIVE_TOKEN) {
+            require(
+                AuditLeftoverMockERC20(token).transferFrom(msg.sender, address(this), amount),
+                "AuditLeftoverDestTerminal: transferFrom failed"
+            );
+        }
+
         lastAmount = amount;
     }
 
@@ -131,7 +139,7 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
 
     function pay(
         uint256,
-        address,
+        address token,
         uint256 amount,
         address,
         uint256,
@@ -143,6 +151,14 @@ contract AuditLeftoverDestTerminal is IJBTerminal {
         override
         returns (uint256)
     {
+        // Pull the ERC20 into the terminal so final-hop receipt enforcement observes real delivery.
+        if (token != JBConstants.NATIVE_TOKEN) {
+            require(
+                AuditLeftoverMockERC20(token).transferFrom(msg.sender, address(this), amount),
+                "AuditLeftoverDestTerminal: transferFrom failed"
+            );
+        }
+
         lastAmount = amount;
         return amount;
     }

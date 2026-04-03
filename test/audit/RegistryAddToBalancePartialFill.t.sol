@@ -120,6 +120,10 @@ contract AuditMockDestTerminal is IJBTerminal {
         payable
         override
     {
+        // Pull the ERC20 into the terminal so final-hop receipt enforcement observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) AuditMockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
     }
@@ -160,6 +164,10 @@ contract AuditMockDestTerminal is IJBTerminal {
         override
         returns (uint256)
     {
+        // Pull the ERC20 into the terminal so final-hop receipt enforcement observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) AuditMockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
         return amount;

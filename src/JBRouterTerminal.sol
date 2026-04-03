@@ -39,6 +39,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
+import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
@@ -82,6 +83,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoObservationHistory();
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
+    error JBRouterTerminal_NonStandardTerminalToken();
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
 
@@ -168,6 +170,7 @@ contract JBRouterTerminal is
     /// @param factory The Uniswap V3 factory for pool discovery.
     /// @param poolManager The Uniswap V4 PoolManager (address(0) if V4 not available).
     /// @param trustedForwarder The trusted forwarder for the contract.
+    // slither-disable-next-line missing-zero-check
     constructor(
         IJBDirectory directory,
         IJBTokens tokens,
@@ -186,6 +189,7 @@ contract JBRouterTerminal is
         POOL_MANAGER = poolManager;
         PERMIT2 = permit2;
         WETH = weth;
+        // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver()));
     }
@@ -239,6 +243,9 @@ contract JBRouterTerminal is
         // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
+        // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
+        uint256 terminalReceiptBaseline = _terminalReceiptBaselineOf({terminal: destTerminal, token: token});
+
         // Forward the fully routed funds into the destination terminal's add-to-balance flow.
         destTerminal.addToBalanceOf{value: payValue}({
             projectId: projectId,
@@ -247,6 +254,11 @@ contract JBRouterTerminal is
             shouldReturnHeldFees: shouldReturnHeldFees,
             memo: memo,
             metadata: metadata
+        });
+
+        // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
+        _enforceStandardTerminalReceipt({
+            terminal: destTerminal, token: token, expectedAmount: amount, receiptBaseline: terminalReceiptBaseline
         });
     }
 
@@ -298,6 +310,9 @@ contract JBRouterTerminal is
         // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
+        // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
+        uint256 terminalReceiptBaseline = _terminalReceiptBaselineOf({terminal: destTerminal, token: token});
+
         // Execute the final payment on the destination terminal and bubble back the beneficiary token count it
         // returned.
         beneficiaryTokenCount = destTerminal.pay{value: payValue}({
@@ -308,6 +323,11 @@ contract JBRouterTerminal is
             minReturnedTokens: minReturnedTokens,
             memo: memo,
             metadata: metadata
+        });
+
+        // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
+        _enforceStandardTerminalReceipt({
+            terminal: destTerminal, token: token, expectedAmount: amount, receiptBaseline: terminalReceiptBaseline
         });
     }
 
@@ -424,6 +444,12 @@ contract JBRouterTerminal is
     /// @return contexts An empty array of `JBAccountingContext`.
     function accountingContextsOf(uint256) external pure override returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](0);
+    }
+
+    /// @notice This terminal forwards terminal-facing calls onward instead of acting as the final accounting sink.
+    /// @return isForwarding Always true for the router.
+    function forwardsTerminalPayments() external pure returns (bool isForwarding) {
+        return true;
     }
 
     /// @notice This terminal holds no surplus. Always returns 0.
@@ -579,6 +605,7 @@ contract JBRouterTerminal is
         view
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory)
     {
+        // slither-disable-next-line unused-return
         return destTerminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
@@ -742,6 +769,7 @@ contract JBRouterTerminal is
         )
     {
         // Delegate the heavy preview-selection logic to the helper contract so the router stays within runtime size.
+        // slither-disable-next-line unused-return
         return _PAY_ROUTE_RESOLVER.previewBestPayRoute({
             router: IJBPayRoutePreviewer(address(this)),
             projectId: projectId,
@@ -804,6 +832,65 @@ contract JBRouterTerminal is
     function _isUsableDestinationTerminal(IJBTerminal terminal) internal view returns (bool isUsable) {
         // Reject zero-address and self-routes so only real external destination terminals are considered usable.
         return address(terminal) != address(0) && !_isCircularTerminal({terminal: terminal});
+    }
+
+    /// @notice Snapshot a destination terminal's pre-call token balance for final-hop receipt enforcement.
+    /// @param terminal The destination terminal that will receive the final forwarded funds.
+    /// @param token The token the terminal is expected to receive.
+    /// @return receiptBaseline The terminal's balance in `token` before the final forwarded call.
+    function _terminalReceiptBaselineOf(
+        IJBTerminal terminal,
+        address token
+    )
+        internal
+        view
+        returns (uint256 receiptBaseline)
+    {
+        // Skip native-token receipt enforcement because value transfers can be consumed during terminal execution.
+        if (token == JBConstants.NATIVE_TOKEN) return 0;
+
+        // Skip receipt enforcement for forwarding terminals because they enforce the terminal-facing hop themselves.
+        if (_isForwardingTerminal(terminal)) return 0;
+
+        // Snapshot the terminal's ERC20 balance so final-hop receipt can be verified after the terminal pulls.
+        return IERC20(token).balanceOf(address(terminal));
+    }
+
+    /// @notice Reject lossy ERC20 terminal pulls on the final forwarded hop.
+    /// @param terminal The destination terminal that received the forwarded call.
+    /// @param token The token the terminal was expected to pull.
+    /// @param expectedAmount The nominal amount forwarded into the terminal call.
+    /// @param receiptBaseline The terminal's pre-call balance in `token`.
+    function _enforceStandardTerminalReceipt(
+        IJBTerminal terminal,
+        address token,
+        uint256 expectedAmount,
+        uint256 receiptBaseline
+    )
+        internal
+        view
+    {
+        // Native-token final hops are excluded because their value transfer is not observable via ERC20 balances.
+        if (token == JBConstants.NATIVE_TOKEN) return;
+
+        // Forwarding terminals are responsible for enforcing the final terminal-facing ERC20 receipt themselves.
+        if (_isForwardingTerminal(terminal)) return;
+
+        // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
+        if (IERC20(token).balanceOf(address(terminal)) - receiptBaseline != expectedAmount) {
+            revert JBRouterTerminal_NonStandardTerminalToken();
+        }
+    }
+
+    /// @notice Whether a terminal forwards terminal-facing calls onward instead of acting as the final receiver.
+    /// @param terminal The terminal being checked for forwarding behavior.
+    /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
+    function _isForwardingTerminal(IJBTerminal terminal) internal view returns (bool isForwarding) {
+        try IJBForwardingTerminal(address(terminal)).forwardsTerminalPayments() returns (bool forwardsPayments) {
+            return forwardsPayments;
+        } catch {
+            return false;
+        }
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
@@ -1019,7 +1106,7 @@ contract JBRouterTerminal is
             // Cash out the source project's tokens.
             // Don't rely on the terminal return value here. Buyback-hook sell-side execution returns 0 reclaimAmount
             // from nana-core, then transfers the real proceeds during the hook callback.
-            // slither-disable-next-line calls-loop
+            // slither-disable-next-line unused-return,calls-loop
             cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
@@ -1514,12 +1601,14 @@ contract JBRouterTerminal is
 
     /// @notice Deposit native tokens into WETH.
     /// @param amount The amount of native tokens to wrap.
+    // slither-disable-next-line calls-loop
     function _wethDeposit(uint256 amount) internal {
         WETH.deposit{value: amount}();
     }
 
     /// @notice Withdraw native tokens from WETH.
     /// @param amount The amount of WETH to unwrap.
+    // slither-disable-next-line calls-loop
     function _wethWithdraw(uint256 amount) internal {
         WETH.withdraw(amount);
     }
@@ -1572,6 +1661,7 @@ contract JBRouterTerminal is
     /// @notice Look up the project ID for a token.
     /// @param token The token address to query.
     /// @return The project ID, or 0 if the token is not a JB project token.
+    // slither-disable-next-line calls-loop
     function _projectIdOf(address token) internal view returns (uint256) {
         return TOKENS.projectIdOf(IJBToken(token));
     }
@@ -1581,6 +1671,7 @@ contract JBRouterTerminal is
     /// @param shouldIgnoreFailure Whether a reverting directory call should degrade into an empty list.
     /// @return terminals The project's terminal list, or an empty list if `shouldIgnoreFailure` is true and the call
     /// failed.
+    // slither-disable-next-line calls-loop
     function _terminalsOf(
         uint256 projectId,
         bool shouldIgnoreFailure
@@ -2051,6 +2142,7 @@ contract JBRouterTerminal is
     /// @param token The token whose balance should be read.
     /// @param account The account whose balance should be returned.
     /// @return balance The account's balance in `token`.
+    // slither-disable-next-line calls-loop
     function _balanceOf(address token, address account) internal view returns (uint256) {
         // Read raw ETH balance for the native-token sentinel and ERC20 balance otherwise.
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
@@ -2258,8 +2350,8 @@ contract JBRouterTerminal is
         });
 
         // Ask that terminal how much of the reclaim token this cashout count would return.
-        // slither-disable-next-line unused-return,calls-loop
         JBCashOutHookSpecification[] memory hookSpecifications;
+        // slither-disable-next-line unused-return,calls-loop
         (, reclaimAmount,, hookSpecifications) = cashOutTerminal.previewCashOutFrom({
             holder: address(this),
             projectId: sourceProjectId,
@@ -2334,6 +2426,7 @@ contract JBRouterTerminal is
         view
         returns (bool exists, bytes memory data)
     {
+        // slither-disable-next-line unused-return
         return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key), metadata: metadata});
     }
 

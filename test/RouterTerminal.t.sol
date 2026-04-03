@@ -146,6 +146,7 @@ contract MockPoolManagerForSettle {
 contract MockPreviewDestTerminal {
     address public immutable ACCEPTED_TOKEN;
     uint256 public immutable PREVIEWED_TOKEN_COUNT;
+    uint256 public totalBalanceAdded;
     uint256 public totalReceived;
 
     constructor(address acceptedToken_, uint256 previewedTokenCount_) {
@@ -172,6 +173,24 @@ contract MockPreviewDestTerminal {
 
         totalReceived += amount;
         return PREVIEWED_TOKEN_COUNT;
+    }
+
+    function addToBalanceOf(
+        uint256,
+        address token,
+        uint256 amount,
+        bool,
+        string calldata,
+        bytes calldata
+    )
+        external
+        payable
+    {
+        if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "MockPreviewDestTerminal: ETH mismatch");
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        else IERC20(token).transferFrom(msg.sender, address(this), amount);
+
+        totalBalanceAdded += amount;
     }
 
     function previewPayFor(
@@ -255,9 +274,9 @@ contract PayerSensitivePreviewTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
-            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -419,9 +438,9 @@ contract MockConfigurableCashOutTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
-            JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: uint32(uint160(RECLAIM_TOKEN))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: uint32(uint160(RECLAIM_TOKEN))});
     }
 
     receive() external payable {}
@@ -749,8 +768,8 @@ contract RouterTerminalTest is Test {
         uint256 amount = 1000;
         address beneficiary = makeAddr("beneficiary");
         address payer = makeAddr("payer");
-        address mockTerminal = makeAddr("destTerminal");
-        vm.etch(mockTerminal, hex"00");
+        MockPreviewDestTerminal mockTerminalContract = new MockPreviewDestTerminal(tokenIn, 100);
+        address mockTerminal = address(mockTerminalContract);
 
         // Not a JB token.
         vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
@@ -773,15 +792,10 @@ contract RouterTerminalTest is Test {
         vm.prank(payer);
         token.approve(address(routerTerminal), amount);
 
-        // Mock safeIncreaseAllowance: the router terminal approves the dest terminal.
-        vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
-
-        // Mock dest terminal pay.
-        vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(100)));
-
         vm.prank(payer);
         uint256 result = routerTerminal.pay(projectId, tokenIn, amount, beneficiary, 0, "", "");
         assertEq(result, 100);
+        assertEq(mockTerminalContract.totalReceived(), amount);
     }
 
     //*********************************************************************//
@@ -882,8 +896,8 @@ contract RouterTerminalTest is Test {
         address tokenIn = address(token);
         uint256 amount = 500;
         address payer = makeAddr("payer");
-        address mockTerminal = makeAddr("destTerminal");
-        vm.etch(mockTerminal, hex"00");
+        MockPreviewDestTerminal mockTerminalContract = new MockPreviewDestTerminal(tokenIn, 0);
+        address mockTerminal = address(mockTerminalContract);
 
         // Not a JB token.
         vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
@@ -906,14 +920,9 @@ contract RouterTerminalTest is Test {
         vm.prank(payer);
         token.approve(address(routerTerminal), amount);
 
-        // Mock safeIncreaseAllowance: the router terminal approves the dest terminal.
-        vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (mockTerminal, amount)), abi.encode(true));
-
-        // Mock dest terminal addToBalanceOf.
-        vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector), abi.encode());
-
         vm.prank(payer);
         routerTerminal.addToBalanceOf(projectId, tokenIn, amount, false, "", "");
+        assertEq(mockTerminalContract.totalBalanceAdded(), amount);
     }
 
     //*********************************************************************//
@@ -1712,17 +1721,17 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory brokenContexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
         brokenContexts[0] =
-            JBAccountingContext({token: brokenToken, decimals: 18, currency: uint32(uint160(brokenToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: brokenToken, decimals: 18, currency: uint32(uint160(brokenToken))});
         vm.mockCall(
             brokenTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(brokenContexts)
         );
 
         JBAccountingContext[] memory workingContexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
         workingContexts[0] =
-            JBAccountingContext({token: workingToken, decimals: 18, currency: uint32(uint160(workingToken))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: workingToken, decimals: 18, currency: uint32(uint160(workingToken))});
         vm.mockCall(
             workingTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(workingContexts)
         );
