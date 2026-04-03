@@ -231,7 +231,10 @@ contract JBRouterTerminal is
         payable
         override
     {
+        // Keep a reference to the terminal that will ultimately receive the routed funds.
         IJBTerminal destTerminal;
+
+        // Accept the caller's funds, resolve the route, and return the terminal/token/amount the destination will see.
         (destTerminal, token, amount) = _route({
             destProjectId: projectId,
             tokenIn: token,
@@ -240,8 +243,11 @@ contract JBRouterTerminal is
             refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
         });
 
+        // Prepare the final transfer into the destination terminal, using `msg.value` only when the final token is
+        // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
+        // Forward the fully routed funds into the destination terminal's add-to-balance flow.
         destTerminal.addToBalanceOf{value: payValue}({
             projectId: projectId,
             token: token,
@@ -282,20 +288,26 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-
+        // Keep a reference to the terminal that will receive the routed payment.
         IJBTerminal destTerminal;
+
+        // Accept the caller's funds and resolve the best routed pay path in one step so all later logic works from
+        // actual received balances.
         (destTerminal, token, amount) = _routeForPay({
             destProjectId: projectId,
             tokenIn: token,
-            amount: amount,
+            amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             beneficiary: beneficiary,
             metadata: metadata,
             refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
         });
 
+        // Prepare the final transfer into the destination terminal, using `msg.value` only when the final token is
+        // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
+        // Execute the final payment on the destination terminal and bubble back the beneficiary token count it
+        // returned.
         beneficiaryTokenCount = destTerminal.pay{value: payValue}({
             projectId: projectId,
             token: token,
@@ -642,10 +654,9 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
-        IJBTerminal[] memory terminals;
-        (bool success, bytes memory data) =
-            address(DIRECTORY).staticcall(abi.encodeWithSelector(IJBDirectory.terminalsOf.selector, destProjectId));
-        if (success && data.length != 0) terminals = abi.decode(data, (IJBTerminal[]));
+        // Read the destination project's terminal list in best-effort mode so a bad directory read degrades into
+        // "no terminals" instead of bricking pay-route selection.
+        IJBTerminal[] memory terminals = _terminalsOf({projectId: destProjectId, shouldIgnoreFailure: true});
 
         if (terminals.length == 0) {
             return _route({
@@ -1349,6 +1360,33 @@ contract JBRouterTerminal is
         return TOKENS.projectIdOf(IJBToken(token));
     }
 
+    /// @notice Read a project's terminal list from the directory.
+    /// @param projectId The project whose terminals should be read.
+    /// @param shouldIgnoreFailure Whether a reverting directory call should degrade into an empty list.
+    /// @return terminals The project's terminal list, or an empty list if `shouldIgnoreFailure` is true and the call
+    /// failed.
+    function _terminalsOf(
+        uint256 projectId,
+        bool shouldIgnoreFailure
+    )
+        internal
+        view
+        returns (IJBTerminal[] memory terminals)
+    {
+        // Use the direct directory view when failures should surface to the caller.
+        if (!shouldIgnoreFailure) return DIRECTORY.terminalsOf(projectId);
+
+        // Fall back to a low-level staticcall when the caller wants directory failures to degrade into an empty list.
+        (bool success, bytes memory data) =
+            address(DIRECTORY).staticcall(abi.encodeCall(IJBDirectory.terminalsOf, (projectId)));
+
+        // Return the default empty array when the best-effort lookup failed or returned no payload.
+        if (!success || data.length == 0) return terminals;
+
+        // Decode and return the directory-provided terminal list on success.
+        return abi.decode(data, (IJBTerminal[]));
+    }
+
     /// @notice Find the highest liquidity across all V3 fee tiers and V4 pools for a token pair.
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
@@ -1495,8 +1533,10 @@ contract JBRouterTerminal is
         address directFallbackToken;
         IJBCashOutTerminal directFallbackTerminal;
 
+        // Read the source project's terminals in strict mode because cashout-path discovery should revert on
+        // directory failure instead of silently changing recursion behavior.
         // slither-disable-next-line calls-loop
-        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(sourceProjectId);
+        IJBTerminal[] memory terminals = _terminalsOf({projectId: sourceProjectId, shouldIgnoreFailure: false});
 
         for (uint256 i; i < terminals.length; i++) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
@@ -1585,6 +1625,11 @@ contract JBRouterTerminal is
     }
 
     /// @notice Get a TWAP-based quote with dynamic slippage for a V3 pool.
+    /// @param pool The V3 pool being quoted.
+    /// @param normalizedTokenIn The normalized token being swapped in.
+    /// @param normalizedTokenOut The normalized token being swapped out.
+    /// @param amount The amount of `normalizedTokenIn` being quoted.
+    /// @return minAmountOut The minimum amount out implied by the TWAP quote and dynamic slippage model.
     function _getV3TwapQuote(
         IUniswapV3Pool pool,
         address normalizedTokenIn,
@@ -1595,24 +1640,35 @@ contract JBRouterTerminal is
         view
         returns (uint256 minAmountOut)
     {
+        // Convert the V3 fee tier into basis points so the slippage helper can incorporate pool fees consistently.
         uint256 feeBps = uint256(pool.fee()) / 100;
+
+        // Read the oldest observation age to determine how much TWAP history the pool can support.
         uint32 oldestObservation = OracleLibrary.getOldestObservationSecondsAgo(address(pool));
+
+        // Abort when the pool has no oracle history at all, since no TWAP can be formed.
         if (oldestObservation == 0) revert JBRouterTerminal_NoObservationHistory();
 
+        // Start from the default TWAP window.
         uint256 twapWindow = DEFAULT_TWAP_WINDOW;
+
+        // Clamp the TWAP window down when the pool's observation history is shorter than the default window.
         if (oldestObservation < twapWindow) twapWindow = oldestObservation;
 
         // Enforce a minimum TWAP window to prevent manipulation of short-history pools.
         if (twapWindow < MIN_TWAP_WINDOW) revert JBRouterTerminal_InsufficientTwapHistory();
 
+        // Query the V3 oracle for the arithmetic-mean tick and in-range liquidity over the chosen TWAP window.
         (
             int24 arithmeticMeanTick,
             uint128 liquidity
             // forge-lint: disable-next-line(unsafe-typecast)
         ) = OracleLibrary.consult({pool: address(pool), secondsAgo: uint32(twapWindow)});
 
+        // Abort when the chosen TWAP window has no in-range liquidity.
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
+        // Convert the TWAP tick and liquidity into a minimum amount out using the router's dynamic slippage model.
         minAmountOut = _quoteWithSlippage({
             amount: amount,
             liquidity: liquidity,
