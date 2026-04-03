@@ -8,7 +8,6 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";

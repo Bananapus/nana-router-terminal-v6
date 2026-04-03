@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBPayHook} from "@bananapus/core-v6/src/interfaces/IJBPayHook.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -83,6 +82,7 @@ contract AuditMockPreviewDestTerminal {
         returns (uint256)
     {
         if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "eth mismatch");
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         else IERC20(token).transferFrom(msg.sender, address(this), amount);
 
         totalReceived += amount;
@@ -117,6 +117,7 @@ contract AuditMockPreviewDestTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
             JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
@@ -166,6 +167,7 @@ contract AuditMockCashOutTerminal {
             (bool ok,) = beneficiary.call{value: EXECUTION_TRANSFER_AMOUNT}("");
             require(ok, "eth send failed");
         } else {
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
             IERC20(tokenToReclaim).transfer(beneficiary, EXECUTION_TRANSFER_AMOUNT);
         }
 
@@ -206,6 +208,7 @@ contract AuditMockCashOutTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
             JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: uint32(uint160(RECLAIM_TOKEN))});
     }
@@ -219,7 +222,6 @@ contract DeployBuybackHookZeroTest is Test {
     uint256 internal constant AMOUNT = 100;
 
     IJBDirectory internal directory;
-    IJBPermissions internal permissions;
     IJBTokens internal tokens;
     IPermit2 internal permit2;
     IWETH9 internal weth;
@@ -242,7 +244,6 @@ contract DeployBuybackHookZeroTest is Test {
 
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
-        permissions = IJBPermissions(makeAddr("permissions"));
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         weth = IWETH9(makeAddr("weth"));
@@ -250,7 +251,6 @@ contract DeployBuybackHookZeroTest is Test {
         poolManager = IPoolManager(makeAddr("poolManager"));
 
         vm.etch(address(directory), hex"00");
-        vm.etch(address(permissions), hex"00");
         vm.etch(address(tokens), hex"00");
         vm.etch(address(permit2), hex"00");
         vm.etch(address(weth), hex"00");

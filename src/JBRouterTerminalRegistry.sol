@@ -38,6 +38,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     error JBRouterTerminalRegistry_AmountOverflow();
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
+    error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminalRegistry_NonStandardTerminalToken(
         address token, IJBTerminal terminal, uint256 amountReceived, uint256 amountExpected
@@ -296,6 +297,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         }
     }
 
+    /// @notice Prevent the registry from forwarding straight back into its immediate caller.
+    /// @param terminal The terminal the registry is about to forward into.
+    function _enforceNoCircularForward(IJBTerminal terminal) internal view {
+        // Reject immediate caller cycles so router -> registry -> same router cannot recurse indefinitely.
+        if (msg.sender == address(terminal)) revert JBRouterTerminalRegistry_CircularForward(terminal);
+    }
+
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
@@ -346,6 +354,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
+
+        // Reject forwards that would bounce straight back into this call's immediate caller.
+        _enforceNoCircularForward(terminal);
 
         // Forward to the resolved terminal.
         terminal.addToBalanceOf{value: payValue}({
@@ -474,6 +485,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
+
+        // Reject forwards that would bounce straight back into this call's immediate caller.
+        _enforceNoCircularForward(terminal);
 
         // Forward the payment to the terminal.
         result = terminal.pay{value: payValue}({

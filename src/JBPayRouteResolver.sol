@@ -12,7 +12,6 @@ import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
-import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 
 /// @notice Resolves the best pay route preview for `JBRouterTerminal`.
 contract JBPayRouteResolver is IJBPayRouteResolver {
@@ -289,6 +288,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         if (sourceProjectId == 0) return (resolvedTerminal, tokenIn, amount);
 
         // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
+        // slither-disable-next-line unused-return
         return router.previewCashOutLoopOf({
             destProjectId: destProjectId,
             token: tokenIn,
@@ -460,36 +460,18 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
     /// @notice Whether previewing through a terminal would immediately cycle back into the router.
     /// @param router The router whose preview path is being evaluated.
-    /// @param projectId The project whose resolved terminal topology should be checked.
     /// @param terminal The terminal that would receive the previewed route.
-    /// @return isCircular A flag indicating whether `terminal` resolves back to `router`.
+    /// @return isCircular A flag indicating whether `terminal` is the router itself.
     function _isCircularTerminal(
         IJBPayRoutePreviewer router,
-        uint256 projectId,
         IJBTerminal terminal
     )
         internal
-        view
-        returns (bool)
+        pure
+        returns (bool isCircular)
     {
-        // A terminal identical to the router is always circular by definition.
-        if (address(terminal) == address(router)) return true;
-
-        // Ask registry-like terminals what concrete terminal they would forward this project into.
-        (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBRouterTerminalRegistry.terminalOf, (projectId)));
-
-        // Treat non-registry terminals and malformed responses as non-circular.
-        if (!success || data.length < 32) return false;
-
-        // Load the resolved terminal address directly from the ABI-encoded return payload.
-        address resolvedTerminal;
-        assembly ("memory-safe") {
-            resolvedTerminal := mload(add(data, 32))
-        }
-
-        // Report whether the registry would forward the payment straight back into the router.
-        return resolvedTerminal == address(router);
+        // Only direct self-routes are considered circular at the router layer.
+        return address(terminal) == address(router);
     }
 
     /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with `tokenIn`.
@@ -583,7 +565,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
 
             // Reject missing or circular terminals so execution cannot preview an impossible route.
-            if (address(destTerminal) == address(0) || _isCircularTerminal(router, projectId, destTerminal)) {
+            if (address(destTerminal) == address(0) || _isCircularTerminal(router, destTerminal)) {
                 revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
             }
             return (tokenOut, destTerminal);
@@ -592,7 +574,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Next prefer a direct-acceptance route for the input token whenever the project already has a non-circular
         // terminal.
         destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenIn});
-        if (address(destTerminal) != address(0) && !_isCircularTerminal(router, projectId, destTerminal)) {
+        if (address(destTerminal) != address(0) && !_isCircularTerminal(router, destTerminal)) {
             return (tokenIn, destTerminal);
         }
 
@@ -600,7 +582,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(router.WETH())) {
             tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(router.WETH()) : JBConstants.NATIVE_TOKEN;
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
-            if (address(destTerminal) != address(0) && !_isCircularTerminal(router, projectId, destTerminal)) {
+            if (address(destTerminal) != address(0) && !_isCircularTerminal(router, destTerminal)) {
                 return (tokenOut, destTerminal);
             }
         }
@@ -609,7 +591,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         (tokenOut, destTerminal) = _discoverAcceptedToken(router, projectId, tokenIn);
 
         // Revert when discovery failed entirely or only found a circular route.
-        if (address(destTerminal) == address(0) || _isCircularTerminal(router, projectId, destTerminal)) {
+        if (address(destTerminal) == address(0) || _isCircularTerminal(router, destTerminal)) {
             revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
         }
     }
@@ -630,19 +612,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (address tokenOut, IJBTerminal destTerminal)
     {
         return _resolveTokenOut({router: router, projectId: projectId, tokenIn: tokenIn, metadata: metadata});
-    }
-
-    /// @inheritdoc IJBPayRouteResolver
-    function isCircularTerminal(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
-        IJBTerminal terminal
-    )
-        external
-        view
-        returns (bool)
-    {
-        return _isCircularTerminal(router, projectId, terminal);
     }
 
     /// @notice Best-effort terminal lookup that degrades to an empty list if the directory call reverts.
@@ -683,6 +652,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         pure
         returns (bool exists, bytes memory data)
     {
+        // slither-disable-next-line unused-return
         return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key, address(router)), metadata: metadata});
     }
 
@@ -722,7 +692,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
             // Resolve the primary terminal for the requested token-out candidate.
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
-            if (address(destTerminal) == address(0) || _isCircularTerminal(router, projectId, destTerminal)) {
+            if (address(destTerminal) == address(0) || _isCircularTerminal(router, destTerminal)) {
                 revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
             }
 
@@ -755,7 +725,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 directory.primaryTerminalOf({projectId: projectId, token: candidateTokens[i]});
 
             // Skip candidates that would obviously bounce straight back into the router.
-            if (_isCircularTerminal(router, projectId, candidateTerminal)) continue;
+            if (_isCircularTerminal(router, candidateTerminal)) continue;
 
             // Isolate each candidate preview so one broken route does not brick the whole search.
             try self.previewPayRouteForCandidate(

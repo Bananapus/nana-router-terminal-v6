@@ -30,13 +30,13 @@ import {IWETH9} from "../src/interfaces/IWETH9.sol";
 // ══════════════════════════════════════════════════════════════════════════════
 
 contract CreditCashoutHarnessTerminal {
-    uint256 public immutable reclaimAmount;
-    address public immutable acceptedToken;
+    uint256 public immutable RECLAIM_AMOUNT;
+    address public immutable ACCEPTED_TOKEN;
     uint256 public lastMinTokensReclaimed;
 
     constructor(uint256 reclaimAmount_, address acceptedToken_) payable {
-        reclaimAmount = reclaimAmount_;
-        acceptedToken = acceptedToken_;
+        RECLAIM_AMOUNT = reclaimAmount_;
+        ACCEPTED_TOKEN = acceptedToken_;
     }
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
@@ -45,8 +45,9 @@ contract CreditCashoutHarnessTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
-            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
 
     function cashOutTokensOf(
@@ -62,8 +63,8 @@ contract CreditCashoutHarnessTerminal {
         returns (uint256)
     {
         lastMinTokensReclaimed = minTokensReclaimed;
-        if (reclaimAmount != 0) beneficiary.transfer(reclaimAmount);
-        return reclaimAmount;
+        if (RECLAIM_AMOUNT != 0) beneficiary.transfer(RECLAIM_AMOUNT);
+        return RECLAIM_AMOUNT;
     }
 
     receive() external payable {}

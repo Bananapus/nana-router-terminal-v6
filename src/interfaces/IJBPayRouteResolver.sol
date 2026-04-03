@@ -9,20 +9,6 @@ import {IJBPayRoutePreviewer} from "./IJBPayRoutePreviewer.sol";
 
 /// @notice Resolves the best pay route preview for a router terminal.
 interface IJBPayRouteResolver {
-    /// @notice Whether routing through a terminal would immediately cycle back into the router.
-    /// @param router The router whose topology is being checked.
-    /// @param projectId The destination project whose terminal resolution should be checked.
-    /// @param terminal The terminal that would receive the route.
-    /// @return isCircular A flag indicating whether `terminal` resolves back into `router`.
-    function isCircularTerminal(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
-        IJBTerminal terminal
-    )
-        external
-        view
-        returns (bool isCircular);
-
     /// @notice Preview the best pay route for a router terminal.
     /// @param router The router terminal whose preview helpers should be used.
     /// @param projectId The destination project that would receive the payment.

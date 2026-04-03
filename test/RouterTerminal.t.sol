@@ -255,6 +255,7 @@ contract PayerSensitivePreviewTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
             JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
@@ -595,9 +596,10 @@ contract RouterTerminalTest is Test {
         assertEq(address(destTerminal), mockTerminal);
     }
 
-    function test_resolveTokenOut_skipsRegistryThatResolvesBackToRouter() public {
+    function test_registry_revertsWhenForwardingBackToImmediateCaller() public {
         uint256 projectId = 1;
-        address tokenIn = makeAddr("tokenIn");
+        uint256 amount = 1 ether;
+        address beneficiary = makeAddr("beneficiary");
         IJBProjects mockProjects = IJBProjects(makeAddr("mockProjects"));
         vm.etch(address(mockProjects), hex"00");
 
@@ -607,21 +609,16 @@ contract RouterTerminalTest is Test {
         vm.prank(terminalOwner);
         registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
 
-        vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
-            abi.encode(address(registry))
-        );
-
-        IJBTerminal[] memory terminals = new IJBTerminal[](0);
-        vm.mockCall(
-            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
-        );
+        vm.deal(address(routerTerminal), amount);
 
         vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_CircularForward.selector,
+                IJBTerminal(address(routerTerminal))
+            )
         );
-        routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
+        vm.prank(address(routerTerminal));
+        registry.pay{value: amount}(projectId, JBConstants.NATIVE_TOKEN, amount, beneficiary, 0, "", "");
     }
 
     function test_resolveTokenOut_metadataOverride() public {
@@ -1544,6 +1541,7 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
 
@@ -1714,6 +1712,7 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory brokenContexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         brokenContexts[0] =
             JBAccountingContext({token: brokenToken, decimals: 18, currency: uint32(uint160(brokenToken))});
         vm.mockCall(
@@ -1721,6 +1720,7 @@ contract RouterTerminalTest is Test {
         );
 
         JBAccountingContext[] memory workingContexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         workingContexts[0] =
             JBAccountingContext({token: workingToken, decimals: 18, currency: uint32(uint160(workingToken))});
         vm.mockCall(

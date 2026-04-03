@@ -14,10 +14,10 @@ contract RegistryFoTToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    uint256 internal immutable _fee;
+    uint256 internal immutable _FEE;
 
     constructor(uint256 fee) {
-        _fee = fee;
+        _FEE = fee;
     }
 
     function mint(address to, uint256 amount) external {
@@ -31,7 +31,7 @@ contract RegistryFoTToken {
 
     function transfer(address to, uint256 amount) external returns (bool) {
         balanceOf[msg.sender] -= amount;
-        uint256 received = amount > _fee ? amount - _fee : 0;
+        uint256 received = amount > _FEE ? amount - _FEE : 0;
         balanceOf[to] += received;
         return true;
     }
@@ -40,7 +40,7 @@ contract RegistryFoTToken {
         uint256 allowed = allowance[from][msg.sender];
         if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
         balanceOf[from] -= amount;
-        uint256 received = amount > _fee ? amount - _fee : 0;
+        uint256 received = amount > _FEE ? amount - _FEE : 0;
         balanceOf[to] += received;
         return true;
     }
@@ -62,6 +62,7 @@ contract PullingTerminal {
         returns (uint256)
     {
         lastAmount = amount;
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         RegistryFoTToken(token).transferFrom(msg.sender, address(this), amount);
         return amount;
     }

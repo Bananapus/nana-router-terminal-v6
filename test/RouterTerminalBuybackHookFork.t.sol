@@ -16,8 +16,6 @@ import {JBSplits} from "@bananapus/core-v6/src/JBSplits.sol";
 import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
 import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -53,7 +51,7 @@ import {IGeomeanOracle} from "@bananapus/buyback-hook-v6/src/interfaces/IGeomean
 contract BuybackForkLiquidityHelper is IUnlockCallback {
     using CurrencyLibrary for Currency;
 
-    IPoolManager public immutable poolManager;
+    IPoolManager public immutable POOL_MANAGER;
 
     struct AddLiqParams {
         PoolKey key;
@@ -63,7 +61,7 @@ contract BuybackForkLiquidityHelper is IUnlockCallback {
     }
 
     constructor(IPoolManager poolManager_) {
-        poolManager = poolManager_;
+        POOL_MANAGER = poolManager_;
     }
 
     function addLiquidity(
@@ -75,14 +73,18 @@ contract BuybackForkLiquidityHelper is IUnlockCallback {
         external
         payable
     {
-        poolManager.unlock(abi.encode(AddLiqParams(key, tickLower, tickUpper, liquidityDelta)));
+        POOL_MANAGER.unlock(
+            abi.encode(
+                AddLiqParams({key: key, tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: liquidityDelta})
+            )
+        );
     }
 
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        require(msg.sender == address(poolManager), "only PM");
+        require(msg.sender == address(POOL_MANAGER), "only PM");
 
         AddLiqParams memory params = abi.decode(data, (AddLiqParams));
-        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+        (BalanceDelta delta,) = POOL_MANAGER.modifyLiquidity(
             params.key,
             ModifyLiquidityParams({
                 tickLower: params.tickLower,
@@ -103,20 +105,25 @@ contract BuybackForkLiquidityHelper is IUnlockCallback {
 
     function _settleIfNegative(Currency currency, int128 delta) internal {
         if (delta >= 0) return;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 amount = uint256(uint128(-delta));
 
         if (currency.isAddressZero()) {
-            poolManager.settle{value: amount}();
+            POOL_MANAGER.settle{value: amount}();
         } else {
-            poolManager.sync(currency);
-            IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
-            poolManager.settle();
+            POOL_MANAGER.sync(currency);
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
+            IERC20(Currency.unwrap(currency)).transfer(address(POOL_MANAGER), amount);
+            POOL_MANAGER.settle();
         }
     }
 
     function _takeIfPositive(Currency currency, int128 delta) internal {
         if (delta <= 0) return;
-        poolManager.take(currency, address(this), uint256(uint128(delta)));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        // forge-lint: disable-next-line(unsafe-typecast)
+        POOL_MANAGER.take(currency, address(this), uint256(uint128(delta)));
     }
 
     receive() external payable {}
@@ -192,6 +199,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
         hookedProjectToken = address(jbController.deployERC20For(hookedProjectId, "HookedProject", "HOOK", bytes32(0)));
 
         _seedBuybackPool();
+        // forge-lint: disable-next-line(unsafe-typecast)
         _mockOracle(int256(LIQUIDITY_DELTA), START_TICK, 10 minutes);
         vm.deal(payer, 10 ether);
     }
@@ -348,6 +356,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
         IERC20(hookedProjectToken).approve(address(V4_POOL_MANAGER), type(uint256).max);
 
         vm.prank(address(liqHelper));
+        // forge-lint: disable-next-line(unsafe-typecast)
         liqHelper.addLiquidity{value: 20 ether}(buybackPoolKey, TICK_LOWER, TICK_UPPER, int256(LIQUIDITY_DELTA));
 
         vm.prank(multisig);
@@ -372,6 +381,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         int56[] memory tickCumulatives = new int56[](2);
         tickCumulatives[0] = 0;
+        // forge-lint: disable-next-line(unsafe-typecast)
         tickCumulatives[1] = int56(tick) * int56(int32(twapWindow));
 
         uint136[] memory secondsPerLiquidityCumulativeX128s = new uint136[](2);
@@ -379,6 +389,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         uint256 liq = uint256(liquidity > 0 ? liquidity : -liquidity);
         if (liq == 0) liq = 1;
+        // forge-lint: disable-next-line(unsafe-typecast)
         secondsPerLiquidityCumulativeX128s[1] = uint136((uint256(twapWindow) << 128) / liq);
 
         vm.mockCall(

@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
@@ -48,13 +47,13 @@ contract AuditMismatchToken {
 }
 
 contract AuditPreviewTerminal {
-    address public immutable acceptedToken;
-    uint256 public immutable previewCount;
+    address public immutable ACCEPTED_TOKEN;
+    uint256 public immutable PREVIEW_COUNT;
     uint256 public totalReceived;
 
     constructor(address acceptedToken_, uint256 previewCount_) {
-        acceptedToken = acceptedToken_;
-        previewCount = previewCount_;
+        ACCEPTED_TOKEN = acceptedToken_;
+        PREVIEW_COUNT = previewCount_;
     }
 
     function pay(
@@ -69,9 +68,10 @@ contract AuditPreviewTerminal {
         external
         returns (uint256)
     {
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         AuditMismatchToken(token).transferFrom(msg.sender, address(this), amount);
         totalReceived += amount;
-        return previewCount;
+        return PREVIEW_COUNT;
     }
 
     function previewPayFor(
@@ -97,14 +97,14 @@ contract AuditPreviewTerminal {
             metadata: 0
         });
         hookSpecifications = new JBPayHookSpecification[](0);
-        return (ruleset, previewCount, 0, hookSpecifications);
+        return (ruleset, PREVIEW_COUNT, 0, hookSpecifications);
     }
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
         // forge-lint: disable-next-line(unsafe-typecast)
         contexts[0] =
-            JBAccountingContext({token: acceptedToken, decimals: 18, currency: uint32(uint160(acceptedToken))});
+            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -116,7 +116,6 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
     JBRouterTerminal internal router;
 
     IJBDirectory internal directory;
-    IJBPermissions internal permissions;
     IJBTokens internal tokens;
     IPermit2 internal permit2;
     IWETH9 internal weth;
@@ -132,7 +131,6 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
 
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
-        permissions = IJBPermissions(makeAddr("permissions"));
         tokens = IJBTokens(makeAddr("tokens"));
         permit2 = IPermit2(makeAddr("permit2"));
         weth = IWETH9(makeAddr("weth"));
@@ -140,7 +138,6 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         poolManager = IPoolManager(makeAddr("poolManager"));
 
         vm.etch(address(directory), hex"00");
-        vm.etch(address(permissions), hex"00");
         vm.etch(address(tokens), hex"00");
         vm.etch(address(permit2), hex"00");
         vm.etch(address(weth), hex"00");

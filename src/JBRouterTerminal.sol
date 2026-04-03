@@ -663,28 +663,38 @@ contract JBRouterTerminal is
     }
 
     /// @notice Estimate the amount a buyback-hook cash-out preview would actually deliver to the router.
+    /// @param reclaimAmount The raw reclaim amount returned by the terminal preview before hook-aware normalization.
+    /// @param hookSpecifications The hook specifications returned alongside the terminal cash-out preview.
+    /// @return effectiveAmount The highest user-visible reclaim amount implied by the raw preview and understood
+    /// buyback-hook metadata.
     function _effectivePreviewCashOutAmount(
         uint256 reclaimAmount,
         JBCashOutHookSpecification[] memory hookSpecifications
     )
         internal
         view
-        returns (uint256)
+        returns (uint256 effectiveAmount)
     {
-        uint256 effectiveAmount = reclaimAmount;
+        // Start from the raw reclaim amount surfaced directly by the destination terminal preview.
+        effectiveAmount = reclaimAmount;
 
         for (uint256 i; i < hookSpecifications.length; i++) {
+            // Inspect one hook specification at a time so only understood buyback hooks can raise the preview.
             JBCashOutHookSpecification memory specification = hookSpecifications[i];
+
+            // Ignore no-op hooks and hooks the router does not recognize as the canonical buyback hook.
             if (specification.noop || address(specification.hook) != BUYBACK_HOOK) continue;
 
+            // Decode only the fields needed to determine the user-visible sell-side output implied by the hook.
             (uint256 minimumSwapAmountOut,,,,,, uint256 rawSwapQuote) =
                 abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
+            // Prefer the raw quote when present, otherwise fall back to the hook's minimum swap commitment.
             uint256 quotedAmount = rawSwapQuote != 0 ? rawSwapQuote : minimumSwapAmountOut;
+
+            // Keep whichever understood hook quote implies the strongest previewed cash-out output.
             if (quotedAmount > effectiveAmount) effectiveAmount = quotedAmount;
         }
-
-        return effectiveAmount;
     }
 
     /// @notice Preview the best pay route using the resolver helper.
@@ -769,11 +779,10 @@ contract JBRouterTerminal is
     }
 
     /// @notice Whether routing through a terminal would immediately cycle back into the router.
-    /// @param projectId The destination project whose terminal topology is being checked.
     /// @param terminal The terminal that would receive the route.
-    /// @return isCircular A flag indicating whether `terminal` resolves back into this router.
-    function _isCircularTerminal(uint256 projectId, IJBTerminal terminal) internal view returns (bool isCircular) {
-        return PAY_ROUTE_RESOLVER.isCircularTerminal(IJBPayRoutePreviewer(address(this)), projectId, terminal);
+    /// @return isCircular A flag indicating whether `terminal` is this router itself.
+    function _isCircularTerminal(IJBTerminal terminal) internal view returns (bool isCircular) {
+        return address(terminal) == address(this);
     }
 
     /// @notice Accepts a token being paid in.
@@ -909,7 +918,7 @@ contract JBRouterTerminal is
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                            && !_isCircularTerminal({terminal: destTerminal})
                     ) {
                         return (destTerminal, preferredToken, amount);
                     }
@@ -921,7 +930,7 @@ contract JBRouterTerminal is
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                            && !_isCircularTerminal({terminal: destTerminal})
                     ) {
                         (token, amount) = _alignTokenToPreferredToken({
                             token: token, amount: amount, preferredToken: preferredToken
@@ -936,7 +945,7 @@ contract JBRouterTerminal is
                 destTerminal = _primaryTerminalOf({projectId: destProjectId, token: token});
                 if (
                     address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                        && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                        && !_isCircularTerminal({terminal: destTerminal})
                 ) {
                     return (destTerminal, token, amount);
                 }
@@ -2055,7 +2064,7 @@ contract JBRouterTerminal is
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                            && !_isCircularTerminal({terminal: destTerminal})
                     ) {
                         return (destTerminal, preferredToken, amount);
                     }
@@ -2067,7 +2076,7 @@ contract JBRouterTerminal is
                     destTerminal = _primaryTerminalOf({projectId: destProjectId, token: preferredToken});
                     if (
                         address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                            && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                            && !_isCircularTerminal({terminal: destTerminal})
                     ) {
                         return (destTerminal, preferredToken, amount);
                     }
@@ -2081,7 +2090,7 @@ contract JBRouterTerminal is
                 // If a real external terminal accepts this token, the preview route is complete and exact.
                 if (
                     address(destTerminal) != address(0) && address(destTerminal) != address(this)
-                        && !_isCircularTerminal({projectId: destProjectId, terminal: destTerminal})
+                        && !_isCircularTerminal({terminal: destTerminal})
                 ) {
                     return (destTerminal, token, amount);
                 }
