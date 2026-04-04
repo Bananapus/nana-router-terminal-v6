@@ -372,8 +372,14 @@ contract JBRouterTerminal is
         if (msg.sender != address(POOL_MANAGER)) revert JBRouterTerminal_CallerNotPoolManager(msg.sender);
 
         // Decode the swap parameters.
-        (PoolKey memory key, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, uint256 minAmountOut) =
-            abi.decode(data, (PoolKey, bool, int256, uint160, uint256));
+        (
+            PoolKey memory key,
+            bool zeroForOne,
+            int256 amountSpecified,
+            uint160 sqrtPriceLimitX96,
+            uint256 minAmountOut,
+            bool canUseExistingNativeBalance
+        ) = abi.decode(data, (PoolKey, bool, int256, uint160, uint256, bool));
 
         // Execute the swap.
         BalanceDelta delta = POOL_MANAGER.swap({
@@ -405,7 +411,7 @@ contract JBRouterTerminal is
 
         // Settle input (pay what we owe to the PoolManager).
         Currency inputCurrency = zeroForOne ? key.currency0 : key.currency1;
-        _settleV4({currency: inputCurrency, amount: amountIn});
+        _settleV4({currency: inputCurrency, amount: amountIn, canUseExistingNativeBalance: canUseExistingNativeBalance});
 
         // Take output (receive what the PoolManager owes us).
         Currency outputCurrency = zeroForOne ? key.currency1 : key.currency0;
@@ -1198,6 +1204,7 @@ contract JBRouterTerminal is
     function _executeSwap(
         address normalizedTokenIn,
         address normalizedTokenOut,
+        bool canUseExistingNativeBalance,
         uint256 amount,
         bytes calldata metadata,
         bytes memory callbackData
@@ -1216,7 +1223,11 @@ contract JBRouterTerminal is
         // Dispatch to the V4 execution path when the chosen pool lives in the PoolManager.
         if (pool.isV4) {
             return _executeV4Swap({
-                key: pool.v4Key, normalizedTokenIn: normalizedTokenIn, amount: amount, minAmountOut: minAmountOut
+                key: pool.v4Key,
+                normalizedTokenIn: normalizedTokenIn,
+                canUseExistingNativeBalance: canUseExistingNativeBalance,
+                amount: amount,
+                minAmountOut: minAmountOut
             });
         } else {
             // Otherwise execute the swap against the discovered V3 pool.
@@ -1269,6 +1280,7 @@ contract JBRouterTerminal is
     function _executeV4Swap(
         PoolKey memory key,
         address normalizedTokenIn,
+        bool canUseExistingNativeBalance,
         uint256 amount,
         uint256 minAmountOut
     )
@@ -1288,9 +1300,13 @@ contract JBRouterTerminal is
 
         // V4 sign convention: negative = exact input, positive = exact output.
         // Ask the PoolManager to unlock and call back into this router to execute the swap atomically.
-        bytes memory result =
+        // The router only reaches this path with uint256 amounts that fit the signed exact-input convention.
         // forge-lint: disable-next-line(unsafe-typecast)
-        POOL_MANAGER.unlock(abi.encode(key, zeroForOne, -int256(amount), sqrtPriceLimitX96, minAmountOut));
+        int256 exactInputAmount = -int256(amount);
+        bytes memory result =
+        POOL_MANAGER.unlock(
+            abi.encode(key, zeroForOne, exactInputAmount, sqrtPriceLimitX96, minAmountOut, canUseExistingNativeBalance)
+        );
 
         // Decode and return the amount-out value surfaced by the unlock callback.
         amountOut = abi.decode(result, (uint256));
@@ -1324,6 +1340,7 @@ contract JBRouterTerminal is
         amountOut = _executeSwap({
             normalizedTokenIn: normalizedTokenIn,
             normalizedTokenOut: _normalize(tokenOut),
+            canUseExistingNativeBalance: tokenIn == JBConstants.NATIVE_TOKEN,
             amount: amount,
             metadata: metadata,
             callbackData: abi.encode(projectId, tokenIn, tokenOut)
@@ -1522,11 +1539,16 @@ contract JBRouterTerminal is
     }
 
     /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
-    function _settleV4(Currency currency, uint256 amount) internal {
+    function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
         if (_unwrapCurrency(currency) == address(0)) {
-            // Unwrap only the WETH deficit (caller may hold partial ETH + partial WETH).
-            uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
-            if (deficit > 0) _wethWithdraw(deficit);
+            // Native-funded routes may spend the ETH they already hold.
+            // WETH-funded routes must not consume unrelated raw ETH already sitting on the router.
+            if (canUseExistingNativeBalance) {
+                uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
+                if (deficit > 0) _wethWithdraw(deficit);
+            } else {
+                _wethWithdraw(amount);
+            }
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {

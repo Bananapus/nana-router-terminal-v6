@@ -494,8 +494,8 @@ contract RouterTerminalHarness is JBRouterTerminal {
         }
     }
 
-    function exposedSettleV4(Currency currency, uint256 amount) external {
-        _settleV4(currency, amount);
+    function exposedSettleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) external {
+        _settleV4(currency, amount, canUseExistingNativeBalance);
     }
 }
 
@@ -2576,7 +2576,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), wethPortion, "Setup: router WETH balance");
 
         // Settle 1 ETH via _settleV4. Should withdraw only 0.5 WETH (the deficit).
-        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), totalAmount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), totalAmount, true);
 
         // PoolManager should have received 1 ETH.
         assertEq(poolManager.lastSettleAmount(), totalAmount, "PoolManager received correct amount");
@@ -2603,7 +2603,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), 0.5 ether, "Setup: router WETH balance");
 
         // Settle 1 ETH. No WETH should be withdrawn.
-        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount, true);
 
         // PoolManager received the ETH.
         assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");
@@ -2626,7 +2626,7 @@ contract SettleV4DeficitTest is Test {
         assertEq(weth.balanceOf(address(routerTerminal)), amount, "Setup: router WETH balance");
 
         // Settle 1 ETH. Should withdraw all 1 WETH.
-        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount);
+        routerTerminal.exposedSettleV4(Currency.wrap(address(0)), amount, false);
 
         // PoolManager received the ETH.
         assertEq(poolManager.lastSettleAmount(), amount, "PoolManager received correct amount");
