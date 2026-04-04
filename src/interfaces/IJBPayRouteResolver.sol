@@ -97,4 +97,18 @@ interface IJBPayRouteResolver {
         external
         view
         returns (address tokenOut, IJBTerminal destTerminal);
+
+    /// @notice Resolve a project's primary terminal only when the router can safely forward into it.
+    /// @param router The router whose forwarding-terminal rules should be applied.
+    /// @param projectId The project whose primary terminal should be checked.
+    /// @param token The token that terminal should accept.
+    /// @return terminal The usable primary terminal, or address(0) if none is usable.
+    function usablePrimaryTerminalOf(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address token
+    )
+        external
+        view
+        returns (IJBTerminal terminal);
 }

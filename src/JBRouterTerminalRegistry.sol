@@ -227,6 +227,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return true;
     }
 
+    /// @inheritdoc IJBForwardingTerminal
+    function forwardingTerminalOf(uint256 projectId) external view returns (IJBTerminal terminal) {
+        return _resolvedTerminalOf(projectId);
+    }
+
     //*********************************************************************//
     // -------------------------- internal views ------------------------- //
     //*********************************************************************//

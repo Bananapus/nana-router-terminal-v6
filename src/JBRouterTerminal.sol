@@ -837,14 +837,6 @@ contract JBRouterTerminal is
         return _normalize(tokenA) == _normalize(tokenB);
     }
 
-    /// @notice Whether a terminal is a valid external destination for routing.
-    /// @param terminal The terminal being evaluated as a route destination.
-    /// @return isUsable A flag indicating whether the router can safely forward into `terminal`.
-    function _isUsableDestinationTerminal(IJBTerminal terminal) internal view returns (bool isUsable) {
-        // Reject zero-address and self-routes so only real external destination terminals are considered usable.
-        return address(terminal) != address(0) && !_isCircularTerminal({terminal: terminal});
-    }
-
     /// @notice Snapshot a destination terminal's pre-call token balance for final-hop receipt enforcement.
     /// @param terminal The destination terminal that will receive the final forwarded funds.
     /// @param token The token the terminal is expected to receive.
@@ -897,11 +889,14 @@ contract JBRouterTerminal is
     /// @param terminal The terminal being checked for forwarding behavior.
     /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
     function _isForwardingTerminal(IJBTerminal terminal) internal view returns (bool isForwarding) {
-        try IJBForwardingTerminal(address(terminal)).forwardsTerminalPayments() returns (bool forwardsPayments) {
-            return forwardsPayments;
-        } catch {
-            return false;
-        }
+        // Probe the generic forwarding capability via staticcall so non-forwarding terminals degrade cleanly.
+        (bool success, bytes memory data) =
+            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardsTerminalPayments, ()));
+
+        // Treat terminals that do not implement the capability as final receivers.
+        if (!success || data.length < 32) return false;
+
+        return abi.decode(data, (bool));
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
@@ -909,11 +904,9 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        // Look up the project's primary terminal for the requested token.
-        terminal = _primaryTerminalOf({projectId: projectId, token: token});
-
-        // Collapse unusable terminals back to address(0) so callers can branch on one simple sentinel.
-        if (!_isUsableDestinationTerminal(terminal)) return IJBTerminal(address(0));
+        return _PAY_ROUTE_RESOLVER.usablePrimaryTerminalOf({
+            router: IJBPayRoutePreviewer(address(this)), projectId: projectId, token: token
+        });
     }
 
     /// @notice Resolve which source project a routed token should cash out from.
@@ -1303,8 +1296,7 @@ contract JBRouterTerminal is
         // The router only reaches this path with uint256 amounts that fit the signed exact-input convention.
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 exactInputAmount = -int256(amount);
-        bytes memory result =
-        POOL_MANAGER.unlock(
+        bytes memory result = POOL_MANAGER.unlock(
             abi.encode(key, zeroForOne, exactInputAmount, sqrtPriceLimitX96, minAmountOut, canUseExistingNativeBalance)
         );
 
@@ -1439,7 +1431,7 @@ contract JBRouterTerminal is
         resolvedTokenOut = tokenOut;
 
         // Resolve the destination terminal that accepts the requested token.
-        destTerminal = _primaryTerminalOf({projectId: destProjectId, token: tokenOut});
+        destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: tokenOut});
 
         // Revert immediately when the destination project has no terminal for the requested token.
         if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(destProjectId, tokenOut);
@@ -1862,8 +1854,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Find which terminal to cash out from and which token to reclaim.
-    /// @dev Prioritizes: 1) tokens the destination directly accepts, 2) JB project tokens (recursable),
-    /// 3) any base token (the router will swap it).
+    /// @dev Prioritizes: 1) tokens the destination directly accepts, 2) base tokens that can exit the recursion
+    /// immediately, 3) JB project tokens (recursable) only when no direct or base-token exit exists.
     /// @param sourceProjectId The ID of the project whose tokens are being cashed out.
     /// @param destProjectId The ID of the destination project.
     /// @return tokenToReclaim The token to reclaim from the cash out.
@@ -1922,14 +1914,14 @@ contract JBRouterTerminal is
             return (candidates.directFallbackToken, candidates.directFallbackTerminal);
         }
 
-        // Otherwise fall back to a JB project token so the router can recurse through another cashout hop.
-        if (address(candidates.fallbackTerminal) != address(0)) {
-            return (candidates.fallbackToken, candidates.fallbackTerminal);
-        }
-
         // Otherwise return the first base token discovered and let the router handle the remaining swap route.
         if (address(candidates.baseFallbackTerminal) != address(0)) {
             return (candidates.baseFallbackToken, candidates.baseFallbackTerminal);
+        }
+
+        // Otherwise fall back to a JB project token so the router can recurse through another cashout hop.
+        if (address(candidates.fallbackTerminal) != address(0)) {
+            return (candidates.fallbackToken, candidates.fallbackTerminal);
         }
 
         // Revert when no terminal exposed any reclaimable token that can advance the route.
@@ -1954,23 +1946,29 @@ contract JBRouterTerminal is
     {
         updatedCandidates = candidates;
 
+        // Treat native ETH as a non-recursive base asset. For ERC-20s, detect whether the token is itself a JB
+        // project token so recursive and base fallbacks stay disjoint.
+        bool isJbProjectToken;
+        if (contextToken != JBConstants.NATIVE_TOKEN) {
+            // slither-disable-next-line calls-loop
+            isJbProjectToken = _projectIdOf(contextToken) != 0;
+        }
+
         // Record the first directly accepted token only when its destination terminal is actually usable.
         if (address(destTerminal) != address(0) && address(updatedCandidates.directFallbackTerminal) == address(0)) {
             updatedCandidates.directFallbackToken = contextToken;
             updatedCandidates.directFallbackTerminal = terminal;
         }
 
-        // Record the first JB project token so the router can recurse through another cashout hop if necessary.
-        if (address(updatedCandidates.fallbackTerminal) == address(0) && contextToken != JBConstants.NATIVE_TOKEN) {
-            // slither-disable-next-line calls-loop
-            if (_projectIdOf(contextToken) != 0) {
-                updatedCandidates.fallbackToken = contextToken;
-                updatedCandidates.fallbackTerminal = terminal;
-            }
+        // Record the first JB project token so the router can recurse through another cashout hop if no direct or
+        // base-token exit ends up existing.
+        if (address(updatedCandidates.fallbackTerminal) == address(0) && isJbProjectToken) {
+            updatedCandidates.fallbackToken = contextToken;
+            updatedCandidates.fallbackTerminal = terminal;
         }
 
-        // Record the first base-token fallback so the router can at least continue via a swap route.
-        if (address(updatedCandidates.baseFallbackTerminal) == address(0)) {
+        // Record the first non-JB base-token fallback so the router can at least continue via a swap route.
+        if (address(updatedCandidates.baseFallbackTerminal) == address(0) && !isJbProjectToken) {
             updatedCandidates.baseFallbackToken = contextToken;
             updatedCandidates.baseFallbackTerminal = terminal;
         }

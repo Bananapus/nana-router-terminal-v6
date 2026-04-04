@@ -644,6 +644,35 @@ contract RouterTerminalTest is Test {
         registry.pay{value: amount}(projectId, JBConstants.NATIVE_TOKEN, amount, beneficiary, 0, "", "");
     }
 
+    function test_resolveTokenOut_revertsWhenForwardingTerminalResolvesBackToRouter() public {
+        uint256 projectId = 1;
+        address tokenIn = makeAddr("tokenIn");
+        IJBProjects mockProjects = IJBProjects(makeAddr("mockProjects"));
+        vm.etch(address(mockProjects), hex"00");
+
+        JBRouterTerminalRegistry registry =
+            new JBRouterTerminalRegistry(mockPermissions, mockProjects, mockPermit2, terminalOwner, address(0));
+
+        vm.prank(terminalOwner);
+        registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
+            abi.encode(address(registry))
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.terminalsOf, (projectId)),
+            abi.encode(new IJBTerminal[](0))
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+        );
+        routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
+    }
+
     function test_resolveTokenOut_metadataOverride() public {
         uint256 projectId = 1;
         address tokenIn = makeAddr("tokenIn");
@@ -2379,7 +2408,7 @@ contract RouterTerminalTest is Test {
         uint256 minAmountOut = 0;
 
         // Encode the data as the contract would encode it (with the sign fix).
-        bytes memory callbackData = abi.encode(key, true, amountSpecified, sqrtPriceLimitX96, minAmountOut);
+        bytes memory callbackData = abi.encode(key, true, amountSpecified, sqrtPriceLimitX96, minAmountOut, false);
 
         // Mock the PoolManager.swap call — it should receive a negative amountSpecified.
         // We construct the expected SwapParams to verify the sign.
