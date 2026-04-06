@@ -8,7 +8,6 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -55,19 +54,19 @@ contract HarnessRouterTerminal is JBRouterTerminal {
     constructor()
         JBRouterTerminal(
             IJBDirectory(address(0)),
-            IJBPermissions(address(0)),
             IJBTokens(address(0)),
             IPermit2(address(0)),
-            address(this),
             IWETH9(address(new MockWETH())),
             IUniswapV3Factory(address(0)),
             IPoolManager(address(0)),
+            address(0),
+            address(0),
             address(0)
         )
     {}
 
     function simulatePayLeftoverRefund(address token, address beneficiary, uint256 leftover) external {
-        address payable refundTo = _resolveRefundWithBackupRecipient(payable(beneficiary));
+        address payable refundTo = payable(_resolveOriginalPayer(beneficiary));
         _transferFrom({from: address(this), to: refundTo, token: token, amount: leftover});
     }
 }

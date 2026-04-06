@@ -28,14 +28,18 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         IWETH9 weth,
         IUniswapV3Factory factory,
         IPoolManager poolManager,
+        address buybackHook,
+        address univ4Hook,
         address trustedForwarder
     )
-        JBRouterTerminal(directory, permissions, tokens, permit2, owner, weth, factory, poolManager, trustedForwarder)
+        JBRouterTerminal(
+            directory, tokens, permit2, weth, factory, poolManager, buybackHook, univ4Hook, trustedForwarder
+        )
     {}
 
-    /// @notice Public wrapper so tests can call `_resolveRefundWithBackupRecipient` directly.
+    /// @notice Public wrapper so tests can call `_resolveOriginalPayer` directly.
     function resolveRefundTo(address payable fallback_) external view returns (address payable) {
-        return _resolveRefundWithBackupRecipient(fallback_);
+        return payable(_resolveOriginalPayer(fallback_));
     }
 }
 
@@ -109,6 +113,8 @@ contract PayerTrackerRefundTest is Test {
             IWETH9(address(0)),
             IUniswapV3Factory(address(0)),
             IPoolManager(address(0)),
+            address(0), // buybackHook
+            address(0), // univ4Hook
             address(0) // trustedForwarder
         );
 

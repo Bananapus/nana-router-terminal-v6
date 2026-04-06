@@ -77,7 +77,7 @@ contract MaliciousReentrantTerminal {
         uint256, /* cashOutCount */
         address, /* tokenToReclaim */
         uint256, /* minTokensReclaimed */
-        address payable, /* beneficiary */
+        address payable beneficiary,
         bytes calldata /* metadata */
     )
         external
@@ -100,6 +100,8 @@ contract MaliciousReentrantTerminal {
                 reentryReverted = true;
             }
         }
+        // Deliver the reclaimed ETH to the router the same way a real cashout terminal would.
+        beneficiary.transfer(1e18);
         return 1e18;
     }
 
@@ -163,7 +165,7 @@ contract MaliciousAddToBalanceTerminal {
         uint256, /* cashOutCount */
         address, /* tokenToReclaim */
         uint256, /* minTokensReclaimed */
-        address payable, /* beneficiary */
+        address payable beneficiary,
         bytes calldata /* metadata */
     )
         external
@@ -185,6 +187,8 @@ contract MaliciousAddToBalanceTerminal {
                 reentryReverted = true;
             }
         }
+        // Deliver the reclaimed ETH to the router the same way a real cashout terminal would.
+        beneficiary.transfer(1e18);
         return 1e18;
     }
 
@@ -269,13 +273,13 @@ contract RouterTerminalReentrancyTest is Test {
 
         routerTerminal = new JBRouterTerminal(
             mockDirectory,
-            mockPermissions,
             mockTokens,
             mockPermit2,
-            terminalOwner,
             mockWeth,
             mockFactory,
             mockPoolManager,
+            address(0),
+            address(0),
             address(0)
         );
     }
@@ -334,10 +338,8 @@ contract RouterTerminalReentrancyTest is Test {
         vm.prank(payer);
         jbTokenMock.approve(address(routerTerminal), 100e18);
 
-        // Fund the router with what the mock cashout returns.
-        vm.deal(address(routerTerminal), 1e18);
-        uint256 routerEthBefore = address(routerTerminal).balance;
-
+        // Fund the malicious terminal so its cashout callback can actually deliver reclaimed ETH to the router.
+        vm.deal(address(malicious), 1e18);
         // Execute: the cashout callback will re-enter router.pay().
         vm.prank(payer);
         uint256 result = routerTerminal.pay(destProjectId, jbToken, 100e18, payer, 0, "", "");
@@ -353,9 +355,7 @@ contract RouterTerminalReentrancyTest is Test {
         // and ETH forwarding was not corrupted by the mid-flight re-entry attempt.
 
         // Router forwarded all reclaimed ETH to the destination terminal.
-        assertEq(
-            address(routerTerminal).balance, routerEthBefore - 1e18, "router should have forwarded all reclaimed ETH"
-        );
+        assertEq(address(routerTerminal).balance, 0, "router should have forwarded all reclaimed ETH");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -405,9 +405,8 @@ contract RouterTerminalReentrancyTest is Test {
         vm.prank(payer);
         jbTokenMock.approve(address(routerTerminal), 100e18);
 
-        vm.deal(address(routerTerminal), 1e18);
-        uint256 routerEthBefore = address(routerTerminal).balance;
-
+        // Fund the malicious terminal so its cashout callback can actually deliver reclaimed ETH to the router.
+        vm.deal(address(malicious), 1e18);
         vm.prank(payer);
         routerTerminal.addToBalanceOf(destProjectId, jbToken, 100e18, false, "", "");
 
@@ -416,9 +415,7 @@ contract RouterTerminalReentrancyTest is Test {
         // The re-entrant call reverts due to no route for the mock projectId/token — NOT due to
         // a reentrancy guard. The outer call completes and ETH forwarding is not corrupted.
 
-        assertEq(
-            address(routerTerminal).balance, routerEthBefore - 1e18, "router should have forwarded all reclaimed ETH"
-        );
+        assertEq(address(routerTerminal).balance, 0, "router should have forwarded all reclaimed ETH");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -468,7 +465,8 @@ contract RouterTerminalReentrancyTest is Test {
         vm.prank(payer);
         jbTokenMock.approve(address(routerTerminal), 50e18);
 
-        vm.deal(address(routerTerminal), 1e18);
+        // Fund the malicious terminal so its cashout callback can actually deliver reclaimed ETH to the router.
+        vm.deal(address(malicious), 1e18);
 
         vm.prank(payer);
         uint256 result = routerTerminal.pay(destProjectId, jbToken, 50e18, payer, 0, "", "");

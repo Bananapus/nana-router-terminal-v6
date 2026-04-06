@@ -5,10 +5,11 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
+import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "./IJBPayerTracker.sol";
 
 /// @notice A registry that maps projects to their preferred router terminal.
-interface IJBRouterTerminalRegistry is IJBTerminal, IJBPayerTracker {
+interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPayerTracker {
     /// @notice Emitted when a terminal is allowed for use by projects.
     /// @param terminal The terminal that was allowed.
     /// @param caller The address that called the function.
@@ -36,31 +37,31 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBPayerTracker {
     event JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller);
 
     /// @notice The default terminal used when a project has not set a specific terminal.
-    /// @return The default terminal.
-    function defaultTerminal() external view returns (IJBTerminal);
+    /// @return terminal The default terminal.
+    function defaultTerminal() external view returns (IJBTerminal terminal);
 
     /// @notice Whether the terminal for the given project is locked and cannot be changed.
     /// @param projectId The ID of the project.
-    /// @return Whether the terminal is locked.
-    function hasLockedTerminal(uint256 projectId) external view returns (bool);
+    /// @return isLocked Whether the terminal is locked.
+    function hasLockedTerminal(uint256 projectId) external view returns (bool isLocked);
 
     /// @notice Whether the given terminal is allowed to be set for projects.
     /// @param terminal The terminal to check.
-    /// @return Whether the terminal is allowed.
-    function isTerminalAllowed(IJBTerminal terminal) external view returns (bool);
+    /// @return isAllowed Whether the terminal is allowed.
+    function isTerminalAllowed(IJBTerminal terminal) external view returns (bool isAllowed);
 
     /// @notice The permit2 utility used for token approvals.
-    /// @return The permit2 contract.
-    function PERMIT2() external view returns (IPermit2);
+    /// @return permit2 The permit2 contract.
+    function PERMIT2() external view returns (IPermit2 permit2);
 
     /// @notice The project registry.
-    /// @return The projects contract.
-    function PROJECTS() external view returns (IJBProjects);
+    /// @return projects The projects contract.
+    function PROJECTS() external view returns (IJBProjects projects);
 
     /// @notice The terminal for the given project, or the default terminal if none is set.
     /// @param projectId The ID of the project.
-    /// @return The terminal for the project.
-    function terminalOf(uint256 projectId) external view returns (IJBTerminal);
+    /// @return terminal The terminal for the project.
+    function terminalOf(uint256 projectId) external view returns (IJBTerminal terminal);
 
     /// @notice Allow a terminal to be used by projects.
     /// @param terminal The terminal to allow.

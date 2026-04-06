@@ -6,6 +6,6 @@ pragma solidity ^0.8.0;
 /// Downstream contracts can query this to refund partial-fill leftovers to the true payer.
 interface IJBPayerTracker {
     /// @notice The original payer of the current transaction.
-    /// @return The original payer address, or `address(0)` if no forwarding is in progress.
-    function originalPayer() external view returns (address);
+    /// @return payer The original payer address, or `address(0)` if no forwarding is in progress.
+    function originalPayer() external view returns (address payer);
 }

@@ -17,7 +17,6 @@ import {JBSplits} from "@bananapus/core-v6/src/JBSplits.sol";
 import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
 import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -77,13 +76,13 @@ contract RouterTerminalPreviewForkTest is Test {
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
-            permissions: IJBPermissions(address(jbPermissions)),
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
-            owner: multisig,
             weth: WETH,
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,
+            buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: address(0)
         });
 
@@ -286,6 +285,7 @@ contract RouterTerminalPreviewForkTest is Test {
         returns (uint256 projectId)
     {
         // forge-lint: disable-next-line(unsafe-typecast)
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint32 baseCurrency = uint32(uint160(acceptedToken));
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
@@ -320,6 +320,7 @@ contract RouterTerminalPreviewForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = new JBFundAccessLimitGroup[](0);
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
         // forge-lint: disable-next-line(unsafe-typecast)
         uint32 tokenCurrency = uint32(uint160(acceptedToken));
         tokensToAccept[0] = JBAccountingContext({token: acceptedToken, decimals: decimals, currency: tokenCurrency});

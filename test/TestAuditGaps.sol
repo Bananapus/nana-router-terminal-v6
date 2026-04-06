@@ -6,12 +6,15 @@ import {Test} from "forge-std/Test.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -23,6 +26,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
+import {IJBForwardingTerminal} from "../src/interfaces/IJBForwardingTerminal.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -104,13 +108,14 @@ contract AuditHarness is JBRouterTerminal {
         IJBPermissions p,
         IJBTokens t,
         IPermit2 pm,
-        address o,
         IWETH9 w,
         IUniswapV3Factory f,
         IPoolManager pm4,
+        address bh,
+        address uh,
         address tf
     )
-        JBRouterTerminal(d, p, t, pm, o, w, f, pm4, tf)
+        JBRouterTerminal(d, t, pm, w, f, pm4, bh, uh, tf)
     {}
 
     function exposedAcceptFundsFor(
@@ -168,7 +173,7 @@ contract TestAuditGaps is Test {
         vm.etch(address(pm), hex"00");
         owner = makeAddr("owner");
 
-        router = new AuditHarness(dir, perms, toks, permit2, owner, weth, factory, pm, address(0));
+        router = new AuditHarness(dir, perms, toks, permit2, weth, factory, pm, address(0), address(0), address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -241,6 +246,33 @@ contract TestAuditGaps is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         ctx[0] = JBAccountingContext({token: tokenOut, decimals: 18, currency: uint32(uint160(tokenOut))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(ctx));
+        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
+        // non-router target.
+        vm.mockCall(
+            destTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encode(destTerminal)
+        );
+        vm.mockCall(
+            destTerminal,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
+        );
 
         // V3 pool at 0.3%.
         vm.mockCall(
@@ -302,6 +334,11 @@ contract TestAuditGaps is Test {
         // Project accepts tokenIn directly.
         vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, tokenIn)), abi.encode(dest));
 
+        // Mock terminalsOf so _routeForPay finds the project's terminals.
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(dest);
+        vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.terminalsOf, (1)), abi.encode(terminals));
+
         JBAccountingContext[] memory ctx = new JBAccountingContext[](1);
         ctx[0] =
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -315,6 +352,34 @@ contract TestAuditGaps is Test {
         // Mock approve for dest terminal (actual received amount = 4900).
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (dest, 4900)), abi.encode(true));
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
+        // non-router target.
+        vm.mockCall(
+            dest,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, uint256(1)),
+            abi.encode(dest)
+        );
+        // Mock previewPayFor for route scoring.
+        vm.mockCall(
+            dest,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
+        );
 
         // Expect that pay is called with the reduced amount (4900).
         vm.expectCall(dest, abi.encodeCall(IJBTerminal.pay, (1, tokenIn, 4900, payer, 0, "", "")));
@@ -488,6 +553,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(77)));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
         // safeIncreaseAllowance calls allowance() then approve().
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
@@ -670,6 +736,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 99)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(99)));
@@ -739,6 +806,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
@@ -770,13 +838,13 @@ contract TestAuditGaps is Test {
     }
 
     /// @notice ETH that is directly deposited to the registry (not via partial-fill refund) is still stuck.
-    /// However, partial-fill leftovers are now routed to `beneficiary` (for pay()) or `_msgSender()`
-    /// (for addToBalanceOf()) instead of `_msgSender()` of the router, so the registry no longer
+    /// However, partial-fill leftovers are now routed to the original payer for both pay() and addToBalanceOf(),
+    /// so the registry no longer
     /// receives partial-fill refunds in the first place.
     function test_registryReceive_directDepositStillStuck() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
-        // Simulate ETH arriving directly (not from partial-fill — that path now goes to beneficiary).
+        // Simulate ETH arriving directly (not from partial-fill — that path now goes to the original payer).
         vm.deal(address(reg), 1 ether);
         assertEq(address(reg).balance, 1 ether);
 
@@ -803,14 +871,12 @@ contract TestAuditGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 6b: Partial-fill leftovers go to beneficiary, not _msgSender()
+    // GAP 6b: Partial-fill leftovers go to the original payer, not the downstream beneficiary
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When pay() is called and a partial fill occurs, leftover input tokens
-    /// are sent to the `beneficiary`, not `_msgSender()`. This is critical when pay()
-    /// is called through a registry or other intermediary where _msgSender() differs
-    /// from the intended recipient.
-    function test_partialFill_leftoverSentToBeneficiary_notMsgSender() public {
+    /// are sent back to the original payer, not to the downstream beneficiary.
+    function test_partialFill_leftoverSentToOriginalPayer_notBeneficiary() public {
         MockERC20Std tok = new MockERC20Std();
         address tokenIn = address(tok);
         address tokenOut = makeAddr("tokenOut_refund");
@@ -831,8 +897,7 @@ contract TestAuditGaps is Test {
         // Mock V3 swap (partial fill — swap returns only 90 output for 80 input consumed).
         // Because the swap is fully mocked, no tokens actually leave the router.
         // After _acceptFundsFor transfers 100 in, the router's real balance stays at 100.
-        // The leftover check sees that 100 and refunds all of it. This is correct behavior
-        // for testing the *recipient* — what matters is WHERE the leftover goes, not how much.
+        // The leftover check sees that 100 and refunds all of it to the original payer.
         {
             bool zeroForOne = tokenIn < tokenOut;
             if (zeroForOne) {
@@ -853,26 +918,25 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
 
-        address alice = makeAddr("alice"); // msg.sender
-        address bob = makeAddr("bob"); // beneficiary (should receive leftover)
+        address alice = makeAddr("alice"); // original payer
+        address bob = makeAddr("bob"); // downstream beneficiary
 
         tok.mint(alice, 100);
         vm.prank(alice);
         tok.approve(address(router), 100);
 
-        // Alice pays on behalf of Bob. Leftover should go to Bob (beneficiary), not Alice (_msgSender()).
+        // Alice pays on behalf of Bob. Leftover should return to Alice, not Bob.
         vm.prank(alice);
         uint256 result = router.pay(1, tokenIn, 100, bob, 0, "", metadata);
         assertEq(result, 42);
 
-        // Bob (beneficiary) received the leftover tokens.
-        assertTrue(tok.balanceOf(bob) > 0, "Leftover should go to beneficiary (bob)");
-        // Alice should NOT have received the leftover.
-        assertEq(tok.balanceOf(alice), 0, "Alice (_msgSender) should not receive leftover");
+        assertEq(tok.balanceOf(bob), 0, "Beneficiary should not receive leftover input");
+        assertEq(tok.balanceOf(alice), 100, "Original payer should receive leftover input");
     }
 
     // ═══════════════════════════════════════════════════════════════════════

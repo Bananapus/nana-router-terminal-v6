@@ -111,13 +111,13 @@ contract RouterTerminalMultihopForkTest is Test {
         // Deploy the router terminal with real Uniswap + real Permit2, but fresh JB core.
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
-            permissions: jbPermissions,
             tokens: jbTokens,
             permit2: PERMIT2,
-            owner: multisig,
             weth: WETH,
             factory: V3_FACTORY,
             poolManager: V4_POOL_MANAGER,
+            buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: trustedForwarder
         });
 

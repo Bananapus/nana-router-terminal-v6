@@ -120,6 +120,10 @@ contract MockDestTerminal is IJBTerminal {
         payable
         override
     {
+        // Pull the ERC20 into the terminal so the router's final-hop receipt check observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) MockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
     }
@@ -160,6 +164,10 @@ contract MockDestTerminal is IJBTerminal {
         override
         returns (uint256)
     {
+        // Pull the ERC20 into the terminal so the router's final-hop receipt check observes real delivery.
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
+        if (token != JBConstants.NATIVE_TOKEN) MockERC20(token).transferFrom(msg.sender, address(this), amount);
+
         lastToken = token;
         lastAmount = amount;
         return amount;
@@ -340,7 +348,7 @@ contract RouterTerminalEdgeCasesTest is Test {
         vm.etch(address(factory), hex"00");
 
         router = new JBRouterTerminal(
-            directory, permissions, tokens, permit2, owner, weth, factory, poolManager, address(0)
+            directory, tokens, permit2, weth, factory, poolManager, address(0), address(0), address(0)
         );
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
     }

@@ -19,6 +19,7 @@
 - Preview output drifts from execution because quote and execution paths were edited independently.
 - Registry state makes a project use a different router than expected.
 - Metadata overrides force an output token or cash-out source that the caller did not intend.
+- A terminal-facing ERC-20 path reverts because the destination terminal did not actually receive the nominal amount. This now indicates a non-standard final-hop token path, not just a documentation caveat.
 
 ## Useful Proof Points
 

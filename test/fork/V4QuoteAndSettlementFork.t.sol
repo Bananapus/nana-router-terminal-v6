@@ -242,13 +242,13 @@ contract V4QuoteAndSettlementForkTest is Test {
         NoV3PoolFactory noV3Factory = new NoV3PoolFactory();
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
-            permissions: jbPermissions,
             tokens: jbTokens,
             permit2: PERMIT2,
-            owner: multisig,
             weth: WETH,
             factory: IUniswapV3Factory(address(noV3Factory)),
             poolManager: V4_POOL_MANAGER,
+            buybackHook: address(0),
+            univ4Hook: address(0),
             trustedForwarder: trustedForwarder
         });
 

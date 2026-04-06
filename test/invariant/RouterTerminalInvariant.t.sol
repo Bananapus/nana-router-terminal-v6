@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -510,13 +509,13 @@ contract RouterTerminalInvariant is Test {
         // Deploy the router terminal.
         router = new JBRouterTerminal(
             IJBDirectory(mockDirectory),
-            IJBPermissions(mockPermissions),
             IJBTokens(mockTokens),
             IPermit2(mockPermit2),
-            address(this), // owner
             IWETH9(address(weth)),
             IUniswapV3Factory(mockFactory),
             IPoolManager(mockPoolManager),
+            address(0),
+            address(0),
             address(0) // no trusted forwarder
         );
 

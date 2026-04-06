@@ -22,7 +22,6 @@ Admin privileges and their scope in nana-router-terminal-v6.
 
 - `lockTerminalFor` is irreversible.
 - The current default terminal cannot be disallowed; the registry owner must move the default first before removing the old implementation from the allowlist.
-- The router terminal owner currently has no operational powers, but ownership still matters for any future code that might inherit or extend the contract.
 
 ## Recovery Notes
 
@@ -43,15 +42,7 @@ Admin privileges and their scope in nana-router-terminal-v6.
 **Assigned via**: Ownership of the project's ERC-721 NFT (via `JBProjects.ownerOf(projectId)`), or delegation via `JBPermissions` with permission ID `SET_ROUTER_TERMINAL` (30).
 **Scope**: Per-project -- controls which router terminal a specific project uses, and can permanently lock that choice.
 
-### 3. Router Terminal Owner (Ownable)
-
-**Contract**: `JBRouterTerminal`
-**Assigned via**: Constructor parameter `owner`, transferable via `Ownable.transferOwnership()`.
-**Scope**: Currently unused. `JBRouterTerminal` inherits `Ownable` but does not gate any functions behind `onlyOwner`. The owner exists for potential future use or subclass extensions. The `Ownable.renounceOwnership()` and `Ownable.transferOwnership()` functions are inherited but have no practical effect on the terminal's operation.
-
-**Risk note:** While the owner has no current powers over the terminal's operation, the `Ownable` inheritance means a future code change or subclass could introduce `onlyOwner`-gated functions. If the terminal is deployed with a specific owner address, that address retains transfer rights indefinitely.
-
-### 4. Credit Cashout Payer (Implicit)
+### 3. Credit Cashout Payer (Implicit)
 
 **Contract**: `JBRouterTerminal`
 **Required permission**: `TRANSFER_CREDITS` (permission ID 13) -- must be granted by the payer to the router terminal address for the source project via `JBPermissions`.
@@ -81,13 +72,6 @@ When a payment is forwarded through the registry, the terminal is resolved as fo
 | `setTerminalFor(projectId, terminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (30) | Per-project | Routes a specific project to a specific allowed terminal. Reverts if the terminal is not allowlisted or if the project's terminal is locked. |
 | `lockTerminalFor(projectId, expectedTerminal)` | Project Owner or Delegate | `SET_ROUTER_TERMINAL` (30) | Per-project | Permanently locks the terminal choice for a project. If no explicit terminal is set, snapshots the current default into `_terminalOf[projectId]`. Reverts with `TerminalMismatch` if the resolved terminal differs from `expectedTerminal` (race condition protection). **Irreversible.** |
 
-### JBRouterTerminal
-
-| Function | Required Role | Permission ID | Scope | What It Does |
-|----------|--------------|---------------|-------|--------------|
-| `transferOwnership(newOwner)` | Owner | `onlyOwner` (inherited) | Global | Transfers contract ownership. No functions currently gated by ownership. |
-| `renounceOwnership()` | Owner | `onlyOwner` (inherited) | Global | Renounces contract ownership. No functions currently gated by ownership. |
-
 ### Implicit Permission Requirements (not `onlyOwner`, but enforced by external contracts)
 
 | Operation | Required By | Permission | What Happens |
@@ -103,15 +87,15 @@ The following values are set at deploy time and cannot be changed:
 
 | Property | Set At | Mutable? | Description |
 |----------|--------|----------|-------------|
-| `PERMISSIONS` | Constructor | No | JB permissions registry for permission checks |
 | `Trusted forwarder` | Constructor | No | ERC-2771 trusted forwarder for meta-transactions |
 | `DIRECTORY` | Constructor | No | JB directory for terminal/controller lookups |
-| `PROJECTS` | Constructor | No | JB project NFT registry |
 | `TOKENS` | Constructor | No | JB token manager for credit transfers and project token lookups |
 | `FACTORY` | Constructor | No | Uniswap V3 factory for pool discovery and callback verification |
 | `POOL_MANAGER` | Constructor | No | Uniswap V4 PoolManager (can be `address(0)` to disable V4) |
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 | `WETH` | Constructor | No | Wrapped ETH contract |
+| `BUYBACK_HOOK` | Constructor | No | Canonical buyback hook whose metadata this router understands |
+| `UNIV4_HOOK` | Constructor | No | Canonical Uniswap V4 hook address searched during hooked-pool discovery |
 | `DEFAULT_TWAP_WINDOW` | Compile-time constant | No | 10 minutes (600 seconds) |
 | `SLIPPAGE_DENOMINATOR` | Compile-time constant | No | 10,000 (basis points) |
 | `_FEE_TIERS` | Storage (initialized) | No | `[3000, 500, 10000, 100]` -- V3 fee tiers |
@@ -147,7 +131,7 @@ What admins **cannot** do:
 - **Modify swap parameters, slippage, or routing logic.** These are controlled by the `JBRouterTerminal` contract, not the registry.
 - **Pause payments.** There is no pause mechanism.
 
-### Router Terminal Owner Cannot:
+### Router Terminal Maintainers Cannot:
 - **Modify swap slippage parameters.** The TWAP window, sigmoid constants, fee tiers, and max slippage are all immutable.
 - **Redirect funds.** The terminal is stateless between transactions and routes payments to whichever terminal the JB directory specifies.
 - **Change the Uniswap factory or PoolManager.** These are immutable constructor parameters.

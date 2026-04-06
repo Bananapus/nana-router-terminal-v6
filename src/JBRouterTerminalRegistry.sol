@@ -23,9 +23,11 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
-import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
+import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 
+/// @notice Lets projects pick, lock, and forward through a router terminal or a shared default router terminal.
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
@@ -36,6 +38,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     error JBRouterTerminalRegistry_AmountOverflow();
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
+    error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
@@ -61,20 +64,20 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice The default terminal to use.
     IJBTerminal public override defaultTerminal;
 
-    /// @notice Whether the terminal for the given project is locked.
-    /// @custom:param projectId The ID of the project to get the locked terminal for.
+    /// @notice Whether the terminal for a given project has been locked against future updates.
+    /// @custom:param projectId The ID of the project whose lock state is being tracked.
     mapping(uint256 projectId => bool) public override hasLockedTerminal;
 
-    /// @notice Whether the given terminal is allowed to be set for projects.
-    /// @custom:param terminal The terminal to check.
+    /// @notice Whether a terminal is allowlisted for project-level selection.
+    /// @custom:param terminal The terminal whose allowlist status is being tracked.
     mapping(IJBTerminal terminal => bool) public override isTerminalAllowed;
 
     //*********************************************************************//
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
 
-    /// @notice The terminal explicitly set for the given project.
-    /// @custom:param projectId The ID of the project to get the terminal for.
+    /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
+    /// @custom:param projectId The ID of the project whose explicit terminal assignment is being tracked.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
     //*********************************************************************//
@@ -88,6 +91,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ---------------------------- constructor -------------------------- //
     //*********************************************************************//
 
+    /// @notice Construct a router-terminal registry.
     /// @param permissions The permissions contract.
     /// @param projects The project registry.
     /// @param permit2 The permit2 utility.
@@ -151,6 +155,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
+    /// @return currentSurplus Always returns 0 because the registry is only a forwarding layer.
     function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {}
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
@@ -198,17 +203,25 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param projectId The ID of the project to get the terminal for.
     /// @return terminal The terminal for the project.
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
-        terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        return _resolvedTerminalOf(projectId);
     }
 
     //*********************************************************************//
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
-    function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
-        return interfaceId == type(IJBRouterTerminalRegistry).interfaceId
-            || interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    /// @notice Whether the registry supports a given interface ID.
+    /// @param interfaceId The interface ID to check.
+    /// @return supported A flag indicating whether `interfaceId` is implemented.
+    function supportsInterface(bytes4 interfaceId) public pure override returns (bool supported) {
+        supported = interfaceId == type(IJBRouterTerminalRegistry).interfaceId
+            || interfaceId == type(IJBForwardingTerminal).interfaceId || interfaceId == type(IJBTerminal).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @inheritdoc IJBForwardingTerminal
+    function forwardingTerminalOf(uint256 projectId) external view returns (IJBTerminal terminal) {
+        return _resolvedTerminalOf(projectId);
     }
 
     //*********************************************************************//
@@ -232,11 +245,31 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return ERC2771Context._msgSender();
     }
 
+    /// @notice Resolve the effective terminal for a project, falling back to the default terminal when unset.
+    /// @param projectId The project whose terminal should be resolved.
+    /// @return terminal The project-specific terminal, or the default terminal if no override exists.
+    function _resolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        // Start from the project-specific override, if one was configured.
+        terminal = _terminalOf[projectId];
+
+        // Fall back to the default terminal when no project-specific terminal has been set.
+        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+    }
+
+    /// @notice Prevent the registry from forwarding straight back into its immediate caller.
+    /// @param terminal The terminal the registry is about to forward into.
+    function _enforceNoCircularForward(IJBTerminal terminal) internal view {
+        // Reject immediate caller cycles so router -> registry -> same router cannot recurse indefinitely.
+        if (msg.sender == address(terminal)) revert JBRouterTerminalRegistry_CircularForward(terminal);
+    }
+
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
 
     /// @notice Empty implementation to satisfy the interface.
+    /// @param projectId The ID of the project whose contexts would otherwise be updated.
+    /// @param accountingContexts Ignored because the registry delegates accounting contexts to the resolved terminal.
     function addAccountingContextsFor(
         uint256 projectId,
         JBAccountingContext[] calldata accountingContexts
@@ -245,7 +278,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
     {}
 
-    /// @notice Accepts funds for a given project and adds them to the project's balance in the resolved terminal.
+    /// @notice Accept funds for a project and add them to the balance of the resolved terminal.
     /// @param projectId The ID of the project for which funds are being accepted.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
@@ -265,9 +298,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         override
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Resolve the terminal that should receive this forwarded add-to-balance call.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -278,6 +310,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
+
+        // Reject forwards that would bounce straight back into this call's immediate caller.
+        _enforceNoCircularForward(terminal);
 
         // Forward to the resolved terminal.
         terminal.addToBalanceOf{value: payValue}({
@@ -297,8 +332,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev Only the owner can allow a terminal.
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external onlyOwner {
+        // Mark the terminal as selectable for future project-level configuration.
         isTerminalAllowed[terminal] = true;
 
+        // Emit the allowlist update for off-chain consumers and audit trails.
         emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
     }
 
@@ -312,8 +349,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             revert JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(terminal);
         }
 
+        // Remove the terminal from the allowlist so future projects cannot select it.
         isTerminalAllowed[terminal] = false;
 
+        // Emit the allowlist update for off-chain consumers and audit trails.
         emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
 
@@ -384,9 +423,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256 result)
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Resolve the terminal that should receive this forwarded payment.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -397,6 +435,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
+
+        // Reject forwards that would bounce straight back into this call's immediate caller.
+        _enforceNoCircularForward(terminal);
 
         // Forward the payment to the terminal.
         result = terminal.pay{value: payValue}({
@@ -454,7 +495,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice Accepts a token being paid in.
-    /// @dev Fee-on-transfer tokens are not supported. The returned amount assumes 1:1 transfer without fees.
+    /// @dev Measures the actual received balance so forwarded amounts stay in sync with lossy ERC-20 transfers.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
     /// @param metadata The metadata in which `permit2` context is provided.
@@ -497,13 +538,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             }
         }
 
-        // Fee-on-transfer tokens are not supported by design. The router uses balance-delta
-        // checks for its own accounting but relies on underlying terminal behavior for FoT tokens. Projects
-        // should avoid configuring FoT tokens.
+        // Measure the actual received balance so downstream forwarding uses what arrived, not the caller's nominal
+        // amount.
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
         // Transfer the tokens from the `_msgSender()` to this terminal.
         _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
 
-        return amount;
+        return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
     /// @notice Logic to be triggered before transferring tokens from this terminal.

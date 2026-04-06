@@ -16,6 +16,7 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
+import {IJBForwardingTerminal} from "../../src/interfaces/IJBForwardingTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 /// @notice Minimal ERC20 mock for balance-delta accounting in _acceptFundsFor.
@@ -82,13 +83,13 @@ contract CashOutLoopLimitTest is Test {
 
         routerTerminal = new JBRouterTerminal(
             directory,
-            permissions,
             tokens,
             permit2,
-            owner,
             weth,
             factory,
             IPoolManager(address(0)), // no V4
+            address(0),
+            address(0),
             address(0)
         );
 
@@ -193,6 +194,13 @@ contract CashOutLoopLimitTest is Test {
 
         // Mock dest terminal pay.
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(5)));
+        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
+        // non-router target.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, DEST_PROJECT_ID),
+            abi.encode(mockTerminal)
+        );
 
         // Mint and approve tokenA.
         tokenA.mint(payer, amount);
