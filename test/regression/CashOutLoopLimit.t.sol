@@ -199,6 +199,12 @@ contract CashOutLoopLimitTest is Test {
             abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
             abi.encode(true)
         );
+        // Mock forwardingTerminalOf so the circular-terminal check sees a non-router target.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, DEST_PROJECT_ID),
+            abi.encode(mockTerminal)
+        );
 
         // Mint and approve tokenA.
         tokenA.mint(payer, amount);

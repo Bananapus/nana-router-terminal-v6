@@ -664,6 +664,21 @@ contract JBRouterTerminal is
         return fallback_;
     }
 
+    /// @notice Resolve the holder whose credits should be debited for a credit cashout.
+    /// @dev Registry-style forwarders record the original payer in transient storage. When present, that payer owns
+    /// the credits being cashed out; otherwise fall back to the direct caller.
+    /// @param fallback_ The default holder to use when no original payer is available.
+    /// @return The holder whose credits should be transferred into the router.
+    function _resolveCreditHolderWithFallback(address fallback_) internal view returns (address) {
+        // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
+        if (msg.sender.code.length > 0) {
+            try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
+                if (payer != address(0)) return payer;
+            } catch {}
+        }
+        return fallback_;
+    }
+
     /// @notice Route a payment using the destination token that yields the highest previewed beneficiary output.
     /// @param destProjectId The project receiving the routed payment.
     /// @param tokenIn The token currently held by the router for this payment.
@@ -953,9 +968,9 @@ contract JBRouterTerminal is
 
             (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-            // Credit transfers must be attributed to the direct caller.
-            // Intermediary-supplied payer metadata is not trusted for credit ownership.
-            address holder = _msgSender();
+            // Registry-style forwarders preserve the original payer in transient storage so credit transfers debit
+            // the actual holder rather than the intermediary.
+            address holder = _resolveCreditHolderWithFallback(_msgSender());
 
             // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
             IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));

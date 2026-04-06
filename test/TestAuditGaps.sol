@@ -251,6 +251,12 @@ contract TestAuditGaps is Test {
             abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
             abi.encode(true)
         );
+        // Mock forwardingTerminalOf so the circular-terminal check sees a non-router target.
+        vm.mockCall(
+            destTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encode(destTerminal)
+        );
         vm.mockCall(
             destTerminal,
             abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
@@ -332,6 +338,11 @@ contract TestAuditGaps is Test {
         // Project accepts tokenIn directly.
         vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.primaryTerminalOf, (1, tokenIn)), abi.encode(dest));
 
+        // Mock terminalsOf so _routeForPay finds the project's terminals.
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(dest);
+        vm.mockCall(address(dir), abi.encodeCall(IJBDirectory.terminalsOf, (1)), abi.encode(terminals));
+
         JBAccountingContext[] memory ctx = new JBAccountingContext[](1);
         ctx[0] =
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -347,6 +358,33 @@ contract TestAuditGaps is Test {
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
         vm.mockCall(
             dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector), abi.encode(true)
+        );
+        // Mock forwardingTerminalOf so the circular-terminal check sees a non-router target.
+        vm.mockCall(
+            dest,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, uint256(1)),
+            abi.encode(dest)
+        );
+        // Mock previewPayFor for route scoring.
+        vm.mockCall(
+            dest,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
         );
 
         // Expect that pay is called with the reduced amount (4900).

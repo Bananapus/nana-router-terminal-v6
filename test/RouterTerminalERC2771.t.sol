@@ -5,10 +5,13 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
@@ -178,6 +181,41 @@ contract RouterTerminalERC2771Test is Test {
             abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
             abi.encode(true)
         );
+        // Mock forwardingTerminalOf so the circular-terminal check sees a non-router target.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encode(mockTerminal)
+        );
+
+        // Mock terminalsOf so the _routeForPay path finds the project's terminals.
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(mockTerminal);
+        vm.mockCall(
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
+        );
+
+        // Mock previewPayFor on dest terminal for route scoring.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
+        );
 
         // Mint tokens to the REAL caller and have them approve the router.
         token.mint(realCaller, amount);
@@ -239,6 +277,41 @@ contract RouterTerminalERC2771Test is Test {
             mockTerminal,
             abi.encodeWithSelector(IJBForwardingTerminal.forwardsTerminalPayments.selector),
             abi.encode(true)
+        );
+        // Mock forwardingTerminalOf so the circular-terminal check sees a non-router target.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encode(mockTerminal)
+        );
+
+        // Mock terminalsOf so the _routeForPay path finds the project's terminals.
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(mockTerminal);
+        vm.mockCall(
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
+        );
+
+        // Mock previewPayFor on dest terminal for route scoring.
+        vm.mockCall(
+            mockTerminal,
+            abi.encodeWithSelector(IJBTerminal.previewPayFor.selector),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 1,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(1),
+                uint256(0),
+                new JBPayHookSpecification[](0)
+            )
         );
 
         // Mint tokens to the direct caller and have them approve the router.

@@ -173,6 +173,8 @@ contract DeployScript is Script, Sphinx {
         });
 
         // Deploy the router terminal using the resolved network-specific Uniswap and buyback-hook addresses.
+        require(address(buyback.hook) != address(0), "RouterTerminal: missing buyback hook");
+        require(address(univ4Router.hook) != address(0), "RouterTerminal: missing v4 hook");
         JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
             directory: core.directory,
             tokens: core.tokens,
