@@ -40,9 +40,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
     error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
-    error JBRouterTerminalRegistry_NonStandardTerminalToken(
-        address token, IJBTerminal terminal, uint256 amountReceived, uint256 amountExpected
-    );
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
     error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
@@ -223,11 +220,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @inheritdoc IJBForwardingTerminal
-    function forwardsTerminalPayments() external pure returns (bool isForwarding) {
-        return true;
-    }
-
-    /// @inheritdoc IJBForwardingTerminal
     function forwardingTerminalOf(uint256 projectId) external view returns (IJBTerminal terminal) {
         return _resolvedTerminalOf(projectId);
     }
@@ -262,50 +254,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Fall back to the default terminal when no project-specific terminal has been set.
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
-    }
-
-    /// @notice Snapshot a downstream terminal's ERC-20 balance when receipt enforcement applies.
-    /// @param terminal The terminal that is about to receive forwarded funds.
-    /// @param token The token that will be forwarded.
-    /// @return balanceBefore The terminal's pre-forward ERC-20 balance, or 0 when receipt enforcement is skipped.
-    function _terminalBalanceBefore(IJBTerminal terminal, address token) internal view returns (uint256 balanceBefore) {
-        // Skip ERC-20 receipt snapshots for native-token forwards.
-        if (token == JBConstants.NATIVE_TOKEN) return 0;
-
-        // Skip ERC-20 receipt snapshots for forwarding terminals that may immediately forward again.
-        if (_isForwardingTerminal(terminal)) return 0;
-
-        // Snapshot the terminal's ERC-20 balance so the post-forward delta can be checked precisely.
-        return IERC20(token).balanceOf(address(terminal));
-    }
-
-    /// @notice Enforce that a downstream terminal received the exact nominal ERC-20 amount it was forwarded.
-    /// @param terminal The terminal that just received funds.
-    /// @param token The token that was forwarded.
-    /// @param amount The nominal amount the registry forwarded.
-    /// @param balanceBefore The terminal's ERC-20 balance before the forward.
-    function _enforceStandardTerminalReceipt(
-        IJBTerminal terminal,
-        address token,
-        uint256 amount,
-        uint256 balanceBefore
-    )
-        internal
-        view
-    {
-        // Skip receipt enforcement for native-token forwards because this check is ERC-20 specific.
-        if (token == JBConstants.NATIVE_TOKEN) return;
-
-        // Skip receipt enforcement for forwarding terminals because they enforce the final terminal-facing hop.
-        if (_isForwardingTerminal(terminal)) return;
-
-        // Measure the exact ERC-20 amount the terminal received during the forward.
-        uint256 amountReceived = IERC20(token).balanceOf(address(terminal)) - balanceBefore;
-
-        // Reject lossy terminal-facing ERC-20s when the received amount differs from the nominal forward.
-        if (amountReceived != amount) {
-            revert JBRouterTerminalRegistry_NonStandardTerminalToken(token, terminal, amountReceived, amount);
-        }
     }
 
     /// @notice Prevent the registry from forwarding straight back into its immediate caller.
@@ -356,9 +304,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
-        // Snapshot the terminal balance so lossy terminal-facing ERC-20 pulls can be detected after the forward.
-        uint256 terminalBalanceBefore = _terminalBalanceBefore({terminal: terminal, token: token});
-
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -377,11 +322,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             shouldReturnHeldFees: shouldReturnHeldFees,
             memo: memo,
             metadata: metadata
-        });
-
-        // Reject lossy terminal-facing ERC-20s when the terminal received less than the nominal forwarded amount.
-        _enforceStandardTerminalReceipt({
-            terminal: terminal, token: token, amount: amount, balanceBefore: terminalBalanceBefore
         });
 
         // Clear transient storage.
@@ -489,7 +429,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
-        uint256 terminalBalanceBefore = _terminalBalanceBefore({terminal: terminal, token: token});
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
@@ -509,10 +448,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             minReturnedTokens: minReturnedTokens,
             memo: memo,
             metadata: metadata
-        });
-
-        _enforceStandardTerminalReceipt({
-            terminal: terminal, token: token, amount: amount, balanceBefore: terminalBalanceBefore
         });
 
         // Clear transient storage.
@@ -626,17 +561,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
 
         return 0;
-    }
-
-    /// @notice Whether a terminal forwards terminal-facing calls onward instead of acting as the final receiver.
-    /// @param terminal The terminal being checked.
-    /// @return isForwarding A flag indicating whether `terminal` advertises forwarding-terminal behavior.
-    function _isForwardingTerminal(IJBTerminal terminal) internal view returns (bool isForwarding) {
-        try IJBForwardingTerminal(address(terminal)).forwardsTerminalPayments() returns (bool forwardsPayments) {
-            return forwardsPayments;
-        } catch {
-            return false;
-        }
     }
 
     /// @notice Transfers tokens.

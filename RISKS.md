@@ -41,7 +41,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 ## 3. Access Control
 
 - **No access control on `pay` / `addToBalanceOf`.** Anyone can route payments. This is by design but means the contract processes arbitrary token types and amounts.
-- **Lossy terminal-facing ERC-20s unsupported.** Ingress into the router or registry is balance-delta reconciled, and the final forwarded ERC-20 hop is now enforced on both surfaces by checking that the destination terminal actually received the full nominal ERC-20 amount. Fee-on-transfer or otherwise lossy terminal-facing ERC-20 pulls revert.
+- **Lossy terminal-facing ERC-20s unsupported on the router.** Ingress into the router is balance-delta reconciled, and the router's final forwarded ERC-20 hop is enforced by checking that the destination terminal actually received the full nominal ERC-20 amount. Fee-on-transfer or otherwise lossy terminal-facing ERC-20 pulls revert on the router. The registry does not perform receipt enforcement because it always forwards to the router terminal, which never retains tokens.
 - **Credit cashout path.** `_acceptFundsFor` processes `cashOutSource` metadata to transfer credits from `_msgSender()`. Requires `TRANSFER_CREDITS` permission. If a user has this permission set broadly, any caller through the trusted forwarder could drain their credits.
 - **Registry owner.** Controls which terminals are allowlisted and sets the global default. Disallowing the current default terminal now reverts with `CannotDisallowDefaultTerminal` instead of silently clearing it. Per-project terminal settings already set to a disallowed terminal are NOT cleared.
 - **Registry terminal selection can permanently snapshot a bad terminal.** `lockTerminalFor` is intentionally a one-way commitment to the project's currently resolved terminal. If governance or a project owner selects a terminal that later proves unusable, hostile, or simply misconfigured, locking that choice can permanently brick registry-mediated routing for that project until governance and deployment topology change around it. This is not unique to the registry itself pointing at itself; it is true for any bad terminal choice, so terminal selection and locking should be treated as a high-trust operational action.
@@ -59,7 +59,7 @@ This file focuses on the routing, accounting-context, and liquidity-selection ri
 - **Cashout loop limit.** Circular or deep token dependency chains hit `_MAX_CASHOUT_ITERATIONS = 20` and revert.
 - **Pool with zero liquidity.** Pools with zero in-range liquidity cause reverts.
 - **External terminal reverts.** The final `destTerminal.pay()` or `destTerminal.addToBalanceOf()` call is not wrapped in try-catch. A reverting destination terminal blocks the entire payment.
-- **Non-standard final ERC-20 transfer behavior.** Terminal-facing ERC-20 hops are enforced to settle exactly on both the router and registry paths. Tokens that burn, tax, or otherwise reduce the amount actually received by the destination terminal will revert on the final forwarded hop.
+- **Non-standard final ERC-20 transfer behavior.** Terminal-facing ERC-20 hops are enforced to settle exactly on the router path. Tokens that burn, tax, or otherwise reduce the amount actually received by the destination terminal will revert on the final forwarded hop. The registry does not independently enforce receipt checks; it relies on the router to reject lossy transfers.
 
 ## 5. Integration Risks
 

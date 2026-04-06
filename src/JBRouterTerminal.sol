@@ -39,10 +39,10 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
+import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
-import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
@@ -249,7 +249,8 @@ contract JBRouterTerminal is
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
         // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
-        uint256 terminalReceiptBaseline = _terminalReceiptBaselineOf({terminal: destTerminal, token: token});
+        uint256 terminalReceiptBaseline =
+            _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
 
         // Forward the fully routed funds into the destination terminal's add-to-balance flow.
         destTerminal.addToBalanceOf{value: payValue}({
@@ -263,7 +264,11 @@ contract JBRouterTerminal is
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
-            terminal: destTerminal, token: token, expectedAmount: amount, receiptBaseline: terminalReceiptBaseline
+            terminal: destTerminal,
+            token: token,
+            expectedAmount: amount,
+            receiptBaseline: terminalReceiptBaseline,
+            projectId: projectId
         });
     }
 
@@ -316,7 +321,8 @@ contract JBRouterTerminal is
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
         // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
-        uint256 terminalReceiptBaseline = _terminalReceiptBaselineOf({terminal: destTerminal, token: token});
+        uint256 terminalReceiptBaseline =
+            _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
 
         // Execute the final payment on the destination terminal and bubble back the beneficiary token count it
         // returned.
@@ -332,7 +338,11 @@ contract JBRouterTerminal is
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
-            terminal: destTerminal, token: token, expectedAmount: amount, receiptBaseline: terminalReceiptBaseline
+            terminal: destTerminal,
+            token: token,
+            expectedAmount: amount,
+            receiptBaseline: terminalReceiptBaseline,
+            projectId: projectId
         });
     }
 
@@ -455,12 +465,6 @@ contract JBRouterTerminal is
     /// @return contexts An empty array of `JBAccountingContext`.
     function accountingContextsOf(uint256) external pure override returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](0);
-    }
-
-    /// @notice This terminal forwards terminal-facing calls onward instead of acting as the final accounting sink.
-    /// @return isForwarding Always true for the router.
-    function forwardsTerminalPayments() external pure returns (bool isForwarding) {
-        return true;
     }
 
     /// @notice This terminal holds no surplus. Always returns 0.
@@ -855,10 +859,12 @@ contract JBRouterTerminal is
     /// @notice Snapshot a destination terminal's pre-call token balance for final-hop receipt enforcement.
     /// @param terminal The destination terminal that will receive the final forwarded funds.
     /// @param token The token the terminal is expected to receive.
+    /// @param projectId The project whose forwarding status should be checked.
     /// @return receiptBaseline The terminal's balance in `token` before the final forwarded call.
     function _terminalReceiptBaselineOf(
         IJBTerminal terminal,
-        address token
+        address token,
+        uint256 projectId
     )
         internal
         view
@@ -868,7 +874,7 @@ contract JBRouterTerminal is
         if (token == JBConstants.NATIVE_TOKEN) return 0;
 
         // Skip receipt enforcement for forwarding terminals because they enforce the terminal-facing hop themselves.
-        if (_isForwardingTerminal(terminal)) return 0;
+        if (_isForwardingTerminal(terminal, projectId)) return 0;
 
         // Snapshot the terminal's ERC20 balance so final-hop receipt can be verified after the terminal pulls.
         return IERC20(token).balanceOf(address(terminal));
@@ -879,11 +885,13 @@ contract JBRouterTerminal is
     /// @param token The token the terminal was expected to pull.
     /// @param expectedAmount The nominal amount forwarded into the terminal call.
     /// @param receiptBaseline The terminal's pre-call balance in `token`.
+    /// @param projectId The project whose forwarding status should be checked.
     function _enforceStandardTerminalReceipt(
         IJBTerminal terminal,
         address token,
         uint256 expectedAmount,
-        uint256 receiptBaseline
+        uint256 receiptBaseline,
+        uint256 projectId
     )
         internal
         view
@@ -892,7 +900,7 @@ contract JBRouterTerminal is
         if (token == JBConstants.NATIVE_TOKEN) return;
 
         // Forwarding terminals are responsible for enforcing the final terminal-facing ERC20 receipt themselves.
-        if (_isForwardingTerminal(terminal)) return;
+        if (_isForwardingTerminal(terminal, projectId)) return;
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
         if (IERC20(token).balanceOf(address(terminal)) - receiptBaseline != expectedAmount) {
@@ -902,16 +910,17 @@ contract JBRouterTerminal is
 
     /// @notice Whether a terminal forwards terminal-facing calls onward instead of acting as the final receiver.
     /// @param terminal The terminal being checked for forwarding behavior.
+    /// @param projectId The project whose forwarding target should be resolved.
     /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
-    function _isForwardingTerminal(IJBTerminal terminal) internal view returns (bool isForwarding) {
-        // Probe the generic forwarding capability via staticcall so non-forwarding terminals degrade cleanly.
+    function _isForwardingTerminal(IJBTerminal terminal, uint256 projectId) internal view returns (bool isForwarding) {
+        // Probe via staticcall so non-forwarding terminals degrade cleanly.
         (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardsTerminalPayments, ()));
+            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardingTerminalOf, (projectId)));
 
-        // Treat terminals that do not implement the capability as final receivers.
+        // Treat terminals that do not implement the capability or return zero as final receivers.
         if (!success || data.length < 32) return false;
 
-        return abi.decode(data, (bool));
+        return address(abi.decode(data, (IJBTerminal))) != address(0);
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.

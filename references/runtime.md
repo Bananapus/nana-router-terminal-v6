@@ -22,7 +22,7 @@
 - Callback validation: V3 and V4 callback guards are security-critical and should not drift.
 - Leftover/refund handling: refunds can route to the original payer or fallback recipient depending on context.
 - Dynamic accounting contexts: this repo intentionally synthesizes accounting contexts instead of storing a static token list.
-- Final terminal-facing ERC-20 receipt enforcement: router and registry now reject lossy terminal pulls, so terminal mocks and integrations must behave like standard pull-based ERC-20 receivers.
+- Final terminal-facing ERC-20 receipt enforcement: the router rejects lossy terminal pulls, so terminal mocks and integrations must behave like standard pull-based ERC-20 receivers. The registry does not independently enforce receipts; it relies on the router.
 
 ## Tests To Trust First
 

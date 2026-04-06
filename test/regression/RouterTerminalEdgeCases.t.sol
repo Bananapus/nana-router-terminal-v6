@@ -173,10 +173,6 @@ contract MockDestTerminal is IJBTerminal {
         return amount;
     }
 
-    function forwardsTerminalPayments() external pure returns (bool) {
-        return false;
-    }
-
     function previewPayFor(
         uint256,
         address, /* token — unused in mock, required by IJBTerminal interface */

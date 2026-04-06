@@ -10,9 +10,9 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
+import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
-import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 
 /// @notice Resolves the best pay route preview for `JBRouterTerminal`.
 contract JBPayRouteResolver is IJBPayRouteResolver {
@@ -477,19 +477,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Treat direct self-routes as circular immediately.
         if (address(terminal) == address(router)) return true;
 
-        // Probe the generic forwarding capability via staticcall so plain terminals degrade cleanly.
-        (bool supportsForwardingProbe, bytes memory forwardingProbeData) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardsTerminalPayments, ()));
-        if (!supportsForwardingProbe || forwardingProbeData.length < 32) return false;
-        if (!abi.decode(forwardingProbeData, (bool))) return false;
-
-        // Reject forwarding terminals that would immediately bounce the preview back into the router.
-        (bool supportsTargetProbe, bytes memory targetProbeData) =
+        // Probe via staticcall so plain terminals degrade cleanly.
+        (bool success, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardingTerminalOf, (projectId)));
-        if (!supportsTargetProbe || targetProbeData.length < 32) return true;
 
-        IJBTerminal forwardingTerminal = abi.decode(targetProbeData, (IJBTerminal));
-        return address(forwardingTerminal) == address(router);
+        // Non-forwarding terminals (call fails or returns zero) are not circular.
+        if (!success || data.length < 32) return false;
+        IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
+        if (address(forwardingTarget) == address(0)) return false;
+
+        // Forwarding terminals that route back into the router are circular.
+        return address(forwardingTarget) == address(router);
     }
 
     /// @notice Resolve the usable primary terminal for a discovered candidate token.
