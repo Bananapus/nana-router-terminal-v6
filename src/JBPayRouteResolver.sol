@@ -121,9 +121,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             if (specification.noop || address(specification.hook) != buybackHook) continue;
 
             // Decode only the minimum token-count commitments needed to score the buyback-enhanced preview.
-            (,,,,,,,, uint256 minimumBeneficiaryTokenCount, uint256 minimumReservedTokenCount,) = abi.decode(
+            (,,,,,,,,, uint256 minimumBeneficiaryTokenCount, uint256 minimumReservedTokenCount,) = abi.decode(
                 specification.metadata,
-                (bool, uint256, uint256, address, uint256, int24, uint128, bytes32, uint256, uint256, uint256)
+                (bool, uint256, uint256, bool, address, uint256, int24, uint128, bytes32, uint256, uint256, uint256)
             );
 
             // Keep whichever decoded hook commitment implies the stronger user-visible preview outcome.
