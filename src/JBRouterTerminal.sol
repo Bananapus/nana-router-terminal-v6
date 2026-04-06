@@ -241,7 +241,7 @@ contract JBRouterTerminal is
             tokenIn: token,
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             metadata: metadata,
-            refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
+            refundTo: payable(_resolveOriginalPayer(_msgSender()))
         });
 
         // Prepare the final transfer into the destination terminal, using `msg.value` only when the final token is
@@ -313,7 +313,7 @@ contract JBRouterTerminal is
             amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
             beneficiary: beneficiary,
             metadata: metadata,
-            refundTo: _resolveRefundWithBackupRecipient(payable(_msgSender()))
+            refundTo: payable(_resolveOriginalPayer(_msgSender()))
         });
 
         // Prepare the final transfer into the destination terminal, using `msg.value` only when the final token is
@@ -651,29 +651,12 @@ contract JBRouterTerminal is
     // ------------------------- internal helpers ------------------------ //
     //*********************************************************************//
 
-    /// @notice Resolve the refund target for partial-fill leftovers.
-    /// @dev When called via an intermediary that implements `IJBPayerTracker` (e.g. `JBRouterTerminalRegistry`),
-    /// the intermediary stores the original payer in transient storage. This function reads it so that refunds
-    /// go to the true payer rather than the intermediary.
-    /// @param fallback_ The default refund address to use when no original payer is available.
-    /// @return The address to refund partial-fill leftovers to.
-    function _resolveRefundWithBackupRecipient(address payable fallback_) internal view returns (address payable) {
-        // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
-        if (msg.sender.code.length > 0) {
-            // Check if the caller implements IJBPayerTracker and has an original payer set.
-            try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
-                if (payer != address(0)) return payable(payer);
-            } catch {}
-        }
-        return fallback_;
-    }
-
-    /// @notice Resolve the holder whose credits should be debited for a credit cashout.
-    /// @dev Registry-style forwarders record the original payer in transient storage. When present, that payer owns
-    /// the credits being cashed out; otherwise fall back to the direct caller.
-    /// @param fallback_ The default holder to use when no original payer is available.
-    /// @return The holder whose credits should be transferred into the router.
-    function _resolveCreditHolderWithFallback(address fallback_) internal view returns (address) {
+    /// @notice Resolve the original payer when called through an intermediary.
+    /// @dev Registry-style forwarders record the original payer in transient storage via `IJBPayerTracker`. When
+    /// present, that address is used for refunds and credit cashouts instead of the intermediary.
+    /// @param fallback_ The default address to use when no original payer is available.
+    /// @return The original payer, or `fallback_` if none is available.
+    function _resolveOriginalPayer(address fallback_) internal view returns (address) {
         // Only attempt the call if msg.sender is a contract (EOAs have no code and would revert).
         if (msg.sender.code.length > 0) {
             try IJBPayerTracker(msg.sender).originalPayer() returns (address payer) {
@@ -979,7 +962,7 @@ contract JBRouterTerminal is
 
             // Registry-style forwarders preserve the original payer in transient storage so credit transfers debit
             // the actual holder rather than the intermediary.
-            address holder = _resolveCreditHolderWithFallback(_msgSender());
+            address holder = _resolveOriginalPayer(_msgSender());
 
             // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
             IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));

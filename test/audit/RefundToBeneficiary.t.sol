@@ -66,7 +66,7 @@ contract HarnessRouterTerminal is JBRouterTerminal {
     {}
 
     function simulatePayLeftoverRefund(address token, address beneficiary, uint256 leftover) external {
-        address payable refundTo = _resolveRefundWithBackupRecipient(payable(beneficiary));
+        address payable refundTo = payable(_resolveOriginalPayer(beneficiary));
         _transferFrom({from: address(this), to: refundTo, token: token, amount: leftover});
     }
 }

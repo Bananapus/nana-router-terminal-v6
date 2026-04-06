@@ -37,9 +37,9 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         )
     {}
 
-    /// @notice Public wrapper so tests can call `_resolveRefundWithBackupRecipient` directly.
+    /// @notice Public wrapper so tests can call `_resolveOriginalPayer` directly.
     function resolveRefundTo(address payable fallback_) external view returns (address payable) {
-        return _resolveRefundWithBackupRecipient(fallback_);
+        return payable(_resolveOriginalPayer(fallback_));
     }
 }
 
