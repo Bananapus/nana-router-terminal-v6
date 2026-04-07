@@ -13,6 +13,7 @@ import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
+import {IWETH9} from "./interfaces/IWETH9.sol";
 
 /// @notice Resolves the best pay route preview for `JBRouterTerminal`.
 contract JBPayRouteResolver is IJBPayRouteResolver {
@@ -21,6 +22,27 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     //*********************************************************************//
 
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
+
+    //*********************************************************************//
+    // --------------- public immutable stored properties --------------- //
+    //*********************************************************************//
+
+    /// @notice The directory storing project terminal relationships, cached from the router at construction time.
+    IJBDirectory public immutable DIRECTORY;
+
+    /// @notice The wrapped native token, cached from the router at construction time.
+    IWETH9 public immutable WETH;
+
+    //*********************************************************************//
+    // -------------------------- constructor ---------------------------- //
+    //*********************************************************************//
+
+    /// @param directory The directory storing project terminal relationships.
+    /// @param weth The wrapped native token used for router token normalization.
+    constructor(IJBDirectory directory, IWETH9 weth) {
+        DIRECTORY = directory;
+        WETH = weth;
+    }
 
     //*********************************************************************//
     // ----------------------- internal helpers -------------------------- //
@@ -364,7 +386,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
 
         // Return early when the routed token already matches the desired destination token.
-        if (_hasSameRoutingAsset({router: router, tokenA: routedTokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({tokenA: routedTokenIn, tokenB: tokenOut})) {
             return (tokenOut, routedAmountIn);
         }
 
@@ -415,7 +437,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             _resolveTokenOut({router: router, projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
 
         // Return the current amount unchanged when no swap is needed after token resolution.
-        if (_hasSameRoutingAsset({router: router, tokenA: tokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({tokenA: tokenIn, tokenB: tokenOut})) {
             return (destTerminal, tokenOut, amount);
         }
 
@@ -455,39 +477,22 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
-    /// @param router The router whose wrapped-native token configuration should be respected.
     /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
-    function _normalizedTokenOf(
-        IJBPayRoutePreviewer router,
-        address token
-    )
-        internal
-        view
-        returns (address normalizedToken)
-    {
-        return token == JBConstants.NATIVE_TOKEN ? address(router.WETH()) : token;
+    function _normalizedTokenOf(address token) internal view returns (address normalizedToken) {
+        return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
     }
 
     /// @notice Check whether two tokens share the same routing representation for the router.
-    /// @param router The router whose normalization rules should be used.
     /// @param tokenA The first token to compare.
     /// @param tokenB The second token to compare.
     /// @return hasSameAsset A flag indicating whether the router would treat both tokens as the same asset.
-    function _hasSameRoutingAsset(
-        IJBPayRoutePreviewer router,
-        address tokenA,
-        address tokenB
-    )
-        internal
-        view
-        returns (bool hasSameAsset)
-    {
+    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
         // Treat exact-token matches as the same routing asset without extra normalization work.
         if (tokenA == tokenB) return true;
 
         // Otherwise compare normalized representations so ETH and WETH share one routing identity.
-        return _normalizedTokenOf(router, tokenA) == _normalizedTokenOf(router, tokenB);
+        return _normalizedTokenOf(tokenA) == _normalizedTokenOf(tokenB);
     }
 
     /// @notice Whether previewing through a terminal would immediately cycle back into the router.
@@ -559,7 +564,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal terminal)
     {
         return _usablePrimaryTerminalForCandidate({
-            router: router, directory: router.DIRECTORY(), projectId: projectId, candidateToken: token
+            router: router, directory: DIRECTORY, projectId: projectId, candidateToken: token
         });
     }
 
@@ -580,11 +585,11 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        // Cache the directory once so fallback candidates can be resolved back to their primary terminals.
-        IJBDirectory directory = router.DIRECTORY();
+        // Use the constructor-cached directory so fallback candidates can be resolved back to their primary terminals.
+        IJBDirectory directory = DIRECTORY;
 
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
-        address normalizedTokenIn = _normalizedTokenOf(router, tokenIn);
+        address normalizedTokenIn = _normalizedTokenOf(tokenIn);
 
         // Read the destination project's currently known terminals directly from the directory.
         IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
@@ -604,7 +609,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address candidateToken = contexts[j].token;
 
                 // Normalize the candidate so native-vs-WETH comparisons behave the same as the router.
-                address normalizedCandidate = _normalizedTokenOf(router, candidateToken);
+                address normalizedCandidate = _normalizedTokenOf(candidateToken);
 
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
                 if (normalizedCandidate == normalizedTokenIn) {
@@ -667,8 +672,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        // Cache the directory once since every resolution branch reads from it.
-        IJBDirectory directory = router.DIRECTORY();
+        // Use the constructor-cached directory since every resolution branch reads from it.
+        IJBDirectory directory = DIRECTORY;
 
         // Respect explicit token-out overrides before any direct-acceptance or discovery logic runs.
         (bool exists, bytes memory routeData) = _getDataFor({router: router, metadata: metadata, key: "routeTokenOut"});
@@ -700,8 +705,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Then try the native-token and wrapped-native-token equivalent form before falling back to pool discovery.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(router.WETH())) {
-            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(router.WETH()) : JBConstants.NATIVE_TOKEN;
+        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WETH)) {
+            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : JBConstants.NATIVE_TOKEN;
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) != address(0)
@@ -809,8 +814,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Cache a self-interface once because candidate isolation requires an external call that can be caught.
         IJBPayRouteResolver self = IJBPayRouteResolver(address(this));
 
-        // Cache the directory once because every route-selection branch uses it.
-        IJBDirectory directory = router.DIRECTORY();
+        // Use the constructor-cached directory because every route-selection branch uses it.
+        IJBDirectory directory = DIRECTORY;
 
         // Respect explicit route-token overrides before scanning candidate tokens.
         (bool routeOverrideExists, bytes memory routeData) =

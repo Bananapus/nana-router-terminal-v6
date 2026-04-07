@@ -197,7 +197,7 @@ contract JBRouterTerminal is
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
         UNIV4_HOOK = univ4Hook;
-        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver()));
+        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver(directory, weth)));
 
         // Pre-compute metadata IDs to avoid hashing string literals on every call.
         _CASH_OUT_SOURCE_ID = JBMetadataResolver.getId("cashOutSource");

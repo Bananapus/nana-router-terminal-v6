@@ -158,7 +158,7 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             univ4Hook: address(0),
             trustedForwarder: address(0)
         });
-        resolver = new JBPayRouteResolver();
+        resolver = new JBPayRouteResolver(directory, weth);
 
         token = new AuditMismatchToken();
         inputToken = new AuditMismatchToken();
