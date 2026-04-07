@@ -146,20 +146,21 @@ contract JBRouterTerminal is
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
 
+    /// @notice Pre-computed metadata ID for "cashOutSource".
+    bytes4 internal immutable _CASH_OUT_SOURCE_ID;
+
+    /// @notice Pre-computed metadata ID for "permit2".
+    bytes4 internal immutable _PERMIT2_ID;
+
+    /// @notice Pre-computed metadata ID for "cashOutMinReclaimed".
+    bytes4 internal immutable _CASH_OUT_MIN_RECLAIMED_ID;
+
+    /// @notice Pre-computed metadata ID for "quoteForSwap".
+    bytes4 internal immutable _QUOTE_FOR_SWAP_ID;
+
     //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
     //*********************************************************************//
-
-    /// @notice The fee tiers to search when auto-discovering V3 pools, ordered by commonality.
-    /// 3000 = 0.3%, 500 = 0.05%, 10000 = 1%, 100 = 0.01%.
-    // forge-lint: disable-next-line(mixed-case-variable)
-    uint24[4] internal _FEE_TIERS = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-
-    /// @notice The fee/tickSpacing pairings to search for V4 vanilla pools.
-    // forge-lint: disable-next-line(mixed-case-variable)
-    uint24[4] internal _V4_FEES = [uint24(3000), uint24(500), uint24(10_000), uint24(100)];
-    // forge-lint: disable-next-line(mixed-case-variable)
-    int24[4] internal _V4_TICK_SPACINGS = [int24(60), int24(10), int24(200), int24(1)];
 
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
@@ -197,6 +198,12 @@ contract JBRouterTerminal is
         BUYBACK_HOOK = buybackHook;
         UNIV4_HOOK = univ4Hook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver()));
+
+        // Pre-compute metadata IDs to avoid hashing string literals on every call.
+        _CASH_OUT_SOURCE_ID = JBMetadataResolver.getId("cashOutSource");
+        _PERMIT2_ID = JBMetadataResolver.getId("permit2");
+        _CASH_OUT_MIN_RECLAIMED_ID = JBMetadataResolver.getId("cashOutMinReclaimed");
+        _QUOTE_FOR_SWAP_ID = JBMetadataResolver.getId("quoteForSwap");
     }
 
     //*********************************************************************//
@@ -248,8 +255,9 @@ contract JBRouterTerminal is
         // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
-        // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
-        uint256 terminalReceiptBaseline =
+        // Snapshot the destination terminal's ERC20 balance and forwarding status for receipt enforcement.
+        // Combines both checks into one call to avoid duplicate _isForwardingTerminal probes.
+        (uint256 terminalReceiptBaseline, bool isForwarding) =
             _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
 
         // Forward the fully routed funds into the destination terminal's add-to-balance flow.
@@ -268,7 +276,7 @@ contract JBRouterTerminal is
             token: token,
             expectedAmount: amount,
             receiptBaseline: terminalReceiptBaseline,
-            projectId: projectId
+            isForwarding: isForwarding
         });
     }
 
@@ -320,8 +328,9 @@ contract JBRouterTerminal is
         // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
-        // Snapshot the destination terminal's ERC20 balance so lossy terminal pulls can be rejected after the call.
-        uint256 terminalReceiptBaseline =
+        // Snapshot the destination terminal's ERC20 balance and forwarding status for receipt enforcement.
+        // Combines both checks into one call to avoid duplicate _isForwardingTerminal probes.
+        (uint256 terminalReceiptBaseline, bool isForwarding) =
             _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
 
         // Execute the final payment on the destination terminal and bubble back the beneficiary token count it
@@ -342,7 +351,7 @@ contract JBRouterTerminal is
             token: token,
             expectedAmount: amount,
             receiptBaseline: terminalReceiptBaseline,
-            projectId: projectId
+            isForwarding: isForwarding
         });
     }
 
@@ -732,12 +741,17 @@ contract JBRouterTerminal is
         // Start from the raw reclaim amount surfaced directly by the destination terminal preview.
         effectiveAmount = reclaimAmount;
 
-        for (uint256 i; i < hookSpecifications.length; i++) {
+        for (uint256 i; i < hookSpecifications.length;) {
             // Inspect one hook specification at a time so only understood buyback hooks can raise the preview.
             JBCashOutHookSpecification memory specification = hookSpecifications[i];
 
             // Ignore no-op hooks and hooks the router does not recognize as the canonical buyback hook.
-            if (specification.noop || address(specification.hook) != BUYBACK_HOOK) continue;
+            if (specification.noop || address(specification.hook) != BUYBACK_HOOK) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             // Decode only the fields needed to determine the user-visible sell-side output implied by the hook.
             (uint256 minimumSwapAmountOut,,,,,, uint256 rawSwapQuote) =
@@ -748,6 +762,10 @@ contract JBRouterTerminal is
 
             // Keep whichever understood hook quote implies the strongest previewed cash-out output.
             if (quotedAmount > effectiveAmount) effectiveAmount = quotedAmount;
+
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -834,11 +852,14 @@ contract JBRouterTerminal is
         return _normalize(tokenA) == _normalize(tokenB);
     }
 
-    /// @notice Snapshot a destination terminal's pre-call token balance for final-hop receipt enforcement.
+    /// @notice Snapshot a destination terminal's pre-call token balance and check forwarding status.
+    /// @dev Combines both the balance snapshot and forwarding probe into a single helper to avoid duplicate
+    /// `_isForwardingTerminal` calls in the pay/addToBalance flows.
     /// @param terminal The destination terminal that will receive the final forwarded funds.
     /// @param token The token the terminal is expected to receive.
     /// @param projectId The project whose forwarding status should be checked.
     /// @return receiptBaseline The terminal's balance in `token` before the final forwarded call.
+    /// @return isForwarding Whether the terminal forwards calls onward.
     function _terminalReceiptBaselineOf(
         IJBTerminal terminal,
         address token,
@@ -846,16 +867,19 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (uint256 receiptBaseline)
+        returns (uint256 receiptBaseline, bool isForwarding)
     {
         // Skip native-token receipt enforcement because value transfers can be consumed during terminal execution.
-        if (token == JBConstants.NATIVE_TOKEN) return 0;
+        if (token == JBConstants.NATIVE_TOKEN) return (0, false);
+
+        // Check forwarding status once and return it alongside the baseline.
+        isForwarding = _isForwardingTerminal(terminal, projectId);
 
         // Skip receipt enforcement for forwarding terminals because they enforce the terminal-facing hop themselves.
-        if (_isForwardingTerminal(terminal, projectId)) return 0;
+        if (isForwarding) return (0, true);
 
         // Snapshot the terminal's ERC20 balance so final-hop receipt can be verified after the terminal pulls.
-        return IERC20(token).balanceOf(address(terminal));
+        return (IERC20(token).balanceOf(address(terminal)), false);
     }
 
     /// @notice Reject lossy ERC20 terminal pulls on the final forwarded hop.
@@ -863,13 +887,13 @@ contract JBRouterTerminal is
     /// @param token The token the terminal was expected to pull.
     /// @param expectedAmount The nominal amount forwarded into the terminal call.
     /// @param receiptBaseline The terminal's pre-call balance in `token`.
-    /// @param projectId The project whose forwarding status should be checked.
+    /// @param isForwarding Whether the terminal forwards calls onward (pre-computed by caller).
     function _enforceStandardTerminalReceipt(
         IJBTerminal terminal,
         address token,
         uint256 expectedAmount,
         uint256 receiptBaseline,
-        uint256 projectId
+        bool isForwarding
     )
         internal
         view
@@ -878,7 +902,7 @@ contract JBRouterTerminal is
         if (token == JBConstants.NATIVE_TOKEN) return;
 
         // Forwarding terminals are responsible for enforcing the final terminal-facing ERC20 receipt themselves.
-        if (_isForwardingTerminal(terminal, projectId)) return;
+        if (isForwarding) return;
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
         if (IERC20(token).balanceOf(address(terminal)) - receiptBaseline != expectedAmount) {
@@ -950,8 +974,11 @@ contract JBRouterTerminal is
     /// @param metadata The metadata in which `permit2` and credit context is provided.
     /// @return The amount of tokens that have been accepted.
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
+        // Cache _msgSender() once to avoid repeated ERC-2771 context resolution.
+        address sender = _msgSender();
+
         // Check for credit cash-out metadata.
-        (bool creditExists, bytes memory creditData) = _getDataFor({metadata: metadata, key: "cashOutSource"});
+        (bool creditExists, bytes memory creditData) = _getDataFor({metadata: metadata, id: _CASH_OUT_SOURCE_ID});
 
         if (creditExists) {
             // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
@@ -961,7 +988,7 @@ contract JBRouterTerminal is
 
             // Registry-style forwarders preserve the original payer in transient storage so credit transfers debit
             // the actual holder rather than the intermediary.
-            address holder = _resolveOriginalPayer(_msgSender());
+            address holder = _resolveOriginalPayer(sender);
 
             // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
             IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));
@@ -979,7 +1006,7 @@ contract JBRouterTerminal is
         if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
 
         // Unpack the `JBSingleAllowance` to use given by the frontend.
-        (bool exists, bytes memory parsedMetadata) = _getDataFor({metadata: metadata, key: "permit2"});
+        (bool exists, bytes memory parsedMetadata) = _getDataFor({metadata: metadata, id: _PERMIT2_ID});
 
         // If the metadata contained permit data, use it to set the allowance.
         if (exists) {
@@ -999,9 +1026,9 @@ contract JBRouterTerminal is
             });
 
             // slither-disable-next-line reentrancy-events
-            try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
+            try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
-                emit Permit2AllowanceFailed(token, _msgSender(), reason);
+                emit Permit2AllowanceFailed(token, sender, reason);
             }
         }
 
@@ -1011,8 +1038,8 @@ contract JBRouterTerminal is
         // Measure balance before transfer to determine actual tokens received (handles fee-on-transfer tokens).
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
 
-        // Transfer the tokens from the `_msgSender()` to this terminal.
-        _transferFrom({from: _msgSender(), to: payable(address(this)), token: token, amount: amount});
+        // Transfer the tokens from the sender to this terminal.
+        _transferFrom({from: sender, to: payable(address(this)), token: token, amount: amount});
 
         // Return the actual amount received (balance delta), not the user-supplied amount.
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
@@ -1074,7 +1101,7 @@ contract JBRouterTerminal is
 
         // Walk the cashout path hop by hop until we reach a directly acceptable destination asset or exhaust the
         // bounded iteration limit.
-        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
+        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
             // When a preferred token was supplied, check whether the route can already finish into it before taking
             // another cashout hop.
             if (preferredToken != address(0)) {
@@ -1141,6 +1168,10 @@ contract JBRouterTerminal is
             // Update for next iteration.
             token = tokenToReclaim;
             sourceProjectIdOverride = 0;
+
+            unchecked {
+                ++i;
+            }
         }
 
         // If we reach here, the loop exceeded the maximum iteration count.
@@ -1738,7 +1769,7 @@ contract JBRouterTerminal is
         returns (uint256 sourceProjectId, uint256 amount)
     {
         // Read the optional cash-out source payload from the metadata blob.
-        (bool exists, bytes memory creditData) = _getDataFor({metadata: metadata, key: "cashOutSource"});
+        (bool exists, bytes memory creditData) = _getDataFor({metadata: metadata, id: _CASH_OUT_SOURCE_ID});
 
         // Decode the source project and credit amount if the payload is present.
         if (exists) (sourceProjectId, amount) = abi.decode(creditData, (uint256, uint256));
@@ -1765,11 +1796,16 @@ contract JBRouterTerminal is
         uint128 bestLiquidity;
 
         // Search V3.
-        for (uint256 i; i < 4; i++) {
+        for (uint256 i; i < 4;) {
             // slither-disable-next-line calls-loop
-            address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _FEE_TIERS[i]});
+            address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _feeTier(i)});
 
-            if (poolAddr == address(0)) continue;
+            if (poolAddr == address(0)) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             // slither-disable-next-line calls-loop
             uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
@@ -1777,6 +1813,10 @@ contract JBRouterTerminal is
             if (poolLiquidity > bestLiquidity) {
                 bestLiquidity = poolLiquidity;
                 bestPool.v3Pool = IUniswapV3Pool(poolAddr);
+            }
+
+            unchecked {
+                ++i;
             }
         }
 
@@ -1814,30 +1854,48 @@ contract JBRouterTerminal is
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
 
-        for (uint256 i; i < 4; i++) {
-            for (uint256 j; j < 2; j++) {
+        for (uint256 i; i < 4;) {
+            for (uint256 j; j < 2;) {
                 // Probe vanilla pools first, then the configured hooked-pool family if one exists.
                 IHooks hooks = j == 0 ? IHooks(address(0)) : IHooks(UNIV4_HOOK);
-                if (j != 0 && address(hooks) == address(0)) continue;
+                if (j != 0 && address(hooks) == address(0)) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
 
                 // Build the V4 pool key for the current fee / tick-spacing / hook combination.
-                PoolKey memory key = PoolKey({
-                    currency0: _wrapCurrency(sorted0),
-                    currency1: _wrapCurrency(sorted1),
-                    fee: _V4_FEES[i],
-                    tickSpacing: _V4_TICK_SPACINGS[i],
-                    hooks: hooks
-                });
+                // Fee tiers and tick spacings are returned from pure functions (no SLOAD).
+                PoolKey memory key;
+                {
+                    (uint24 fee, int24 tickSpacing) = _v4FeeAndTickSpacing(i);
+                    key = PoolKey({
+                        currency0: _wrapCurrency(sorted0),
+                        currency1: _wrapCurrency(sorted1),
+                        fee: fee,
+                        tickSpacing: tickSpacing,
+                        hooks: hooks
+                    });
+                }
+
+                // Cache key.toId() to avoid recomputing the same hash twice per inner iteration.
+                PoolId id = key.toId();
 
                 // Probe slot0 first so uninitialized pools can be skipped without treating them as valid candidates.
                 // slither-disable-next-line unused-return,calls-loop
-                (uint160 sqrtPriceX96,,,) = _getSlot0(key.toId());
+                (uint160 sqrtPriceX96,,,) = _getSlot0(id);
                 // slither-disable-next-line incorrect-equality
-                if (sqrtPriceX96 == 0) continue;
+                if (sqrtPriceX96 == 0) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
 
                 // Read the current in-range liquidity for the initialized pool.
                 // slither-disable-next-line calls-loop
-                uint128 poolLiquidity = _getLiquidity(key.toId());
+                uint128 poolLiquidity = _getLiquidity(id);
                 if (poolLiquidity > currentBestLiquidity) {
                     // Promote this V4 pool when it beats every candidate seen so far.
                     currentBestLiquidity = poolLiquidity;
@@ -1845,6 +1903,14 @@ contract JBRouterTerminal is
                     updatedBestPool.v3Pool = IUniswapV3Pool(address(0));
                     updatedBestPool.v4Key = key;
                 }
+
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
             }
         }
     }
@@ -1872,14 +1938,22 @@ contract JBRouterTerminal is
         // slither-disable-next-line calls-loop
         IJBTerminal[] memory terminals = _terminalsOf({projectId: sourceProjectId, shouldIgnoreFailure: false});
 
-        for (uint256 i; i < terminals.length; i++) {
+        for (uint256 i; i < terminals.length;) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
             // slither-disable-next-line calls-loop
             try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                 bool supported
             ) {
-                if (!supported) continue;
+                if (!supported) {
+                    unchecked {
+                        ++i;
+                    }
+                    continue;
+                }
             } catch {
+                unchecked {
+                    ++i;
+                }
                 continue;
             }
 
@@ -1887,7 +1961,7 @@ contract JBRouterTerminal is
             // slither-disable-next-line calls-loop
             JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(sourceProjectId);
 
-            for (uint256 j; j < contexts.length; j++) {
+            for (uint256 j; j < contexts.length;) {
                 address contextToken = contexts[j].token;
 
                 if (preferredToken != address(0) && contextToken == preferredToken) {
@@ -1902,6 +1976,14 @@ contract JBRouterTerminal is
                 candidates = _recordCashOutPathCandidate({
                     candidates: candidates, contextToken: contextToken, terminal: terminal, destTerminal: destTerminal
                 });
+
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
             }
         }
 
@@ -2151,7 +2233,7 @@ contract JBRouterTerminal is
     /// @param metadata The metadata to inspect for a minimum reclaim amount.
     /// @return minTokensReclaimed The minimum reclaim amount, or 0 if none is specified.
     function _minReclaimedFrom(bytes calldata metadata) internal view returns (uint256 minTokensReclaimed) {
-        (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, key: "cashOutMinReclaimed"});
+        (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, id: _CASH_OUT_MIN_RECLAIMED_ID});
         if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
     }
 
@@ -2220,7 +2302,7 @@ contract JBRouterTerminal is
         }
 
         // Check for a user-provided quote.
-        (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, key: "quoteForSwap"});
+        (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, id: _QUOTE_FOR_SWAP_ID});
 
         if (exists) {
             (minAmountOut) = abi.decode(quote, (uint256));
@@ -2291,7 +2373,7 @@ contract JBRouterTerminal is
         uint256 minTokensReclaimed = _minReclaimedFrom(metadata);
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
-        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS; i++) {
+        for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
             // When a preferred token was supplied, check whether the preview can already finish into it before
             // previewing another cashout hop.
             if (preferredToken != address(0)) {
@@ -2343,6 +2425,10 @@ contract JBRouterTerminal is
 
             // Consume the one-shot override so later hops derive their project from the reclaimed token itself.
             sourceProjectIdOverride = 0;
+
+            unchecked {
+                ++i;
+            }
         }
 
         // If no terminal was reached within the iteration cap, treat the route as non-converging.
@@ -2439,19 +2525,12 @@ contract JBRouterTerminal is
 
     /// @notice Read a metadata entry from the router's metadata namespace.
     /// @param metadata The metadata blob to query.
-    /// @param key The metadata key to resolve.
+    /// @param id The pre-computed metadata ID to look up.
     /// @return exists A flag indicating whether the metadata entry was present.
-    /// @return data The raw metadata payload for `key`.
-    function _getDataFor(
-        bytes calldata metadata,
-        string memory key
-    )
-        internal
-        view
-        returns (bool exists, bytes memory data)
-    {
+    /// @return data The raw metadata payload for `id`.
+    function _getDataFor(bytes calldata metadata, bytes4 id) internal pure returns (bool exists, bytes memory data) {
         // slither-disable-next-line unused-return
-        return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key), metadata: metadata});
+        return JBMetadataResolver.getDataFor({id: id, metadata: metadata});
     }
 
     /// @notice Wrap an address into a Uniswap V4 `Currency`.
@@ -2466,5 +2545,28 @@ contract JBRouterTerminal is
     /// @return token The unwrapped token address.
     function _unwrapCurrency(Currency currency) internal pure returns (address token) {
         return Currency.unwrap(currency);
+    }
+
+    /// @notice Return the V3 fee tier at the given index.
+    /// @dev Replaces the storage array `_FEE_TIERS` with a pure function (no SLOAD).
+    /// @param index The tier index (0-3), ordered by commonality: 0.3%, 0.05%, 1%, 0.01%.
+    /// @return fee The fee value.
+    function _feeTier(uint256 index) internal pure returns (uint24 fee) {
+        if (index == 0) return 3000;
+        if (index == 1) return 500;
+        if (index == 2) return 10_000;
+        return 100;
+    }
+
+    /// @notice Return the V4 fee and tick spacing at the given index.
+    /// @dev Replaces the storage arrays `_V4_FEES` and `_V4_TICK_SPACINGS` with a single pure function (no SLOAD).
+    /// @param index The tier index (0-3).
+    /// @return fee The V4 fee value.
+    /// @return tickSpacing The V4 tick spacing value.
+    function _v4FeeAndTickSpacing(uint256 index) internal pure returns (uint24 fee, int24 tickSpacing) {
+        if (index == 0) return (3000, 60);
+        if (index == 1) return (500, 10);
+        if (index == 2) return (10_000, 200);
+        return (100, 1);
     }
 }

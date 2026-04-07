@@ -45,38 +45,52 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Read every terminal's accounting contexts once upfront to avoid double external calls.
         JBAccountingContext[][] memory allContexts = new JBAccountingContext[][](terminals.length);
         uint256 totalContexts;
-        for (uint256 i; i < terminals.length; i++) {
+        for (uint256 i; i < terminals.length;) {
             allContexts[i] = terminals[i].accountingContextsOf(projectId);
             totalContexts += allContexts[i].length;
+            unchecked {
+                ++i;
+            }
         }
 
         // Allocate enough space for the worst case where every accounting context contributes a distinct token.
         tokens = new address[](totalContexts);
 
-        for (uint256 i; i < terminals.length; i++) {
+        for (uint256 i; i < terminals.length;) {
             // Reuse the contexts already read in the sizing pass above.
             JBAccountingContext[] memory contexts = allContexts[i];
 
-            for (uint256 j; j < contexts.length; j++) {
+            for (uint256 j; j < contexts.length;) {
                 // Start from the token surfaced by this accounting context.
                 address candidateToken = contexts[j].token;
 
                 // Track whether the token was already emitted by a previous terminal/context pair.
                 bool alreadySeen;
 
-                for (uint256 k; k < count; k++) {
+                for (uint256 k; k < count;) {
                     if (tokens[k] == candidateToken) {
                         // Mark the candidate as already emitted so the outer loop can skip it below.
                         alreadySeen = true;
                         break;
                     }
+                    unchecked {
+                        ++k;
+                    }
                 }
 
                 // Skip duplicate tokens so the preview scorer only evaluates each candidate once.
-                if (alreadySeen) continue;
+                if (alreadySeen) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
 
                 // Skip tokens that no longer resolve to a primary terminal for this project.
                 if (address(directory.primaryTerminalOf({projectId: projectId, token: candidateToken})) == address(0)) {
+                    unchecked {
+                        ++j;
+                    }
                     continue;
                 }
 
@@ -85,6 +99,12 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
                 // Advance the populated length so the next unique token lands in the next slot.
                 count++;
+                unchecked {
+                    ++j;
+                }
+            }
+            unchecked {
+                ++i;
             }
         }
     }
@@ -115,12 +135,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             return (beneficiaryTokenCount, reservedTokenCount);
         }
 
-        for (uint256 i; i < hookSpecifications.length; i++) {
+        for (uint256 i; i < hookSpecifications.length;) {
             // Inspect one hook specification at a time so only understood buyback metadata influences scoring.
             JBPayHookSpecification memory specification = hookSpecifications[i];
 
             // Ignore no-op hooks and hooks the router does not recognize as the canonical buyback hook.
-            if (specification.noop || address(specification.hook) != buybackHook) continue;
+            if (specification.noop || address(specification.hook) != buybackHook) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             // Decode only the minimum token-count commitments needed to score the buyback-enhanced preview.
             (,,,,,,,,, uint256 minimumBeneficiaryTokenCount, uint256 minimumReservedTokenCount,) = abi.decode(
@@ -136,6 +161,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             ) {
                 effectiveBeneficiaryTokenCount = minimumBeneficiaryTokenCount;
                 effectiveReservedTokenCount = minimumReservedTokenCount;
+            }
+            unchecked {
+                ++i;
             }
         }
     }
@@ -567,11 +595,11 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Track whether any acceptable fallback token has been seen in case no pool exists at all.
         bool hasFallback;
 
-        for (uint256 i; i < terminals.length; i++) {
+        for (uint256 i; i < terminals.length;) {
             // Read each terminal's accepted accounting contexts so the scorer can inspect every candidate token.
             JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
 
-            for (uint256 j; j < contexts.length; j++) {
+            for (uint256 j; j < contexts.length;) {
                 // Pull the candidate token out of the accounting context being inspected.
                 address candidateToken = contexts[j].token;
 
@@ -579,13 +607,23 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address normalizedCandidate = _normalizedTokenOf(router, candidateToken);
 
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
-                if (normalizedCandidate == normalizedTokenIn) continue;
+                if (normalizedCandidate == normalizedTokenIn) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
 
                 // Resolve the candidate token back to its usable primary terminal so discovery agrees with
                 // preview/execution terminal selection.
                 IJBTerminal candidateTerminal =
                     _usablePrimaryTerminalForCandidate(router, directory, projectId, candidateToken);
-                if (address(candidateTerminal) == address(0)) continue;
+                if (address(candidateTerminal) == address(0)) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
 
                 // Keep the first viable candidate as a fallback in case no pool-backed route exists.
                 if (!hasFallback) {
@@ -602,6 +640,12 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     tokenOut = candidateToken;
                     destTerminal = candidateTerminal;
                 }
+                unchecked {
+                    ++j;
+                }
+            }
+            unchecked {
+                ++i;
             }
         }
     }
