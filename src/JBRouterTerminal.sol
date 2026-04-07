@@ -704,11 +704,13 @@ contract JBRouterTerminal is
         });
 
         // Execute the winning route by converting into the preview-selected destination token.
+        // Pass the preview-resolved destTerminal so execution skips the redundant directory lookup.
         return _routeToDestination({
             destProjectId: destProjectId,
             tokenIn: tokenIn,
             amount: amount,
             tokenOut: tokenOut,
+            previewedDestTerminal: destTerminal,
             metadata: metadata,
             refundTo: refundTo
         });
@@ -810,20 +812,13 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         // Normalize native-token sentinels into WETH so pool discovery and quoting use canonical pair addresses.
-        address normalizedTokenIn = _normalize(tokenIn);
-        address normalizedTokenOut = _normalize(tokenOut);
-
-        // Reject preview requests when there is no discovered liquidity between the normalized token pair.
-        if (_bestPoolLiquidity({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut}) == 0) {
-            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
-        }
-
-        // Reuse the production pool-selection and quote logic so preview and execution stay aligned.
+        // _pickPoolAndQuote already discovers the best pool and reverts with NoPoolFound when none exists,
+        // so no separate liquidity guard is needed here.
         (amountOut,) = _pickPoolAndQuote({
             metadata: metadata,
-            normalizedTokenIn: normalizedTokenIn,
+            normalizedTokenIn: _normalize(tokenIn),
             amount: amount,
-            normalizedTokenOut: normalizedTokenOut
+            normalizedTokenOut: _normalize(tokenOut)
         });
     }
 
@@ -907,13 +902,17 @@ contract JBRouterTerminal is
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
+    /// @dev Inlined from the resolver to avoid a cross-contract roundtrip (saves 3 external calls per lookup).
     /// @param projectId The project whose primary terminal should be checked.
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        return _PAY_ROUTE_RESOLVER.usablePrimaryTerminalOf({
-            router: IJBPayRoutePreviewer(address(this)), projectId: projectId, token: token
-        });
+        terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
+
+        // Drop terminals that would route straight back into the router (circular).
+        if (address(terminal) == address(0) || _isCircularTerminal(terminal)) {
+            return IJBTerminal(address(0));
+        }
     }
 
     /// @notice Resolve which source project a routed token should cash out from.
@@ -938,7 +937,7 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice Whether routing through a terminal would immediately cycle back into the router.
+    /// @notice Whether routing through a terminal would cycle back into the router.
     /// @param terminal The terminal that would receive the route.
     /// @return isCircular A flag indicating whether `terminal` is this router itself.
     function _isCircularTerminal(IJBTerminal terminal) internal view returns (bool isCircular) {
@@ -1428,6 +1427,7 @@ contract JBRouterTerminal is
         address tokenIn,
         uint256 amount,
         address tokenOut,
+        IJBTerminal previewedDestTerminal,
         bytes calldata metadata,
         address payable refundTo
     )
@@ -1437,11 +1437,8 @@ contract JBRouterTerminal is
         // Start from the caller-requested destination token.
         resolvedTokenOut = tokenOut;
 
-        // Resolve the destination terminal that accepts the requested token.
-        destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: tokenOut});
-
-        // Revert immediately when the destination project has no terminal for the requested token.
-        if (address(destTerminal) == address(0)) revert JBRouterTerminal_NoRouteFound(destProjectId, tokenOut);
+        // Reuse the terminal already resolved during preview to avoid a redundant directory lookup.
+        destTerminal = previewedDestTerminal;
 
         // Hold the terminal surfaced by a source-project cashout path, if that path reaches the destination directly.
         IJBTerminal cashOutResolvedTerminal;
@@ -1779,17 +1776,7 @@ contract JBRouterTerminal is
 
             if (poolLiquidity > bestLiquidity) {
                 bestLiquidity = poolLiquidity;
-                bestPool = PoolInfo({
-                    isV4: false,
-                    v3Pool: IUniswapV3Pool(poolAddr),
-                    v4Key: PoolKey({
-                        currency0: _wrapCurrency(address(0)),
-                        currency1: _wrapCurrency(address(0)),
-                        fee: 0,
-                        tickSpacing: 0,
-                        hooks: IHooks(address(0))
-                    })
-                });
+                bestPool.v3Pool = IUniswapV3Pool(poolAddr);
             }
         }
 
@@ -1854,7 +1841,9 @@ contract JBRouterTerminal is
                 if (poolLiquidity > currentBestLiquidity) {
                     // Promote this V4 pool when it beats every candidate seen so far.
                     currentBestLiquidity = poolLiquidity;
-                    updatedBestPool = PoolInfo({isV4: true, v3Pool: IUniswapV3Pool(address(0)), v4Key: key});
+                    updatedBestPool.isV4 = true;
+                    updatedBestPool.v3Pool = IUniswapV3Pool(address(0));
+                    updatedBestPool.v4Key = key;
                 }
             }
         }

@@ -42,18 +42,20 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address[] memory tokens, uint256 count)
     {
-        // Count every accounting context first so the temporary candidate array can be sized once.
+        // Read every terminal's accounting contexts once upfront to avoid double external calls.
+        JBAccountingContext[][] memory allContexts = new JBAccountingContext[][](terminals.length);
         uint256 totalContexts;
         for (uint256 i; i < terminals.length; i++) {
-            totalContexts += terminals[i].accountingContextsOf(projectId).length;
+            allContexts[i] = terminals[i].accountingContextsOf(projectId);
+            totalContexts += allContexts[i].length;
         }
 
         // Allocate enough space for the worst case where every accounting context contributes a distinct token.
         tokens = new address[](totalContexts);
 
         for (uint256 i; i < terminals.length; i++) {
-            // Read the terminal's accepted tokens once so the inner loop can inspect them cheaply.
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
+            // Reuse the contexts already read in the sizing pass above.
+            JBAccountingContext[] memory contexts = allContexts[i];
 
             for (uint256 j; j < contexts.length; j++) {
                 // Start from the token surfaced by this accounting context.
