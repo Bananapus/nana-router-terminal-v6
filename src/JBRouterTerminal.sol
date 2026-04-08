@@ -198,7 +198,7 @@ contract JBRouterTerminal is
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
         UNIV4_HOOK = univ4Hook;
-        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver(directory, weth)));
+        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
 
         // Pre-compute metadata IDs to avoid hashing string literals on every call.
         _CASH_OUT_SOURCE_ID = JBMetadataResolver.getId("cashOutSource");
@@ -501,9 +501,10 @@ contract JBRouterTerminal is
         override
         returns (PoolInfo memory)
     {
-        PoolInfo memory pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        PoolInfo memory pool =
+            _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
         if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
         return pool;
     }
@@ -647,7 +648,7 @@ contract JBRouterTerminal is
     /// @param tokenB The other token in the pair.
     /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
     function bestPoolLiquidityOf(address tokenA, address tokenB) external view returns (uint128) {
-        return _bestPoolLiquidity(tokenA, tokenB);
+        return _bestPoolLiquidity({tokenA: tokenA, tokenB: tokenB});
     }
 
     //*********************************************************************//
@@ -880,7 +881,7 @@ contract JBRouterTerminal is
         if (token == JBConstants.NATIVE_TOKEN) return (0, false);
 
         // Check forwarding status once and return it alongside the baseline.
-        isForwarding = _isForwardingTerminal(terminal, projectId);
+        isForwarding = _isForwardingTerminal({terminal: terminal, projectId: projectId});
 
         // Skip receipt enforcement for forwarding terminals because they enforce the terminal-facing hop themselves.
         if (isForwarding) return (0, true);

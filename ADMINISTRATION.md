@@ -111,6 +111,13 @@ The following values are set at deploy time and cannot be changed:
 | `PROJECTS` | Constructor | No | JB project NFT registry |
 | `PERMIT2` | Constructor | No | Permit2 contract for gasless approvals |
 
+### JBPayRouteResolver
+
+| Property | Set At | Mutable? | Description |
+|----------|--------|----------|-------------|
+| `DIRECTORY` | Constructor | No | JB directory for terminal and accounting-context lookups, cached from the router at construction time |
+| `WETH` | Constructor | No | Wrapped native token used for token normalization, cached from the router at construction time |
+
 ### JBSwapLib
 
 | Constant | Value | Description |

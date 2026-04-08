@@ -8,9 +8,14 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 - `JBRouterTerminal`
 - `JBRouterTerminalRegistry`
+- `JBPayRouteResolver`
 - `IJBRouterTerminal`
 - `IJBRouterTerminalRegistry`
+- `IJBPayRouteResolver`
+- `IJBPayRoutePreviewer`
+- `IJBForwardingTerminal`
 - `JBSwapLib`
+- `CashOutPathCandidates`
 
 ## Summary
 
