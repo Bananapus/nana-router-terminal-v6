@@ -324,6 +324,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             metadata: metadata
         });
 
+        // Revoke any leftover allowance the terminal did not pull.
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
+
         // Clear transient storage.
         originalPayer = address(0);
     }
@@ -358,6 +361,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Lock a terminal for a project.
     /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.
+    /// @dev Locking a circular or self-referential terminal (e.g. one that routes back to this registry) will
+    /// permanently brick routing for the project through this registry. Because locks are irreversible, callers must
+    /// verify that the terminal is valid and non-circular before locking.
     /// @param projectId The ID of the project to lock the terminal for.
     /// @param expectedTerminal The terminal the caller expects to lock. Prevents race conditions where the default
     /// changes between transaction submission and execution.
@@ -449,6 +455,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             memo: memo,
             metadata: metadata
         });
+
+        // Revoke any leftover allowance the terminal did not pull.
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
 
         // Clear transient storage.
         originalPayer = address(0);
@@ -557,8 +566,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // If the token is the native token, return early.
         if (token == JBConstants.NATIVE_TOKEN) return amount;
 
-        // Otherwise, set the appropriate allowance for the recipient.
-        IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
+        // Reset-then-set: avoid reverts from tokens that disallow non-zero to non-zero approval changes.
+        IERC20(token).forceApprove({spender: to, value: amount});
 
         return 0;
     }

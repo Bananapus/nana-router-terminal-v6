@@ -43,6 +43,7 @@ import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
@@ -270,6 +271,9 @@ contract JBRouterTerminal is
             metadata: metadata
         });
 
+        // Revoke any leftover allowance the destination terminal did not pull.
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
+
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
             terminal: destTerminal,
@@ -344,6 +348,9 @@ contract JBRouterTerminal is
             memo: memo,
             metadata: metadata
         });
+
+        // Revoke any leftover allowance the destination terminal did not pull.
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
@@ -937,6 +944,11 @@ contract JBRouterTerminal is
         if (address(terminal) == address(0) || _isCircularTerminal(terminal)) {
             return IJBTerminal(address(0));
         }
+
+        // Check if the terminal is a registry that forwards back to this router.
+        try IJBRouterTerminalRegistry(address(terminal)).terminalOf(projectId) returns (IJBTerminal resolved) {
+            if (address(resolved) == address(this)) return IJBTerminal(address(0));
+        } catch {}
     }
 
     /// @notice Resolve which source project a routed token should cash out from.
@@ -1054,8 +1066,8 @@ contract JBRouterTerminal is
         // If the token is the native token, return the amount as msg.value.
         if (token == JBConstants.NATIVE_TOKEN) return amount;
 
-        // Otherwise, set the appropriate allowance for the recipient.
-        IERC20(token).safeIncreaseAllowance({spender: to, value: amount});
+        // Reset-then-set: avoid reverts from tokens that disallow non-zero to non-zero approval changes.
+        IERC20(token).forceApprove({spender: to, value: amount});
 
         return 0;
     }
@@ -2270,6 +2282,9 @@ contract JBRouterTerminal is
     /// @notice Discover a pool and compute the minimum acceptable output for a swap.
     /// @dev Uses a user-provided quote if available, otherwise falls back to TWAP (V3) or spot price (V4)
     /// with dynamic slippage.
+    /// @dev For V4 pools without TWAP-capable hooks, `minAmountOut` is derived from the same-block spot tick, which is
+    /// manipulable via sandwich attacks. Integrators should supply `quoteForSwap` metadata for sandwich protection on
+    /// V4 routes.
     ///
     /// Priority for `minAmountOut`:
     ///   1. **User-provided quote** — If `quoteForSwap` is present in `metadata`, it is used directly.
