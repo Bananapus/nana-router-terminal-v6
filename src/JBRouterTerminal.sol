@@ -947,9 +947,16 @@ contract JBRouterTerminal is
         }
 
         // Check if the terminal is a registry that forwards back to this router.
-        try IJBRouterTerminalRegistry(address(terminal)).terminalOf(projectId) returns (IJBTerminal resolved) {
+        // Use a low-level staticcall because the target may not implement terminalOf at all; a high-level try-catch
+        // on a successful call with insufficient returndata triggers an internal ABI-decode failure that catch cannot
+        // intercept.
+        (bool ok, bytes memory data) = address(terminal).staticcall(
+            abi.encodeCall(IJBRouterTerminalRegistry.terminalOf, (projectId))
+        );
+        if (ok && data.length >= 32) {
+            IJBTerminal resolved = abi.decode(data, (IJBTerminal));
             if (address(resolved) == address(this)) return IJBTerminal(address(0));
-        } catch {}
+        }
     }
 
     /// @notice Resolve which source project a routed token should cash out from.
