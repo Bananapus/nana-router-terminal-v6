@@ -199,9 +199,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         });
     }
 
-    /// @notice The terminal for the given project, or the default terminal if none is set.
-    /// @param projectId The ID of the project to get the terminal for.
-    /// @return terminal The terminal for the project.
+    /// @inheritdoc IJBForwardingTerminal
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
         return _resolvedTerminalOf(projectId);
     }
@@ -219,10 +217,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             || interfaceId == type(IERC165).interfaceId;
     }
 
-    /// @inheritdoc IJBForwardingTerminal
-    function forwardingTerminalOf(uint256 projectId) external view returns (IJBTerminal terminal) {
-        return _resolvedTerminalOf(projectId);
-    }
 
     //*********************************************************************//
     // -------------------------- internal views ------------------------- //

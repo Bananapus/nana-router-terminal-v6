@@ -43,7 +43,6 @@ import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
-import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
@@ -925,7 +924,7 @@ contract JBRouterTerminal is
     function _isForwardingTerminal(IJBTerminal terminal, uint256 projectId) internal view returns (bool isForwarding) {
         // Probe via staticcall so non-forwarding terminals degrade cleanly.
         (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardingTerminalOf, (projectId)));
+            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
         // Treat terminals that do not implement the capability or return zero as final receivers.
         if (!success || data.length < 32) return false;
@@ -946,16 +945,14 @@ contract JBRouterTerminal is
             return IJBTerminal(address(0));
         }
 
-        // Check if the terminal is a registry that forwards back to this router.
-        // Use a low-level staticcall because the target may not implement terminalOf at all; a high-level try-catch
-        // on a successful call with insufficient returndata triggers an internal ABI-decode failure that catch cannot
-        // intercept.
+        // Check if the terminal is a forwarding layer that routes back into this router.
+        // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
+        // cleanly into a no-op (success=false or empty data).
         (bool ok, bytes memory data) = address(terminal).staticcall(
-            abi.encodeCall(IJBRouterTerminalRegistry.terminalOf, (projectId))
+            abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId))
         );
-        if (ok && data.length >= 32) {
-            IJBTerminal resolved = abi.decode(data, (IJBTerminal));
-            if (address(resolved) == address(this)) return IJBTerminal(address(0));
+        if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
+            return IJBTerminal(address(0));
         }
     }
 

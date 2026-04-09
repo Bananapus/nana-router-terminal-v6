@@ -176,11 +176,10 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
-        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
-        // non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
         vm.mockCall(
             mockTerminal,
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, projectId),
             abi.encode(mockTerminal)
         );
 
@@ -269,11 +268,10 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
-        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
-        // non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
         vm.mockCall(
             mockTerminal,
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, projectId),
             abi.encode(mockTerminal)
         );
 

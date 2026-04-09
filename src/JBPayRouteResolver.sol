@@ -330,7 +330,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Probe via staticcall so plain terminals degrade cleanly.
         (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.forwardingTerminalOf, (projectId)));
+            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
         // Non-forwarding terminals (call fails or returns zero) are not circular.
         if (!success || data.length < 32) return false;
