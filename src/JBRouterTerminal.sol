@@ -948,9 +948,8 @@ contract JBRouterTerminal is
         // Check if the terminal is a forwarding layer that routes back into this router.
         // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
         // cleanly into a no-op (success=false or empty data).
-        (bool ok, bytes memory data) = address(terminal).staticcall(
-            abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId))
-        );
+        (bool ok, bytes memory data) =
+            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
         if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
             return IJBTerminal(address(0));
         }

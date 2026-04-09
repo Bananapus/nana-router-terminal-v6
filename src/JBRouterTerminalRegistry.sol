@@ -217,7 +217,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             || interfaceId == type(IERC165).interfaceId;
     }
 
-
     //*********************************************************************//
     // -------------------------- internal views ------------------------- //
     //*********************************************************************//
