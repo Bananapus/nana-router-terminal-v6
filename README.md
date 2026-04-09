@@ -28,6 +28,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
+| `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the best route preview for the router terminal. |
 
 ## Mental Model
 

@@ -161,7 +161,7 @@ contract Permit2AllowanceFailedTest is Test {
         vm.mockCall(address(destTerminal), abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(1e18)));
         vm.mockCall(
             address(destTerminal),
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector),
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector),
             abi.encode(destTerminal)
         );
 

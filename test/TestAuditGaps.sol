@@ -246,11 +246,10 @@ contract TestAuditGaps is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         ctx[0] = JBAccountingContext({token: tokenOut, decimals: 18, currency: uint32(uint160(tokenOut))});
         vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(ctx));
-        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
-        // non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
         vm.mockCall(
             destTerminal,
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, projectId),
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, projectId),
             abi.encode(destTerminal)
         );
         vm.mockCall(
@@ -352,12 +351,9 @@ contract TestAuditGaps is Test {
         // Mock approve for dest terminal (actual received amount = 4900).
         vm.mockCall(tokenIn, abi.encodeCall(IERC20.approve, (dest, 4900)), abi.encode(true));
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
-        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
-        // non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
         vm.mockCall(
-            dest,
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, uint256(1)),
-            abi.encode(dest)
+            dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, uint256(1)), abi.encode(dest)
         );
         // Mock previewPayFor for route scoring.
         vm.mockCall(
@@ -553,7 +549,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(77)));
-        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector), abi.encode(dest));
         // safeIncreaseAllowance calls allowance() then approve().
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
@@ -736,7 +732,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(10)));
-        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 99)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(99)));
@@ -806,7 +802,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
-        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));
@@ -918,7 +914,7 @@ contract TestAuditGaps is Test {
 
         // Mock dest terminal.
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
-        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector), abi.encode(dest));
+        vm.mockCall(dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector), abi.encode(dest));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.allowance, (address(router), dest)), abi.encode(uint256(0)));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.approve, (dest, 90)), abi.encode(true));
         vm.mockCall(tokenOut, abi.encodeCall(IERC20.balanceOf, (address(router))), abi.encode(uint256(90)));

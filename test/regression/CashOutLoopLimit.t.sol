@@ -194,11 +194,10 @@ contract CashOutLoopLimitTest is Test {
 
         // Mock dest terminal pay.
         vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(5)));
-        // Mock forwardingTerminalOf so _isForwardingTerminal returns true and circular-terminal check sees a
-        // non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
         vm.mockCall(
             mockTerminal,
-            abi.encodeWithSelector(IJBForwardingTerminal.forwardingTerminalOf.selector, DEST_PROJECT_ID),
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, DEST_PROJECT_ID),
             abi.encode(mockTerminal)
         );
 

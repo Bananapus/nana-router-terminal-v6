@@ -58,11 +58,6 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @return projects The projects contract.
     function PROJECTS() external view returns (IJBProjects projects);
 
-    /// @notice The terminal for the given project, or the default terminal if none is set.
-    /// @param projectId The ID of the project.
-    /// @return terminal The terminal for the project.
-    function terminalOf(uint256 projectId) external view returns (IJBTerminal terminal);
-
     /// @notice Allow a terminal to be used by projects.
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external;
