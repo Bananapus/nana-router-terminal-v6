@@ -2286,19 +2286,19 @@ contract JBRouterTerminal is
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
     }
 
+    /// @notice Whether a token matches the router's configured WETH.
+    /// @param token The token to compare.
+    /// @return isWeth A flag indicating whether `token` is WETH.
+    function _isWeth(address token) internal view returns (bool isWeth) {
+        return token == address(WETH);
+    }
+
     /// @notice Normalize a token address by replacing the native token sentinel with WETH.
     /// @param token The token to normalize for internal routing comparisons.
     /// @return normalizedToken The normalized token address.
     function _normalize(address token) internal view returns (address) {
         // Replace the native-token sentinel with WETH so ETH and WETH share one routing representation.
         return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
-    }
-
-    /// @notice Whether a token matches the router's configured WETH.
-    /// @param token The token to compare.
-    /// @return isWeth A flag indicating whether `token` is WETH.
-    function _isWeth(address token) internal view returns (bool isWeth) {
-        return token == address(WETH);
     }
 
     /// @notice Discover a pool and compute the minimum acceptable output for a swap.
