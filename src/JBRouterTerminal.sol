@@ -218,7 +218,12 @@ contract JBRouterTerminal is
     //*********************************************************************//
 
     /// @notice Empty implementation to satisfy the interface. Accounting contexts are determined dynamically.
-    function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
+    /// @param projectId The ID of the project whose accounting contexts would otherwise be configured.
+    /// @param accountingContexts Ignored because this terminal derives accounting contexts at runtime.
+    function addAccountingContextsFor(uint256 projectId, JBAccountingContext[] calldata accountingContexts)
+        external
+        override
+    {}
 
     /// @notice Add funds to a project's balance by routing the incoming token to whatever token the project accepts.
     /// @param projectId The ID of the destination project.
@@ -270,8 +275,10 @@ contract JBRouterTerminal is
             metadata: metadata
         });
 
-        // Revoke any leftover allowance the destination terminal did not pull.
-        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
+        _afterTransferFor({
+            destTerminal: destTerminal,
+            token: token
+        });
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
@@ -284,7 +291,19 @@ contract JBRouterTerminal is
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no balance to migrate.
-    function migrateBalanceOf(uint256, address, IJBTerminal) external pure override returns (uint256 balance) {
+    /// @param projectId The project whose balance migration was requested.
+    /// @param token The token whose balance migration was requested.
+    /// @param to The destination terminal that would receive migrated funds.
+    /// @return balance Always returns 0 because the router does not hold project balances.
+    function migrateBalanceOf(uint256 projectId, address token, IJBTerminal to)
+        external
+        pure
+        override
+        returns (uint256 balance)
+    {
+        projectId;
+        token;
+        to;
         return 0;
     }
 
@@ -348,8 +367,10 @@ contract JBRouterTerminal is
             metadata: metadata
         });
 
-        // Revoke any leftover allowance the destination terminal did not pull.
-        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
+        _afterTransferFor({
+            destTerminal: destTerminal,
+            token: token
+        });
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
@@ -476,14 +497,32 @@ contract JBRouterTerminal is
         return JBAccountingContext({token: token, decimals: decimals, currency: uint32(uint160(token))});
     }
 
-    /// @notice Returns an empty array — this terminal accepts any token dynamically.
+    /// @notice Returns an empty array because this terminal accepts tokens dynamically rather than through a fixed
+    /// accounting-context list.
+    /// @param projectId The project whose accounting contexts were requested.
     /// @return contexts An empty array of `JBAccountingContext`.
-    function accountingContextsOf(uint256) external pure override returns (JBAccountingContext[] memory contexts) {
+    function accountingContextsOf(uint256 projectId) external pure override returns (JBAccountingContext[] memory contexts) {
+        projectId;
         contexts = new JBAccountingContext[](0);
     }
 
-    /// @notice This terminal holds no surplus. Always returns 0.
-    function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {
+    /// @notice This terminal holds no surplus because it routes funds onward instead of accounting for project
+    /// balances itself.
+    /// @param projectId The project whose surplus was requested.
+    /// @param tokens The token set the caller wanted surplus measured against.
+    /// @param decimals The fixed-point precision the caller wanted the surplus returned in.
+    /// @param currency The currency the caller wanted the surplus returned in.
+    /// @return surplus Always returns 0 because the router does not own project treasury balances.
+    function currentSurplusOf(uint256 projectId, address[] calldata tokens, uint256 decimals, uint256 currency)
+        external
+        pure
+        override
+        returns (uint256 surplus)
+    {
+        projectId;
+        tokens;
+        decimals;
+        currency;
         return 0;
     }
 
@@ -1061,6 +1100,20 @@ contract JBRouterTerminal is
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
+    /// @notice Run the common post-transfer cleanup after forwarding funds into a destination terminal.
+    /// @param destTerminal The terminal that just received the forwarded call.
+    /// @param token The token that was forwarded into the destination terminal.
+    function _afterTransferFor(
+        IJBTerminal destTerminal,
+        address token
+    )
+        internal
+    {
+        // Revoke any leftover allowance the destination terminal did not pull so routed calls do not leave approvals
+        // hanging around after the terminal finishes its pull.
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
+    }
+
     /// @notice Logic to be triggered before transferring tokens from this terminal.
     /// @param to The address to transfer tokens to.
     /// @param token The token being transferred.
@@ -1289,6 +1342,13 @@ contract JBRouterTerminal is
     }
 
     /// @notice Execute a swap through a V3 pool.
+    /// @param pool The V3 pool to swap through.
+    /// @param normalizedTokenIn The normalized token being sold.
+    /// @param normalizedTokenOut The normalized token being bought.
+    /// @param amount The exact input amount to swap.
+    /// @param minAmountOut The minimum acceptable output after slippage protection.
+    /// @param callbackData ABI-encoded data that the V3 callback will use to settle the input side.
+    /// @return amountOut The amount of `normalizedTokenOut` the pool returned.
     function _executeV3Swap(
         IUniswapV3Pool pool,
         address normalizedTokenIn,
@@ -1300,8 +1360,12 @@ contract JBRouterTerminal is
         internal
         returns (uint256 amountOut)
     {
+        // Determine swap direction using Uniswap's canonical token ordering so both the pool call and
+        // sqrt-price limit are computed against the same side of the pair.
         bool zeroForOne = normalizedTokenIn < normalizedTokenOut;
 
+        // Ask the pool to execute an exact-input swap. The callback settles the input token after the pool
+        // computes how much of the output side it owes this router.
         (int256 amount0, int256 amount1) = pool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
@@ -1313,13 +1377,19 @@ contract JBRouterTerminal is
             data: callbackData
         });
 
+        // Uniswap returns signed deltas for both sides of the swap. The output side is negative because the
+        // pool sent tokens out to the router, so negate the selected leg to recover the positive amount received.
         amountOut = uint256(-(zeroForOne ? amount1 : amount0));
+
+        // Recheck the realized output against the quote floor so partial fills or price movement cannot slip
+        // through even if the pool call itself completed.
         if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
     }
 
     /// @notice Execute a swap through a V4 pool via PoolManager.unlock().
     /// @param key The V4 pool key describing the pool to swap through.
     /// @param normalizedTokenIn The normalized token being swapped in.
+    /// @param canUseExistingNativeBalance Whether raw ETH already held by the router can fund the input side.
     /// @param amount The amount of `normalizedTokenIn` to swap.
     /// @param minAmountOut The minimum acceptable amount out for the swap.
     /// @return amountOut The amount produced by the V4 swap.
@@ -1334,7 +1404,7 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         // Convert WETH addresses to V4's native ETH (address(0)) for currency comparison.
-        address v4In = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
+        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
@@ -1581,21 +1651,28 @@ contract JBRouterTerminal is
         });
     }
 
-    /// @notice Settle the input side of a V4 swap (transfer tokens to PoolManager).
+    /// @notice Settle the input side of a V4 swap by transferring the owed input asset into the PoolManager.
+    /// @param currency The V4 currency the router owes to the PoolManager.
+    /// @param amount The amount of `currency` the router must settle.
+    /// @param canUseExistingNativeBalance Whether already-held raw ETH can be used before unwrapping WETH.
     function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
         if (_unwrapCurrency(currency) == address(0)) {
             // Native-funded routes may spend the ETH they already hold.
             // WETH-funded routes must not consume unrelated raw ETH already sitting on the router.
             if (canUseExistingNativeBalance) {
+                // Only unwrap the shortfall so routes funded by direct ETH do not churn through WETH unnecessarily.
                 uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
                 if (deficit > 0) _wethWithdraw(deficit);
             } else {
+                // WETH-funded routes should unwrap the full amount because they are not allowed to consume ambient ETH.
                 _wethWithdraw(amount);
             }
+            // Native settlement uses `msg.value` because PoolManager expects ETH to accompany the settle call.
             // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {
-            // ERC20: sync then transfer then settle.
+            // ERC20 settlement requires PoolManager to observe the token first (`sync`), then receive the transfer,
+            // then finalize the accounting with `settle`.
             POOL_MANAGER.sync(currency);
             IERC20(_unwrapCurrency(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
             // slither-disable-next-line unused-return
@@ -1603,8 +1680,11 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice Take the output side of a V4 swap (receive tokens from PoolManager).
+    /// @notice Take the output side of a V4 swap by pulling the owed asset out of the PoolManager.
+    /// @param currency The V4 currency the router is owed.
+    /// @param amount The amount of `currency` to take.
     function _takeV4(Currency currency, uint256 amount) internal {
+        // Pull the owed output asset into the router before any later wrapping/unwrapping or forwarding logic runs.
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
@@ -1654,13 +1734,13 @@ contract JBRouterTerminal is
         if (token == preferredToken) return (token, amount);
 
         // Wrap ETH into WETH when the preferred token is the ERC20 wrapper.
-        if (token == JBConstants.NATIVE_TOKEN && _isWeth(preferredToken)) {
+        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WETH)) {
             _wethDeposit(amount);
             return (preferredToken, amount);
         }
 
         // Unwrap WETH into ETH when the preferred token is the native-token sentinel.
-        if (_isWeth(token) && preferredToken == JBConstants.NATIVE_TOKEN) {
+        if (token == address(WETH) && preferredToken == JBConstants.NATIVE_TOKEN) {
             _wethWithdraw(amount);
             return (preferredToken, amount);
         }
@@ -1791,7 +1871,9 @@ contract JBRouterTerminal is
         if (exists) (sourceProjectId, amount) = abi.decode(creditData, (uint256, uint256));
     }
 
-    /// @dev `ERC-2771` specifies the context as being a single address (20 bytes).
+    /// @notice Return the ERC-2771 context suffix length used by the inherited forwarder-aware context.
+    /// @return suffixLength The number of bytes appended to calldata for the forwarded sender.
+    /// @dev ERC-2771 specifies the context as a single address, which is always 20 bytes.
     function _contextSuffixLength() internal view override returns (uint256) {
         return super._contextSuffixLength();
     }
@@ -1864,8 +1946,8 @@ contract JBRouterTerminal is
         if (address(POOL_MANAGER) == address(0)) return updatedBestPool;
 
         // Convert WETH -> address(0) for V4 native ETH representation.
-        address v4In = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
-        address v4Out = _isWeth(normalizedTokenOut) ? address(0) : normalizedTokenOut;
+        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        address v4Out = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
 
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
@@ -2195,6 +2277,11 @@ contract JBRouterTerminal is
     /// front-ends should supply `quoteForSwap` metadata for V4 swaps whenever possible so the user's slippage
     /// tolerance reflects a recent, off-chain-verified price. When no external quote can be provided, this fallback
     /// is still available as an accepted-risk convenience path.
+    /// @param key The V4 pool key describing the pool to quote against.
+    /// @param normalizedTokenIn The normalized token being sold into the pool.
+    /// @param normalizedTokenOut The normalized token being bought from the pool.
+    /// @param amount The exact input amount being quoted.
+    /// @return minAmountOut The quoted minimum output after the router's slippage model is applied.
     function _getV4SpotQuote(
         PoolKey memory key,
         address normalizedTokenIn,
@@ -2243,8 +2330,8 @@ contract JBRouterTerminal is
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
         // V4 uses address(0) for native ETH; map WETH so OracleLibrary token sorting matches the pool.
-        normalizedTokenIn = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
-        normalizedTokenOut = _isWeth(normalizedTokenOut) ? address(0) : normalizedTokenOut;
+        normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
 
         minAmountOut = _quoteWithSlippage({
             amount: amount,
@@ -2284,13 +2371,6 @@ contract JBRouterTerminal is
     function _balanceOf(address token, address account) internal view returns (uint256) {
         // Read raw ETH balance for the native-token sentinel and ERC20 balance otherwise.
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
-    }
-
-    /// @notice Whether a token matches the router's configured WETH.
-    /// @param token The token to compare.
-    /// @return isWeth A flag indicating whether `token` is WETH.
-    function _isWeth(address token) internal view returns (bool isWeth) {
-        return token == address(WETH);
     }
 
     /// @notice Normalize a token address by replacing the native token sentinel with WETH.
