@@ -1334,7 +1334,7 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         // Convert WETH addresses to V4's native ETH (address(0)) for currency comparison.
-        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        address v4In = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
@@ -1654,13 +1654,13 @@ contract JBRouterTerminal is
         if (token == preferredToken) return (token, amount);
 
         // Wrap ETH into WETH when the preferred token is the ERC20 wrapper.
-        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WETH)) {
+        if (token == JBConstants.NATIVE_TOKEN && _isWeth(preferredToken)) {
             _wethDeposit(amount);
             return (preferredToken, amount);
         }
 
         // Unwrap WETH into ETH when the preferred token is the native-token sentinel.
-        if (token == address(WETH) && preferredToken == JBConstants.NATIVE_TOKEN) {
+        if (_isWeth(token) && preferredToken == JBConstants.NATIVE_TOKEN) {
             _wethWithdraw(amount);
             return (preferredToken, amount);
         }
@@ -1864,8 +1864,8 @@ contract JBRouterTerminal is
         if (address(POOL_MANAGER) == address(0)) return updatedBestPool;
 
         // Convert WETH -> address(0) for V4 native ETH representation.
-        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
-        address v4Out = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+        address v4In = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
+        address v4Out = _isWeth(normalizedTokenOut) ? address(0) : normalizedTokenOut;
 
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
@@ -2243,8 +2243,8 @@ contract JBRouterTerminal is
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
         // V4 uses address(0) for native ETH; map WETH so OracleLibrary token sorting matches the pool.
-        normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
-        normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+        normalizedTokenIn = _isWeth(normalizedTokenIn) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = _isWeth(normalizedTokenOut) ? address(0) : normalizedTokenOut;
 
         minAmountOut = _quoteWithSlippage({
             amount: amount,
@@ -2292,6 +2292,13 @@ contract JBRouterTerminal is
     function _normalize(address token) internal view returns (address) {
         // Replace the native-token sentinel with WETH so ETH and WETH share one routing representation.
         return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
+    }
+
+    /// @notice Whether a token matches the router's configured WETH.
+    /// @param token The token to compare.
+    /// @return isWeth A flag indicating whether `token` is WETH.
+    function _isWeth(address token) internal view returns (bool isWeth) {
+        return token == address(WETH);
     }
 
     /// @notice Discover a pool and compute the minimum acceptable output for a swap.
