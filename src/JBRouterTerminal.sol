@@ -2163,27 +2163,38 @@ contract JBRouterTerminal is
         });
     }
 
-    /// @notice Get a spot-price-based quote with dynamic slippage for a V4 pool.
-    /// @dev V4 vanilla pools have no TWAP oracle. Uses spot tick with the same sigmoid slippage formula.
+    /// @notice Get an automatic V4 quote with dynamic slippage.
+    /// @dev Prefers a hook-provided geomean/TWAP quote when available. Falls back to the pool's spot tick otherwise.
+    /// This fallback is an accepted product risk for programmatic integrations that cannot provide an external quote,
+    /// but it should be understood as a bounded-convenience path rather than a fully manipulation-resistant one.
     ///
     /// SECURITY NOTE: The spot price read from `POOL_MANAGER.getSlot0(id)` is an instantaneous value
     /// that can be manipulated within the same block (e.g. via sandwich attacks or flash loans). Unlike V3 pools,
     /// V4 vanilla pools do not expose a built-in TWAP oracle, so there is no manipulation-resistant price source
     /// available on-chain for automatic quoting.
     ///
+    /// Accepted operating envelope:
+    ///   1. This path is intended mainly for routine flows against sufficiently deep pools where the cost of
+    ///      manipulating the spot price is expected to outweigh likely extractable value.
+    ///   2. Deep liquidity reduces practical risk, but does NOT remove the underlying same-block manipulation surface.
+    ///   3. Thin pools, newly initialized pools, and unusually large swaps should not rely on this fallback.
+    ///
     /// Mitigations in place:
     ///   1. Users SHOULD provide a `quoteForSwap` value in the payment metadata (obtained from an off-chain
     ///      quoter or RPC simulation). When present, this function is bypassed entirely — see `_pickPoolAndQuote`.
-    ///   2. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
+    ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this function uses that oracle-derived tick instead
+    ///      of spot.
+    ///   3. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
     ///      (pool fee + 1%, with a hard floor of 2%), which bounds the worst-case loss even if the spot price is
     ///      manipulated. For small swaps in deep pools the tolerance stays near this floor; for larger swaps it
     ///      scales up to the 88% ceiling via a continuous sigmoid curve.
-    ///   3. Pool discovery (`_discoverPool`) may select a V3 pool with TWAP if it has more liquidity, avoiding
+    ///   4. Pool discovery (`_discoverPool`) may select a V3 pool with TWAP if it has more liquidity, avoiding
     ///      this V4 spot-price path altogether.
     ///
-    /// Despite these mitigations, the spot-based quote does NOT provide full MEV protection. Integrators and
-    /// front-ends should always supply `quoteForSwap` metadata for V4 swaps to ensure the user's slippage
-    /// tolerance reflects a recent, off-chain-verified price.
+    /// Despite these mitigations, the spot-based fallback does NOT provide full MEV protection. Integrators and
+    /// front-ends should supply `quoteForSwap` metadata for V4 swaps whenever possible so the user's slippage
+    /// tolerance reflects a recent, off-chain-verified price. When no external quote can be provided, this fallback
+    /// is still available as an accepted-risk convenience path.
     function _getV4SpotQuote(
         PoolKey memory key,
         address normalizedTokenIn,
@@ -2284,19 +2295,21 @@ contract JBRouterTerminal is
     }
 
     /// @notice Discover a pool and compute the minimum acceptable output for a swap.
-    /// @dev Uses a user-provided quote if available, otherwise falls back to TWAP (V3) or spot price (V4)
+    /// @dev Uses a user-provided quote if available, otherwise falls back to TWAP (V3) or automatic V4 quoting
     /// with dynamic slippage.
     /// @dev For V4 pools without TWAP-capable hooks, `minAmountOut` is derived from the same-block spot tick, which is
-    /// manipulable via sandwich attacks. Integrators should supply `quoteForSwap` metadata for sandwich protection on
-    /// V4 routes.
+    /// manipulable via sandwich attacks. This is an accepted risk for integrations that cannot source external quotes,
+    /// especially when routing through deep pools and routine swap sizes, but it should not be treated as full MEV
+    /// protection. Integrators should still supply `quoteForSwap` metadata whenever they can.
     ///
     /// Priority for `minAmountOut`:
     ///   1. **User-provided quote** — If `quoteForSwap` is present in `metadata`, it is used directly.
     ///      This is the recommended path for MEV protection, especially for V4 pools.
     ///   2. **V3 TWAP** — If the best pool is V3, uses a manipulation-resistant time-weighted average price.
-    ///   3. **V4 spot price** — If the best pool is V4, uses the instantaneous `getSlot0` tick. This is
-    ///      manipulable within the same block (see `_getV4SpotQuote` security note). The sigmoid slippage
-    ///      formula provides a floor but not full MEV protection.
+    ///   3. **V4 automatic quote** — If the best pool is V4, first attempts a hook-provided oracle quote and
+    ///      otherwise falls back to the instantaneous `getSlot0` tick. The spot fallback is manipulable within the
+    ///      same block (see `_getV4SpotQuote` security note). The sigmoid slippage formula provides a floor but not
+    ///      full MEV protection.
     ///
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
     /// @param normalizedTokenIn The normalized input token address.
