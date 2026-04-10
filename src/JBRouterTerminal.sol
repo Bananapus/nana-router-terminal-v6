@@ -220,7 +220,10 @@ contract JBRouterTerminal is
     /// @notice Empty implementation to satisfy the interface. Accounting contexts are determined dynamically.
     /// @param projectId The ID of the project whose accounting contexts would otherwise be configured.
     /// @param accountingContexts Ignored because this terminal derives accounting contexts at runtime.
-    function addAccountingContextsFor(uint256 projectId, JBAccountingContext[] calldata accountingContexts)
+    function addAccountingContextsFor(
+        uint256 projectId,
+        JBAccountingContext[] calldata accountingContexts
+    )
         external
         override
     {}
@@ -275,10 +278,7 @@ contract JBRouterTerminal is
             metadata: metadata
         });
 
-        _afterTransferFor({
-            destTerminal: destTerminal,
-            token: token
-        });
+        _afterTransferFor({destTerminal: destTerminal, token: token});
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
@@ -295,7 +295,11 @@ contract JBRouterTerminal is
     /// @param token The token whose balance migration was requested.
     /// @param to The destination terminal that would receive migrated funds.
     /// @return balance Always returns 0 because the router does not hold project balances.
-    function migrateBalanceOf(uint256 projectId, address token, IJBTerminal to)
+    function migrateBalanceOf(
+        uint256 projectId,
+        address token,
+        IJBTerminal to
+    )
         external
         pure
         override
@@ -367,10 +371,7 @@ contract JBRouterTerminal is
             metadata: metadata
         });
 
-        _afterTransferFor({
-            destTerminal: destTerminal,
-            token: token
-        });
+        _afterTransferFor({destTerminal: destTerminal, token: token});
 
         // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
         _enforceStandardTerminalReceipt({
@@ -501,7 +502,12 @@ contract JBRouterTerminal is
     /// accounting-context list.
     /// @param projectId The project whose accounting contexts were requested.
     /// @return contexts An empty array of `JBAccountingContext`.
-    function accountingContextsOf(uint256 projectId) external pure override returns (JBAccountingContext[] memory contexts) {
+    function accountingContextsOf(uint256 projectId)
+        external
+        pure
+        override
+        returns (JBAccountingContext[] memory contexts)
+    {
         projectId;
         contexts = new JBAccountingContext[](0);
     }
@@ -513,7 +519,12 @@ contract JBRouterTerminal is
     /// @param decimals The fixed-point precision the caller wanted the surplus returned in.
     /// @param currency The currency the caller wanted the surplus returned in.
     /// @return surplus Always returns 0 because the router does not own project treasury balances.
-    function currentSurplusOf(uint256 projectId, address[] calldata tokens, uint256 decimals, uint256 currency)
+    function currentSurplusOf(
+        uint256 projectId,
+        address[] calldata tokens,
+        uint256 decimals,
+        uint256 currency
+    )
         external
         pure
         override
@@ -1103,12 +1114,7 @@ contract JBRouterTerminal is
     /// @notice Run the common post-transfer cleanup after forwarding funds into a destination terminal.
     /// @param destTerminal The terminal that just received the forwarded call.
     /// @param token The token that was forwarded into the destination terminal.
-    function _afterTransferFor(
-        IJBTerminal destTerminal,
-        address token
-    )
-        internal
-    {
+    function _afterTransferFor(IJBTerminal destTerminal, address token) internal {
         // Revoke any leftover allowance the destination terminal did not pull so routed calls do not leave approvals
         // hanging around after the terminal finishes its pull.
         if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
