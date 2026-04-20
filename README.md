@@ -1,9 +1,14 @@
 # Juicebox Router Terminal
 
-`@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best available route.
+`@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best previewed route it can resolve from the configured candidates.
 
-Docs: <https://docs.juicebox.money>
-Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md)
+Docs: <https://docs.juicebox.money>  
+Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md)  
+User journeys: [USER_JOURNEYS.md](./USER_JOURNEYS.md)  
+Skills: [SKILLS.md](./SKILLS.md)  
+Risks: [RISKS.md](./RISKS.md)  
+Administration: [ADMINISTRATION.md](./ADMINISTRATION.md)  
+Audit instructions: [AUDIT_INSTRUCTIONS.md](./AUDIT_INSTRUCTIONS.md)
 
 ## Overview
 
@@ -16,7 +21,7 @@ It can route through:
 - Uniswap V3 or V4 swaps
 - recursive Juicebox token cash outs when the input itself is a project token
 
-Projects can use the registry contract to choose a project-specific router terminal or fall back to a default.
+Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default terminal.
 
 Use this repo when UX requires "pay with many tokens, settle into the right one." Do not use it as a replacement for downstream terminal accounting or as an authoritative decimal source.
 
@@ -28,7 +33,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
-| `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the best route preview for the router terminal. |
+| `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
 ## Mental Model
 
@@ -67,6 +72,14 @@ The shortest useful reading order is:
 - accepted-token accounting and final balance changes live in the downstream terminal, usually in `nana-core-v6`
 
 That separation is the reason a successful route can still end in a downstream terminal behavior you did not expect.
+
+## High-Signal Tests
+
+1. `test/RouterTerminal.t.sol`
+2. `test/RouterTerminalPreviewFork.t.sol`
+3. `test/RouterTerminalCashOutFork.t.sol`
+4. `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
+5. `test/codex/CashOutCircularPrimaryTerminal.t.sol`
 
 ## Install
 
@@ -116,3 +129,9 @@ script/
 - final terminal-facing ERC-20 hops must be standard tokens; lossy terminal pulls are rejected on both router and registry paths
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
+
+## For AI Agents
+
+- Do not claim the router is the accounting source of truth after forwarding.
+- Read the preview, recursive cash-out, and registry tests before summarizing path selection behavior.
+- If the route ends in surprising accounting, move to the downstream terminal in `nana-core-v6`.
