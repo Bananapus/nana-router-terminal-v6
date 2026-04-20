@@ -1,6 +1,6 @@
 # Juicebox Router Terminal
 
-`@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best previewed route it can resolve from the configured candidates.
+`@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best route it can resolve from the configured candidates.
 
 Docs: <https://docs.juicebox.money>  
 Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md)  
@@ -19,7 +19,7 @@ It can route through:
 - direct forwarding when the destination already accepts the input token
 - wrapping or unwrapping native ETH and WETH
 - Uniswap V3 or V4 swaps
-- recursive Juicebox token cash outs when the input itself is a project token
+- recursive Juicebox token cash outs when the input is itself a project token
 
 Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default terminal.
 
@@ -60,18 +60,18 @@ The shortest useful reading order is:
 
 ## Integration Traps
 
-- projects that expose a router terminal still settle into ordinary Juicebox terminals underneath; downstream semantics still matter
-- route discovery and route execution are related but not identical, especially when liquidity or metadata-supplied quotes move
+- projects that expose a router terminal still settle into ordinary Juicebox terminals underneath
+- route discovery and route execution are related but not identical, especially when liquidity or caller-supplied quote data moves
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
-- the registry layer changes who a project routes through, but not what the downstream terminal ultimately is
+- the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 
 ## Where State Lives
 
-- route-selection logic lives in `JBRouterTerminal`
-- per-project router choice and lock status live in `JBRouterTerminalRegistry`
-- accepted-token accounting and final balance changes live in the downstream terminal, usually in `nana-core-v6`
+- route-selection logic: `JBRouterTerminal`
+- per-project router choice and lock status: `JBRouterTerminalRegistry`
+- accepted-token accounting and final balance changes: the downstream terminal, usually in `nana-core-v6`
 
-That separation is the reason a successful route can still end in a downstream terminal behavior you did not expect.
+That separation is why a successful route can still end in downstream terminal behavior you did not expect.
 
 ## High-Signal Tests
 
@@ -125,8 +125,8 @@ script/
 - the router synthesizes accounting context for discovery and should not be treated as an accounting-truth surface
 - swap previews are best-effort estimates and depend on current pool state plus caller-supplied quote data
 - recursive cash-out routing increases complexity when the input token is itself a Juicebox project token
-- slippage and sandwich resistance depend on the quality of the quote path chosen for the route
-- final terminal-facing ERC-20 hops must be standard tokens; lossy terminal pulls are rejected on both router and registry paths
+- slippage and sandwich resistance depend on the quality of the chosen quote path
+- final terminal-facing ERC-20 hops must be standard tokens; lossy terminal pulls are rejected
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
 
