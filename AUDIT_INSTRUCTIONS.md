@@ -2,7 +2,7 @@
 
 This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
 
-## Objective
+## Audit Objective
 
 Find issues that:
 - route user funds through an incorrect pool or protocol path
@@ -25,7 +25,13 @@ Key dependencies:
 - `nana-core-v6`
 - Uniswap V3 and V4 integration surfaces
 
-## System Model
+## Start Here
+
+1. `src/JBRouterTerminal.sol`
+2. `src/JBRouterTerminalRegistry.sol`
+3. `src/libraries/JBSwapLib.sol`
+
+## Security Model
 
 The router terminal:
 - discovers what token a project’s terminal accepts
@@ -34,6 +40,22 @@ The router terminal:
 - optionally handles Permit2-funded transfers
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
+
+## Roles And Privileges
+
+| Role | Powers | How constrained |
+|------|--------|-----------------|
+| User or relayer | Initiate routed payment with beneficiary and slippage intent | Must receive exact refund semantics requested |
+| Registry controller | Set default or allowed router terminals | Must not redirect projects unexpectedly |
+| Router terminal | Hold funds only transiently during routing | Must not retain leftovers across flows |
+
+## Integration Assumptions
+
+| Dependency | Assumption | What breaks if wrong |
+|------------|------------|----------------------|
+| `nana-core-v6` | Terminal discovery and pay semantics are accurate | Routed value lands in the wrong place |
+| Uniswap V3 and V4 | Callback settlement and pool discovery are authentic | Slippage and final forwarded amount diverge |
+| Permit2 | Allowances and deadlines reflect user intent | Unauthorized transfer or stuck routing behavior |
 
 ## Critical Invariants
 
@@ -49,16 +71,7 @@ The quoted path, callback settlement, and final forwarded amount must all descri
 4. Registry controls stay narrow
 Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
 
-## Threat Model
-
-Prioritize:
-- V3 or V4 callback reentrancy
-- sandwiching around discovered pool liquidity
-- beneficiary versus payer refund mismatches
-- Permit2 allowance or deadline misuse
-- races around registry terminal locking
-
-## Hotspots
+## Attack Surfaces
 
 - payment entrypoints and refund logic
 - V3 callback verification
@@ -66,18 +79,8 @@ Prioritize:
 - pool discovery and best-path selection
 - registry allowlist and lock behavior
 
-## Build And Verification
+## Verification
 
-Standard workflow:
 - `npm install`
 - `forge build`
 - `forge test`
-
-Current tests focus on:
-- refund edge cases
-- payer tracking
-- Permit2 failure handling
-- cash-out-assisted routes
-- reentrancy and sandwich-sensitive fork cases
-
-Strong findings in this repo usually show the router holding onto value or satisfying user slippage checks with the wrong sign, recipient, or output token.

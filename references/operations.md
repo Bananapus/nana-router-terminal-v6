@@ -10,8 +10,10 @@
 
 - If you edit route discovery, verify both direct acceptance and swap-based routes.
 - If you edit the cash-out loop, check credit-based flows and fork tests, not just simple payments.
-- If you edit slippage or quote logic, inspect [`src/libraries/JBSwapLib.sol`](../src/libraries/JBSwapLib.sol) and the preview tests together.
-- If you touch Permit2 or metadata parsing, verify the corresponding interface and struct usage in [`src/interfaces/`](../src/interfaces/) and [`src/structs/`](../src/structs/).
+- If you edit slippage or quote logic, inspect [`src/JBPayRouteResolver.sol`](../src/JBPayRouteResolver.sol) and the preview tests together.
+- If you edit preview behavior, verify route ranking still normalizes buyback-hook hints and still agrees with execution.
+- If you edit refund or partial-fill handling, verify baseline snapshots and destination-terminal receipt enforcement together.
+- If you touch Permit2 or metadata parsing, verify the corresponding interfaces and structs in `src/interfaces/` and `src/structs/` together with the fork tests.
 
 ## Common Failure Modes
 
@@ -26,4 +28,5 @@
 - [`test/RouterTerminalRegistry.t.sol`](../test/RouterTerminalRegistry.t.sol) for registry rules.
 - [`test/RouterTerminalERC2771.t.sol`](../test/RouterTerminalERC2771.t.sol) for trusted-forwarder behavior.
 - [`test/RouterTerminalSandwichFork.t.sol`](../test/RouterTerminalSandwichFork.t.sol) and [`test/RouterTerminalFeeCashOutFork.t.sol`](../test/RouterTerminalFeeCashOutFork.t.sol) for adversarial routing conditions.
+- [`test/audit/LeftoverRefund.t.sol`](../test/audit/LeftoverRefund.t.sol), [`test/audit/PreviewPrimaryTerminalMismatch.t.sol`](../test/audit/PreviewPrimaryTerminalMismatch.t.sol), and [`test/codex/CashOutCircularPrimaryTerminal.t.sol`](../test/codex/CashOutCircularPrimaryTerminal.t.sol) for the route-selection and refund traps most likely to regress.
 - [`test/TestAuditGaps.sol`](../test/TestAuditGaps.sol) for pinned edge cases.

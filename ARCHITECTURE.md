@@ -2,67 +2,92 @@
 
 ## Purpose
 
-`nana-router-terminal-v6` lets a payer fund a Juicebox project with a token the project does not directly accept. It discovers the destination token, unwraps or wraps native assets when needed, optionally cashes out upstream JB project tokens, and swaps through the deepest available Uniswap V3 or V4 route before forwarding the final asset to the destination terminal.
-The router is intentionally heuristic: it does not exhaustively search every viable pool for the absolute best execution price.
+`nana-router-terminal-v6` lets a payer fund a Juicebox project with a token the project does not directly accept. It discovers the destination token, unwraps or wraps native assets when needed, can recursively cash out upstream JB project tokens, and swaps through bounded Uniswap V3 or V4 routes before forwarding value to the destination terminal.
 
-## Boundaries
+The router is intentionally heuristic. It does not search every possible route for a globally optimal price.
 
-- The router is a terminal-shaped payment adapter, not a canonical accounting terminal.
-- It owns routing, swapping, quoting, and refund behavior.
-- Final accounting still occurs at the destination terminal that actually accepts the routed token.
-- Pool selection is optimized for simple, bounded route discovery, not full best-execution search across all candidate pools.
+## System Overview
 
-## Main Components
+`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline. Final accounting still occurs in the downstream terminal selected through `nana-core-v6`.
 
-| Component | Responsibility |
-| --- | --- |
-| `JBRouterTerminal` | Source-token intake, route discovery, swapping, and forwarding |
-| `JBRouterTerminalRegistry` | Project-level selection and locking of router terminal instances |
-| `JBPayRouteResolver` | Helper contract that evaluates pay-route preview candidates without bloating router runtime size |
-| `JBSwapLib` | Pool discovery, quoting, and slippage helpers |
-| `PoolInfo`, `CashOutPathCandidates`, and interfaces | Typed routing metadata and registry/payer integration surfaces |
+## Core Invariants
 
-## Runtime Model
+- The router's own accounting context is synthetic and must not be treated as the project ledger.
+- Preview route discovery and live execution must stay aligned.
+- Refund behavior is part of correctness, not UX.
+- Registry locking prevents silent migration to untrusted router implementations.
+- Final terminal-facing ERC-20 hops only support standard, non-lossy transfers.
+- Recursive project-token cashout routing is intentionally bounded; non-converging paths should fail instead of looping.
+- Caller reclaim minima only apply to the first cashout hop, because later hops may change token units.
+- Circular `router -> registry -> same router` forwarding remains blocked in the registry.
+
+## Modules
+
+| Module | Responsibility | Notes |
+| --- | --- | --- |
+| `JBRouterTerminal` | Intake, route discovery, swap execution, forwarding, and refunds | Main runtime surface |
+| `JBRouterTerminalRegistry` | Project-level router selection, locking, and proxy forwarding to the resolved router terminal | Governance, safety, and proxy surface |
+| `JBPayRouteResolver` | Preview candidate evaluation | Helper to keep runtime size bounded |
+| `JBSwapLib` and routing structs | Pool discovery, quoting, and route metadata | Shared routing logic |
+
+## Trust Boundaries
+
+- Final accounting remains in the downstream terminal selected through `JBDirectory`.
+- The router trusts Uniswap V3, Uniswap V4, Permit2, and optional payer trackers for routing-side behavior.
+- Fee-on-transfer tokens are only tolerated on ingress where received-balance deltas can be reconciled.
+- The registry is trusted to resolve and forward into the intended router terminal implementation for a project.
+
+## Critical Flows
+
+### Route And Pay
 
 ```text
 router pay call
   -> accept native, ERC-20, or JB-token-like input
   -> if input is a project token, recursively cash it out first
-  -> resolve the destination token the project can actually receive
-  -> pick the best direct, wrap/unwrap, or swap route
-  -> execute the route and forward the result to the destination terminal
-  -> return any leftover input to the original payer when possible
+  -> resolve the destination token the project terminal actually accepts
+  -> choose the best direct, wrap/unwrap, or swap path under the router's bounded candidate-discovery heuristic
+  -> execute the route and forward the result to the downstream terminal
+  -> refund leftover input when possible
 ```
 
-## Critical Invariants
+## Accounting Model
 
-- The router's own accounting context is synthetic. Consumers should not treat it as the source of truth for project accounting.
-- Pool discovery and quote logic must stay aligned between preview and execution paths.
-- Refund resolution is part of correctness, not ergonomics. Partial fills without correct refunds create value leaks.
-- Registry locking is a security feature; it prevents projects from being silently switched to untrusted router implementations.
-- Final forwarded ERC-20 hops are only supported for standard tokens whose destination-terminal pull transfers the full nominal amount without transfer fees or burns.
-- Circular `router -> registry -> same router` forwarding is blocked in the registry, not by teaching the router about registry internals.
+The router does not own project balances. It owns transient route accounting: input reconciliation, swap execution, forwarded amount, and refund resolution.
 
-## Where Complexity Lives
+Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding. `JBPayRouteResolver` narrows candidate tokens and usable external terminals so the live router does not need to brute-force every possibility inline.
 
-- The router composes multiple route families: direct, wrap/unwrap, recursive JB cash-out, and DEX swaps.
-- Native-asset handling and refund handling are the most failure-prone parts of the implementation.
-- Liquidity discovery across V3 and V4 is simple to describe but easy to desynchronize between preview and live execution.
-- V4 discovery intentionally searches both vanilla pools and pools using the canonical `UNIV4_HOOK`, because buyback-hook and LP-split integrations rely on that hook-backed oracle path.
-- “Best route” in this system means the best route under the router's discovery heuristic, not a guarantee of globally optimal output across every live pool.
-- Fee-on-transfer or otherwise lossy ERC-20s are only tolerated on ingress where the router can reconcile the received balance delta. They are rejected on the router's final terminal-facing hop. The registry does not perform independent receipt enforcement; it relies on the downstream router terminal to reject lossy transfers.
-- The preview candidate fanout lives in `JBPayRouteResolver`, but downstream `previewPayFor(...)` calls still originate from the router so payer-sensitive previews match execution context.
+## Security Model
 
-## Dependencies
-
-- `nana-core-v6` terminal and directory surfaces
-- Uniswap V3, Uniswap V4, and Permit2
-- Optional `IJBPayerTracker` intermediaries for refund attribution
+- Native-asset handling and refunds are the most failure-prone paths.
+- V3 and V4 discovery must stay synchronized between preview and live execution.
+- V4 discovery intentionally considers both vanilla pools and pools using the canonical `UNIV4_HOOK`.
+- The router's “best route” claim is only as strong as its bounded discovery set and external-terminal safety checks. It is not a global optimizer.
+- Recursive cashout behavior, preferred-token handling, and one-shot source overrides are tightly coupled; changing one can silently desynchronize preview from execution.
+- “Best route” means best under the bounded discovery heuristic, not globally optimal routing.
 
 ## Safe Change Guide
 
-- Keep route selection and execution semantics paired. If preview and execution diverge, frontends will misprice user flows.
-- Be cautious with native-token handling; wrap and unwrap edge cases are where routers usually leak value.
-- If you change recursive cash-out behavior, inspect the hop limit and failure modes together.
-- Do not promote the router into a stateful treasury layer.
-- Treat any new convenience path as a new asset-conservation proof obligation.
+- Keep route discovery and route execution semantics paired.
+- Be conservative with native wrapping, unwrapping, and refund behavior.
+- If recursive cash-out logic changes, review hop limits and failure handling together.
+- If metadata semantics change, re-check first-hop reclaim minima, one-shot source overrides, and preferred-token routing together.
+- Do not turn the router into a persistent treasury layer.
+
+## Canonical Checks
+
+- bounded recursive cash-out behavior:
+  `test/regression/CashOutLoopLimit.t.sol`
+- preview versus execution terminal alignment:
+  `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
+- router-wide route and refund invariants:
+  `test/invariant/RouterTerminalInvariant.t.sol`
+
+## Source Map
+
+- `src/JBRouterTerminal.sol`
+- `src/JBRouterTerminalRegistry.sol`
+- `src/JBPayRouteResolver.sol`
+- `test/regression/CashOutLoopLimit.t.sol`
+- `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
+- `test/invariant/RouterTerminalInvariant.t.sol`

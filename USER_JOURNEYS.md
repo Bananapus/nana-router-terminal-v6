@@ -1,96 +1,181 @@
 # User Journeys
 
-## Who This Repo Serves
+## Repo Purpose
 
-- projects that want "pay with many tokens, settle into the right terminal asset"
-- frontends and aggregators previewing multi-hop or project-token-based payment routes
-- operators choosing and locking a router terminal per project
-- auditors reviewing swap-path, refund, and downstream-terminal interactions
+This repo is the project-facing payment router for "user has X, project wants Y."
+It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token and
+credit-based sources. It does not replace the downstream terminal that finally receives and accounts for value.
+
+## Primary Actors
+
+- projects that want broad input-token UX while preserving canonical terminal settlement
+- frontends and aggregators previewing payment routes
+- operators choosing and locking a router per project
+- auditors reviewing route discovery, refund behavior, and downstream terminal interactions
+
+## Key Surfaces
+
+- `JBRouterTerminal`: route discovery and execution
+- `JBRouterTerminalRegistry`: router selection, locking, forwarding, and registry-held balance migration
+- `JBPayRouteResolver`: preview and route-resolution helper logic
 
 ## Journey 1: Put A Router In Front Of A Project's Canonical Terminal
 
-**Starting state:** the project already has a canonical terminal but wants a broader input-token UX.
+**Actor:** project operator.
 
-**Success:** the project has a router terminal configured in the registry and users can rely on it as the approved entrypoint.
+**Intent:** broaden input-token UX without changing the project's downstream terminal accounting model.
 
-**Flow**
+**Preconditions**
+- the project already has a canonical terminal
+- the team wants a router in front of that terminal rather than a new accounting surface
+
+**Main Flow**
 1. Deploy or select a `JBRouterTerminal` instance.
 2. Register it for the project in `JBRouterTerminalRegistry`, or rely on the default router if appropriate.
 3. Optionally lock the registry choice so later callers cannot redirect the project to a different router.
 4. Frontends can now route users to a known router without changing downstream accounting contracts.
 
+**Failure Modes**
+- teams configure a router but do not update the registry entry the frontend actually reads
+- operators leave the router mutable longer than intended and downstream integrations assume it is fixed
+
+**Postconditions**
+- the project has a router terminal configured in the registry and users can rely on it as the approved entrypoint
+
 ## Journey 2: Pay With Whatever Token The User Already Has
 
-**Starting state:** the user wants exposure to a project but does not hold the exact token the destination terminal accepts.
+**Actor:** payer.
 
-**Success:** the router converts the user's asset into the terminal's accepted asset and forwards the payment.
+**Intent:** route a payment from the user's existing asset into the project's accepted terminal asset.
 
-**Flow**
+**Preconditions**
+- the user wants exposure to a project but does not hold the exact token the destination terminal accepts
+
+**Main Flow**
 1. The payer calls `pay(...)` on `JBRouterTerminal` with the input token and destination project.
 2. The router discovers the destination terminal and accepted token.
 3. It decides whether the path is direct forwarding, wrap or unwrap, UniV3 swap, or UniV4 swap.
 4. It settles into the downstream terminal and passes along the payment metadata that the project actually expects.
 
-**Failure cases that matter:** stale quotes, insufficient liquidity, permit or allowance failures, leftover refund paths, and metadata that is valid for the terminal but not for the route discovery assumptions.
+**Failure Modes**
+- quotes are stale or liquidity moved before execution
+- permit, allowance, or refund handling breaks mid-route
+- metadata is valid for the destination terminal but not for route discovery assumptions
+
+**Postconditions**
+- the router converts the user's asset into the terminal's accepted asset and forwards the payment
 
 ## Journey 3: Pay With A Juicebox Project Token Instead Of An External Asset
 
-**Starting state:** the user holds a project token and wants to route its value into another project payment.
+**Actor:** payer holding a project token.
 
-**Success:** the router handles the recursive path correctly instead of assuming the input is a normal ERC-20.
+**Intent:** use project-token value as the source leg for a routed payment.
 
-**Flow**
+**Preconditions**
+- the user holds a Juicebox project token rather than a plain external asset
+
+**Main Flow**
 1. The router recognizes that the input token is itself a Juicebox project token.
 2. It may cash out that token through its own terminal path before continuing toward the destination project's accepted asset.
 3. The final asset is then forwarded into the destination terminal as a normal payment.
 
-**Edge conditions that change user experience:** cash-out loop limits, cross-project routing assumptions, preview drift, and slippage when the first leg is a project-token reclaim rather than a swap.
+**Failure Modes**
+- the reclaim leg behaves differently from a normal swap and the user or frontend misprices it
+- cross-project routing assumptions are wrong for the chosen token source
+
+**Postconditions**
+- the router handles the recursive path correctly instead of assuming the input is a normal ERC-20
 
 ## Journey 4: Route A Payment From Credits Or A Cash-Out Source
 
-**Starting state:** the payer has Juicebox credits or a known source project position instead of an ordinary wallet token balance.
+**Actor:** payer or integration using a non-wallet source position.
 
-**Success:** the router can pull that source value, cash it out if needed, and continue routing toward the destination project.
+**Intent:** route a payment from Juicebox credits or another known source-project position.
 
-**Flow**
+**Preconditions**
+- the payer has Juicebox credits or a known source project position instead of an ordinary wallet token balance
+
+**Main Flow**
 1. Encode the `cashOutSource` or equivalent metadata the router expects.
 2. Let the router pull credits or source-project value through the token and terminal surfaces it integrates with.
 3. Continue through the route-discovery process only after the source value has been converted into something the destination path can use.
 
-**Failure cases that matter:** sending `msg.value` alongside credit-based routing, wrong source-project metadata, and assuming credit cash-out behaves like direct ERC-20 routing.
+**Failure Modes**
+- `msg.value` is sent alongside credit-based routing and the route shape is wrong
+- source-project metadata is malformed or points at the wrong position
+- integrations assume credit cash-out behaves like direct ERC-20 routing
+
+**Postconditions**
+- the router can pull that source value, cash it out if needed, and continue routing toward the destination project
 
 ## Journey 5: Preview Routes And Protect The User Against Bad Settlement
 
-**Starting state:** a frontend or integration needs to show likely output before execution.
+**Actor:** frontend or aggregator.
 
-**Success:** the quote is useful, and execution either lands close to it or fails clearly when conditions changed too much.
+**Intent:** preview the route and protect users against materially worse execution.
 
-**Flow**
+**Preconditions**
+- a frontend or integration needs to show likely output before execution
+
+**Main Flow**
 1. Call the router's preview or quote path before execution.
 2. Surface expected destination amount, input requirements, and route shape to the user.
 3. On execution, enforce the relevant minimums and refund rules so the user is not silently settled on a materially worse path.
 
+**Failure Modes**
+- preview assumptions become stale between quote and execution
+- the frontend surfaces a route as deterministic when the final path still depends on live market state
+
+**Postconditions**
+- the quote is useful, and execution either lands close to it or fails clearly when conditions changed too much
+
 ## Journey 6: Lock Down Which Router A Project Uses
 
-**Starting state:** the project has chosen a router and wants to prevent later redirection.
+**Actor:** authorized operator.
 
-**Success:** the registry records the chosen router terminal and locks the decision.
+**Intent:** make the chosen router durable instead of leaving later redirection open.
 
-**Flow**
+**Preconditions**
+- the project has chosen a router and wants to prevent later redirection
+
+**Main Flow**
 1. An authorized actor sets the project-specific router in the registry.
 2. The actor locks the configuration once operational confidence is high.
 3. Integrations can treat the registry entry as durable infrastructure rather than mutable routing advice.
 
+**Failure Modes**
+- operators lock the wrong router and make recovery harder
+- teams assume a registry entry is locked when it is merely set
+
+**Postconditions**
+- the registry records the chosen router terminal and locks the decision
+
 ## Journey 7: Migrate Registry-Held Balance Or Router Responsibility Safely
 
-**Starting state:** the project is changing router expectations or needs to move balance from a registry-held context.
+**Actor:** operator or migration responder.
 
-**Success:** the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind.
+**Intent:** move router responsibility or registry-held value without stranding balances.
 
-**Flow**
+**Preconditions**
+- the project is changing router expectations or needs to move balance from a registry-held context
+
+**Main Flow**
 1. Use the registry's migration surface when a project's router balance or canonical terminal relationship needs to change.
 2. Verify the destination terminal and router assumptions before moving value.
 3. Update frontends only after the registry state and balance migration agree.
+
+**Failure Modes**
+- balances move to a destination terminal that no longer matches routing assumptions
+- frontends switch early and point users at stale registry state
+
+**Postconditions**
+- the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind
+
+## Trust Boundaries
+
+- this repo is trusted for route discovery and forwarding decisions, not final accounting truth
+- downstream terminals remain the source of actual settlement semantics and balances
+- quote quality depends on the swap and oracle surfaces the chosen route relies on
 
 ## Hand-Offs
 
