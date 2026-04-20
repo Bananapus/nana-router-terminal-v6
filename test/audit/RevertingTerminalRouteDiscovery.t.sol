@@ -29,17 +29,11 @@ contract GoodTerminal {
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
         // forge-lint: disable-next-line(unsafe-typecast)
-        contexts[0] = JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+        contexts[0] =
+            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
     }
 
-    function accountingContextForTokenOf(
-        uint256,
-        address token
-    )
-        external
-        pure
-        returns (JBAccountingContext memory)
-    {
+    function accountingContextForTokenOf(uint256, address token) external pure returns (JBAccountingContext memory) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return JBAccountingContext({token: token, decimals: 18, currency: uint32(uint160(token))});
     }
@@ -53,7 +47,12 @@ contract GoodTerminal {
     )
         external
         pure
-        returns (JBRuleset memory ruleset, uint256 beneficiaryTokenCount, uint256 reservedTokenCount, JBPayHookSpecification[] memory hookSpecifications)
+        returns (
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
     {
         ruleset = JBRuleset({
             cycleNumber: 1,
@@ -155,11 +154,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         terminals[0] = IJBTerminal(address(goodTerminal));
 
         // Mock directory.terminalsOf -> returns the good terminal.
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)),
-            abi.encode(terminals)
-        );
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
 
         // Mock directory.primaryTerminalOf for tokenIn -> address(0) (not directly accepted).
         vm.mockCall(
@@ -198,12 +193,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        (address resolvedTokenOut, IJBTerminal resolvedTerminal) = resolver.resolveTokenOut({
-            router: router,
-            projectId: PROJECT_ID,
-            tokenIn: tokenIn,
-            metadata: ""
-        });
+        (address resolvedTokenOut, IJBTerminal resolvedTerminal) =
+            resolver.resolveTokenOut({router: router, projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""});
 
         assertEq(resolvedTokenOut, tokenA, "should resolve to tokenA from the healthy terminal");
         assertEq(address(resolvedTerminal), address(goodTerminal), "should resolve to goodTerminal");
@@ -223,11 +214,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         terminals[1] = IJBTerminal(address(goodTerminal));
 
         // Mock directory.terminalsOf -> returns both terminals.
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)),
-            abi.encode(terminals)
-        );
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
 
         // Mock directory.primaryTerminalOf for tokenIn -> address(0) (not directly accepted).
         vm.mockCall(
@@ -266,12 +253,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        (address resolvedTokenOut, IJBTerminal resolvedTerminal) = resolver.resolveTokenOut({
-            router: router,
-            projectId: PROJECT_ID,
-            tokenIn: tokenIn,
-            metadata: ""
-        });
+        (address resolvedTokenOut, IJBTerminal resolvedTerminal) =
+            resolver.resolveTokenOut({router: router, projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""});
 
         // The reverting terminal is skipped; the good terminal's token is discovered.
         assertEq(resolvedTokenOut, tokenA, "should discover tokenA despite the reverting terminal");
@@ -291,11 +274,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         terminals[0] = IJBTerminal(address(revertingTerminal));
 
         // Mock directory.terminalsOf -> returns the single reverting terminal.
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)),
-            abi.encode(terminals)
-        );
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
 
         // Mock directory.primaryTerminalOf for tokenIn -> address(0).
         vm.mockCall(
@@ -339,11 +318,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         terminals[1] = IJBTerminal(address(goodTerminal));
 
         // Mock directory.terminalsOf.
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)),
-            abi.encode(terminals)
-        );
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
 
         // Mock directory.primaryTerminalOf for tokenIn -> address(0) (not directly accepted).
         vm.mockCall(
@@ -392,7 +367,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(uint256(100 ether))
         );
 
-        // Mock router.previewCashOutLoopOf -> returns no cashout (destTerminal=0, finalToken=tokenIn, amount unchanged).
+        // Mock router.previewCashOutLoopOf -> returns no cashout (destTerminal=0, finalToken=tokenIn, amount
+        // unchanged).
         vm.mockCall(
             address(router),
             abi.encodeWithSelector(IJBPayRoutePreviewer.previewCashOutLoopOf.selector),
@@ -419,14 +395,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         );
 
         // Call previewBestPayRoute — should succeed despite the reverting terminal.
-        (
-            IJBTerminal destTerminal,
-            address resolvedTokenOut,
-            ,
-            ,
-            uint256 beneficiaryTokenCount,
-            ,
-        ) = resolver.previewBestPayRoute({
+        (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
             projectId: PROJECT_ID,
             tokenIn: tokenIn,
@@ -452,11 +421,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         terminals[0] = IJBTerminal(address(revertingTerminal));
 
         // Mock directory.terminalsOf.
-        vm.mockCall(
-            address(directory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)),
-            abi.encode(terminals)
-        );
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
 
         // Mock directory.primaryTerminalOf for tokenIn -> address(0).
         vm.mockCall(
