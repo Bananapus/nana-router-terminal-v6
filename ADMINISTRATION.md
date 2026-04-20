@@ -11,14 +11,14 @@
 
 ## Purpose
 
-`nana-router-terminal-v6` splits administration between a global registry and project-local terminal selection. The router logic itself is mostly immutable; the mutable control plane lives in `JBRouterTerminalRegistry`.
+`nana-router-terminal-v6` splits administration between a global registry and project-local terminal selection. The router logic itself is mostly immutable. The mutable control plane lives in `JBRouterTerminalRegistry`.
 
 ## Control Model
 
-- `JBRouterTerminalRegistry` is globally `Ownable`.
-- Project owners or delegates choose and can lock their router terminal.
-- `JBRouterTerminal` has immutable routing dependencies and no owner-controlled strategy knobs.
-- Some transaction paths depend on project-local `JBPermissions`, such as `TRANSFER_CREDITS`.
+- `JBRouterTerminalRegistry` is globally `Ownable`
+- project owners or delegates choose and can lock their router terminal
+- `JBRouterTerminal` has immutable routing dependencies and no owner-controlled strategy knobs
+- some transaction paths depend on project-local `JBPermissions`, such as `TRANSFER_CREDITS`
 
 ## Roles
 
@@ -39,38 +39,38 @@
 
 ## Immutable And One-Way
 
-- `lockTerminalFor(...)` is irreversible.
-- Constructor dependencies on the router are immutable.
-- The current default terminal must move before the old default can be disallowed.
+- `lockTerminalFor(...)` is irreversible
+- constructor dependencies on the router are immutable
+- the current default terminal must move before the old default can be disallowed
 
 ## Operational Notes
 
-- Keep the terminal allowlist small and explicit.
-- Change the default terminal carefully because unconfigured projects inherit it.
-- Encourage projects to lock only after validating the resolved terminal and routing behavior.
-- Review credit-cashout routing permissions before relying on that path operationally.
-- Distinguish configuration risk from quote-quality risk: some route-discovery paths are best-effort, and some V4 quote paths can rely on weaker spot-style assumptions when robust history is unavailable.
+- keep the terminal allowlist small and explicit
+- change the default terminal carefully because unconfigured projects inherit it
+- encourage projects to lock only after validating the resolved terminal and routing behavior
+- review credit-cashout routing permissions before relying on that path
+- distinguish configuration risk from quote-quality risk
 
 ## Machine Notes
 
-- Do not treat registry ownership as authority to override locked project choice.
-- Inspect `src/JBRouterTerminalRegistry.sol` and `src/JBRouterTerminal.sol` separately; they govern different control boundaries.
-- If the effective terminal resolution and the documented default differ, stop and resolve the registry state before further actions.
-- If route previews are falling back to weaker discovery or quote paths, do not describe the router as offering uniform oracle-quality guarantees across all pools and states.
+- do not treat registry ownership as authority to override a locked project choice
+- inspect `src/JBRouterTerminalRegistry.sol` and `src/JBRouterTerminal.sol` separately; they govern different control boundaries
+- if effective terminal resolution and the documented default differ, resolve registry state before further actions
+- if route previews are falling back to weaker discovery or quote paths, do not describe the router as offering uniform oracle-quality guarantees
 
 ## Recovery
 
-- Unlocked projects can switch to another allowlisted terminal.
-- Locked projects cannot be unlocked by the registry.
-- Bad immutable router behavior means replacement infrastructure, not in-place edits.
-- Quote-path weakness is usually mitigated operationally with better pool choice, external quoting, or replacement routing infrastructure, not with an owner-only hotfix.
+- unlocked projects can switch to another allowlisted terminal
+- locked projects cannot be unlocked by the registry
+- bad immutable router behavior means replacement infrastructure, not in-place edits
+- quote-path weakness is usually mitigated operationally with better pool choice, external quoting, or replacement routing infrastructure
 
 ## Admin Boundaries
 
-- The registry owner cannot unlock or override a locked project terminal.
-- Project operators cannot set a terminal that the registry does not allow.
-- Router maintainers cannot tune routing heuristics or constructor immutables post-deploy.
-- There is no pause surface in the registry or router.
+- the registry owner cannot unlock or override a locked project terminal
+- project operators cannot set a terminal that the registry does not allow
+- router maintainers cannot tune routing heuristics or constructor immutables post-deploy
+- there is no pause surface in the registry or router
 
 ## Source Map
 

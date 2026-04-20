@@ -68,8 +68,13 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         JBAccountingContext[][] memory allContexts = new JBAccountingContext[][](terminals.length);
         uint256 totalContexts;
         for (uint256 i; i < terminals.length;) {
-            allContexts[i] = terminals[i].accountingContextsOf(projectId);
-            totalContexts += allContexts[i].length;
+            // Wrap in try/catch so a single reverting terminal does not DoS the entire route enumeration.
+            try terminals[i].accountingContextsOf(projectId) returns (JBAccountingContext[] memory ctx) {
+                allContexts[i] = ctx;
+                totalContexts += ctx.length;
+            } catch {
+                // Skip terminals that revert — allContexts[i] remains an empty array.
+            }
             unchecked {
                 ++i;
             }
@@ -165,7 +170,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         for (uint256 i; i < terminals.length;) {
             // Read each terminal's accepted accounting contexts so the scorer can inspect every candidate token.
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(projectId);
+            // Wrap in try/catch so a single reverting terminal does not DoS the entire route discovery.
+            JBAccountingContext[] memory contexts;
+            try terminals[i].accountingContextsOf(projectId) returns (JBAccountingContext[] memory ctx) {
+                contexts = ctx;
+            } catch {
+                // Skip terminals that revert.
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             for (uint256 j; j < contexts.length;) {
                 // Pull the candidate token out of the accounting context being inspected.

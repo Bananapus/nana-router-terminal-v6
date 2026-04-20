@@ -5,6 +5,7 @@ This repo accepts one token and routes value into whatever token a destination p
 ## Audit Objective
 
 Find issues that:
+
 - route user funds through an incorrect pool or protocol path
 - under-deliver relative to quoted or minimum-return semantics
 - refund leftovers to the wrong party or trap them in the router
@@ -14,6 +15,7 @@ Find issues that:
 ## Scope
 
 In scope:
+
 - `src/JBRouterTerminal.sol`
 - `src/JBRouterTerminalRegistry.sol`
 - `src/interfaces/`
@@ -22,6 +24,7 @@ In scope:
 - deployment scripts in `script/`
 
 Key dependencies:
+
 - `nana-core-v6`
 - Uniswap V3 and V4 integration surfaces
 
@@ -34,7 +37,8 @@ Key dependencies:
 ## Security Model
 
 The router terminal:
-- discovers what token a project’s terminal accepts
+
+- discovers what token a project's terminal accepts
 - decides whether to route via wrap/unwrap, V3, V4, Juicebox token cash-out, or a combination
 - forwards value into the destination terminal
 - optionally handles Permit2-funded transfers
@@ -59,17 +63,14 @@ The registry chooses which router terminal instance a project uses and whether t
 
 ## Critical Invariants
 
-1. User intent is preserved
-The actual destination project, beneficiary, minimum output semantics, and refund recipient must match the request and metadata.
-
-2. No leftover value disappears
-Partial fills, failed paths, and overfunded inputs must either be forwarded or refunded to the intended party.
-
-3. Pool discovery and settlement agree
-The quoted path, callback settlement, and final forwarded amount must all describe the same trade.
-
-4. Registry controls stay narrow
-Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
+1. User intent is preserved.  
+   The actual destination project, beneficiary, minimum output semantics, and refund recipient must match the request and metadata.
+2. No leftover value disappears.  
+   Partial fills, failed paths, and overfunded inputs must either be forwarded or refunded to the intended party.
+3. Pool discovery and settlement agree.  
+   The quoted path, callback settlement, and final forwarded amount must all describe the same trade.
+4. Registry controls stay narrow.  
+   Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
 
 ## Attack Surfaces
 

@@ -2,9 +2,7 @@
 
 ## Repo Purpose
 
-This repo is the project-facing payment router for "user has X, project wants Y."
-It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token and
-credit-based sources. It does not replace the downstream terminal that finally receives and accounts for value.
+This repo is the project-facing payment router for "user has X, project wants Y." It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token and credit-based sources. It does not replace the downstream terminal that finally receives and accounts for value.
 
 ## Primary Actors
 
@@ -60,12 +58,12 @@ credit-based sources. It does not replace the downstream terminal that finally r
 **Failure Modes**
 - quotes are stale or liquidity moved before execution
 - permit, allowance, or refund handling breaks mid-route
-- metadata is valid for the destination terminal but not for route discovery assumptions
+- metadata is valid for the destination terminal but not for route-discovery assumptions
 
 **Postconditions**
 - the router converts the user's asset into the terminal's accepted asset and forwards the payment
 
-## Journey 3: Pay With A Juicebox Project Token Instead Of An External Asset
+## Journey 3: Pay With A Juicebox Project Token
 
 **Actor:** payer holding a project token.
 
@@ -86,7 +84,7 @@ credit-based sources. It does not replace the downstream terminal that finally r
 **Postconditions**
 - the router handles the recursive path correctly instead of assuming the input is a normal ERC-20
 
-## Journey 4: Route A Payment From Credits Or A Cash-Out Source
+## Journey 4: Route A Payment From Credits Or Another Cash-Out Source
 
 **Actor:** payer or integration using a non-wallet source position.
 
@@ -98,7 +96,7 @@ credit-based sources. It does not replace the downstream terminal that finally r
 **Main Flow**
 1. Encode the `cashOutSource` or equivalent metadata the router expects.
 2. Let the router pull credits or source-project value through the token and terminal surfaces it integrates with.
-3. Continue through the route-discovery process only after the source value has been converted into something the destination path can use.
+3. Continue through route discovery only after the source value has been converted into something the destination path can use.
 
 **Failure Modes**
 - `msg.value` is sent alongside credit-based routing and the route shape is wrong
@@ -124,7 +122,7 @@ credit-based sources. It does not replace the downstream terminal that finally r
 
 **Failure Modes**
 - preview assumptions become stale between quote and execution
-- the frontend surfaces a route as deterministic when the final path still depends on live market state
+- the frontend presents a route as deterministic when the final path still depends on live market state
 
 **Postconditions**
 - the quote is useful, and execution either lands close to it or fails clearly when conditions changed too much
