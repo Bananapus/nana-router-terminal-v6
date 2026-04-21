@@ -1177,28 +1177,32 @@ contract JBRouterTerminal is
         // Walk the cashout path hop by hop until we reach a directly acceptable destination asset or exhaust the
         // bounded iteration limit.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // When a preferred token was supplied, check whether the route can already finish into it before taking
-            // another cashout hop. Gate on sourceProjectIdOverride == 0 so the forced first cashout is not skipped.
-            if (preferredToken != address(0) && sourceProjectIdOverride == 0) {
-                if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
-                    // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
-                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
+            // Skip the destination check on the first iteration if we have a credit override — the forced
+            // cashout must happen before any early return.
+            if (sourceProjectIdOverride == 0) {
+                // When a preferred token was supplied, check whether the route can already finish into it
+                // before taking another cashout hop.
+                if (preferredToken != address(0)) {
+                    if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+                        // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
+                        destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
 
-                    // If a real external terminal accepts that preferred asset, align into it and finish the route.
+                        // If a real external terminal accepts that preferred asset, align into it and finish the
+                        // route.
+                        if (address(destTerminal) != address(0)) {
+                            (token, amount) = _alignTokenToPreferredToken({
+                                token: token, amount: amount, preferredToken: preferredToken
+                            });
+                            return (destTerminal, token, amount);
+                        }
+                    }
+                } else {
+                    // Ask the directory whether the destination already has a usable primary terminal for the
+                    // current token.
+                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
                     if (address(destTerminal) != address(0)) {
-                        (token, amount) =
-                            _alignTokenToPreferredToken({token: token, amount: amount, preferredToken: preferredToken});
                         return (destTerminal, token, amount);
                     }
-                }
-            }
-            // Skip the destination check on the first iteration if we have a credit override.
-            else if (sourceProjectIdOverride == 0) {
-                // Ask the directory whether the destination already has a usable primary terminal for the current
-                // token.
-                destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
-                if (address(destTerminal) != address(0)) {
-                    return (destTerminal, token, amount);
                 }
             }
 
