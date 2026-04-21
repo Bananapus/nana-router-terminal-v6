@@ -77,8 +77,7 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
         bytes memory metadata;
         {
             bytes4 cashOutSourceId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
-            metadata =
-                JBMetadataResolver.addToMetadata("", cashOutSourceId, abi.encode(sourceProjectId, creditAmount));
+            metadata = JBMetadataResolver.addToMetadata("", cashOutSourceId, abi.encode(sourceProjectId, creditAmount));
 
             bytes4 preferredTokenId = JBMetadataResolver.getId("cashOutPreferredToken", address(routerTerminal));
             metadata =
@@ -87,9 +86,7 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
 
         // Mock: controller lookup for sourceProjectId.
         vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.controllerOf, (sourceProjectId)),
-            abi.encode(controller)
+            address(mockDirectory), abi.encodeCall(IJBDirectory.controllerOf, (sourceProjectId)), abi.encode(controller)
         );
 
         // Mock: controller.transferCreditsFrom.
@@ -130,9 +127,7 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
         {
             JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
             contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN,
-                decimals: 18,
-                currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
             });
             vm.mockCall(
                 mockCashOutTerminal,
