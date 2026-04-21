@@ -2503,8 +2503,8 @@ contract JBRouterTerminal is
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // M-30: Skip the destination check on the first iteration if we have a source override — the forced
-            // cashout must happen before any early return. Mirrors the gate in _cashOutLoop.
+            // Preview/execution parity fix: Skip the destination check on the first iteration if we have a source
+            // override — the forced cashout must happen before any early return. Mirrors the gate in _cashOutLoop.
             if (sourceProjectIdOverride == 0) {
                 // When a preferred token was supplied, check whether the preview can already finish into it before
                 // previewing another cashout hop.
