@@ -2503,25 +2503,28 @@ contract JBRouterTerminal is
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // When a preferred token was supplied, check whether the preview can already finish into it before
-            // previewing another cashout hop.
-            if (preferredToken != address(0)) {
-                if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
-                    // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
-                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
+            // M-30: Skip the destination check on the first iteration if we have a source override — the forced
+            // cashout must happen before any early return. Mirrors the gate in _cashOutLoop.
+            if (sourceProjectIdOverride == 0) {
+                // When a preferred token was supplied, check whether the preview can already finish into it before
+                // previewing another cashout hop.
+                if (preferredToken != address(0)) {
+                    if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+                        // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
+                        destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
 
-                    // If a real external terminal accepts that preferred asset, the preview route is complete.
-                    if (address(destTerminal) != address(0)) return (destTerminal, preferredToken, amount);
-                }
-            }
-            // Only probe direct destination acceptance when there is no one-shot source override to consume first.
-            else if (sourceProjectIdOverride == 0) {
-                // Ask the directory whether the destination already has a primary terminal for the current token.
-                destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
+                        // If a real external terminal accepts that preferred asset, the preview route is complete.
+                        if (address(destTerminal) != address(0)) return (destTerminal, preferredToken, amount);
+                    }
+                } else {
+                    // Ask the directory whether the destination already has a primary terminal for the current
+                    // token.
+                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
 
-                // If a real external terminal accepts this token, the preview route is complete and exact.
-                if (address(destTerminal) != address(0)) {
-                    return (destTerminal, token, amount);
+                    // If a real external terminal accepts this token, the preview route is complete and exact.
+                    if (address(destTerminal) != address(0)) {
+                        return (destTerminal, token, amount);
+                    }
                 }
             }
 

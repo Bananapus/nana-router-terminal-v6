@@ -720,7 +720,22 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             vm.mockCall(
                 mockCashOutTerminal,
                 abi.encodeWithSelector(IJBCashOutTerminal.previewCashOutFrom.selector),
-                abi.encode(uint256(0), new JBCashOutHookSpecification[](0))
+                abi.encode(
+                    JBRuleset({
+                        cycleNumber: 1,
+                        id: 1,
+                        basedOnId: 0,
+                        start: 0,
+                        duration: 0,
+                        weight: 0,
+                        weightCutPercent: 0,
+                        approvalHook: IJBRulesetApprovalHook(address(0)),
+                        metadata: 0
+                    }),
+                    uint256(0),
+                    uint256(0),
+                    new JBCashOutHookSpecification[](0)
+                )
             );
 
             vm.mockCall(
