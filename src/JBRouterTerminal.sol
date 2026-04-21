@@ -1178,8 +1178,8 @@ contract JBRouterTerminal is
         // bounded iteration limit.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
             // When a preferred token was supplied, check whether the route can already finish into it before taking
-            // another cashout hop.
-            if (preferredToken != address(0)) {
+            // another cashout hop. Gate on sourceProjectIdOverride == 0 so the forced first cashout is not skipped.
+            if (preferredToken != address(0) && sourceProjectIdOverride == 0) {
                 if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
                     // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
                     destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
