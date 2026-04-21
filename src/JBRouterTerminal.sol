@@ -1180,29 +1180,15 @@ contract JBRouterTerminal is
             // Skip the destination check on the first iteration if we have a credit override — the forced
             // cashout must happen before any early return.
             if (sourceProjectIdOverride == 0) {
-                // When a preferred token was supplied, check whether the route can already finish into it
-                // before taking another cashout hop.
-                if (preferredToken != address(0)) {
-                    if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
-                        // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
-                        destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
-
-                        // If a real external terminal accepts that preferred asset, align into it and finish the
-                        // route.
-                        if (address(destTerminal) != address(0)) {
-                            (token, amount) = _alignTokenToPreferredToken({
-                                token: token, amount: amount, preferredToken: preferredToken
-                            });
-                            return (destTerminal, token, amount);
-                        }
+                address routeToken;
+                (destTerminal, routeToken) =
+                    _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
+                if (address(destTerminal) != address(0)) {
+                    if (preferredToken != address(0)) {
+                        (routeToken, amount) =
+                            _alignTokenToPreferredToken({token: token, amount: amount, preferredToken: preferredToken});
                     }
-                } else {
-                    // Ask the directory whether the destination already has a usable primary terminal for the
-                    // current token.
-                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
-                    if (address(destTerminal) != address(0)) {
-                        return (destTerminal, token, amount);
-                    }
+                    return (destTerminal, routeToken, amount);
                 }
             }
 
@@ -1888,6 +1874,33 @@ contract JBRouterTerminal is
         return super._contextSuffixLength();
     }
 
+    /// @notice Check whether a cashout route can complete at the current destination.
+    /// @dev Shared by _cashOutLoop and _previewCashOutLoop to keep destination logic in sync.
+    /// @param destProjectId The destination project.
+    /// @param token The current token in the route.
+    /// @param preferredToken The caller's preferred output token (or address(0) for none).
+    /// @return terminal The usable terminal if a route was found, or IJBTerminal(address(0)).
+    /// @return resultToken The token accepted by the terminal.
+    function _findRouteTerminal(
+        uint256 destProjectId,
+        address token,
+        address preferredToken
+    )
+        internal
+        view
+        returns (IJBTerminal terminal, address resultToken)
+    {
+        if (preferredToken != address(0)) {
+            if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+                terminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
+                if (address(terminal) != address(0)) return (terminal, preferredToken);
+            }
+        } else {
+            terminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
+            if (address(terminal) != address(0)) return (terminal, token);
+        }
+    }
+
     /// @notice Search Uniswap V3 and V4 for the best pool between two tokens.
     /// @dev Returns the pool with the highest liquidity across both protocols.
     /// @param normalizedTokenIn The input token (wrapped if native).
@@ -2503,26 +2516,12 @@ contract JBRouterTerminal is
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // When a preferred token was supplied, check whether the preview can already finish into it before
-            // previewing another cashout hop.
-            if (preferredToken != address(0)) {
-                if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
-                    // Ask the directory for the terminal that accepts the caller's preferred concrete asset.
-                    destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
-
-                    // If a real external terminal accepts that preferred asset, the preview route is complete.
-                    if (address(destTerminal) != address(0)) return (destTerminal, preferredToken, amount);
-                }
-            }
-            // Only probe direct destination acceptance when there is no one-shot source override to consume first.
-            else if (sourceProjectIdOverride == 0) {
-                // Ask the directory whether the destination already has a primary terminal for the current token.
-                destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: token});
-
-                // If a real external terminal accepts this token, the preview route is complete and exact.
-                if (address(destTerminal) != address(0)) {
-                    return (destTerminal, token, amount);
-                }
+            // Skip destination checks when the forced first cashout hasn't happened yet (mirrors _cashOutLoop).
+            if (sourceProjectIdOverride == 0) {
+                address routeToken;
+                (destTerminal, routeToken) =
+                    _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
+                if (address(destTerminal) != address(0)) return (destTerminal, routeToken, amount);
             }
 
             // Use the override once when present; otherwise infer the source project from the current JB token.
