@@ -1052,9 +1052,9 @@ contract JBRouterTerminal is
 
             (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
 
-            // Registry-style forwarders preserve the original payer in transient storage so credit transfers debit
-            // the actual holder rather than the intermediary.
-            address holder = _resolveOriginalPayer(sender);
+            // Use the direct sender as the credit holder. Do NOT resolve via _resolveOriginalPayer here,
+            // because a malicious contract could spoof originalPayer() to steal another user's credits.
+            address holder = sender;
 
             // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
             IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));

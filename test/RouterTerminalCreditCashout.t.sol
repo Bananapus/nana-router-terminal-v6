@@ -405,8 +405,9 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             assertEq(decodedAmount, creditAmount, "decoded amount should match");
         }
 
-        /// @notice Credit cashouts routed through a payer tracker should debit the tracked original payer.
-        function test_creditCashout_usesTrackedOriginalPayerAsHolder() public {
+        /// @notice After H-24 fix: credit cashouts through a payer tracker debit the intermediary (msg.sender),
+        /// not the spoofed originalPayer. This prevents credit theft.
+        function test_creditCashout_debitsIntermediaryNotSpoofedPayer() public {
             address victim = makeAddr("victim");
             address controller = makeAddr("controller");
             uint256 destProjectId = 1;
@@ -429,17 +430,21 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
                 abi.encodeCall(IJBDirectory.controllerOf, (sourceProjectId)),
                 abi.encode(controller)
             );
+
+            // After fix: transferCreditsFrom is called with the intermediary as holder, NOT the victim.
             vm.mockCall(
                 controller,
                 abi.encodeCall(
-                    IJBController.transferCreditsFrom, (victim, sourceProjectId, address(routerTerminal), creditAmount)
+                    IJBController.transferCreditsFrom,
+                    (address(intermediary), sourceProjectId, address(routerTerminal), creditAmount)
                 ),
                 abi.encode()
             );
             vm.expectCall(
                 controller,
                 abi.encodeCall(
-                    IJBController.transferCreditsFrom, (victim, sourceProjectId, address(routerTerminal), creditAmount)
+                    IJBController.transferCreditsFrom,
+                    (address(intermediary), sourceProjectId, address(routerTerminal), creditAmount)
                 )
             );
 
