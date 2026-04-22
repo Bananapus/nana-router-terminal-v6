@@ -103,3 +103,11 @@ The router and resolver no longer contain registry-specific circular-resolution 
 ### 8.6 V4 spot fallback is an accepted risk for programmatic integrations
 
 Automatic V4 quoting first tries a hook-provided oracle observation and falls back to spot only when that quote is unavailable. The fallback is still manipulable and is accepted only as a bounded on-chain quoting path for integrations that cannot provide `quoteForSwap` metadata.
+
+### 8.7 Credit cash-outs only work when calling the router terminal directly
+
+The credit-cashout path in `_acceptFundsFor` uses `holder = _msgSender()` — the direct caller — as the credit holder. This means credit cash-outs **do not work through the `JBRouterTerminalRegistry`**, because when the registry forwards a `pay()` call, `_msgSender()` inside the router terminal resolves to the registry's address, not the original user. The registry has no credits, so `transferCreditsFrom` would fail.
+
+This is intentional. The previous design used `_resolveOriginalPayer(sender)` to recover the original user from the registry's transient `originalPayer` storage. However, any contract implementing `IJBPayerTracker.originalPayer()` could spoof a victim's address and steal their credits (H-24). The fix uses the direct sender unconditionally for credit transfers, closing the spoofing vector at the cost of registry-mediated credit flows.
+
+Users who need to cash out credits through the router should call `JBRouterTerminal.pay()` directly with `cashOutSource` metadata, not through the registry.
