@@ -819,6 +819,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal candidateTerminal)
     {
         // Resolve the primary terminal for the candidate token so fallback discovery agrees with preview/execution.
+        // slither-disable-next-line calls-loop
         candidateTerminal = directory.primaryTerminalOf({projectId: projectId, token: candidateToken});
 
         // Drop candidates whose primary terminal disappeared or would route straight back into the router.

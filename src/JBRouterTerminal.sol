@@ -197,6 +197,7 @@ contract JBRouterTerminal is
         WETH = weth;
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
+        // slither-disable-next-line missing-zero-check
         UNIV4_HOOK = univ4Hook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
 
@@ -989,6 +990,7 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
+        // slither-disable-next-line calls-loop
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
@@ -999,6 +1001,7 @@ contract JBRouterTerminal is
         // Check if the terminal is a forwarding layer that routes back into this router.
         // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
         // cleanly into a no-op (success=false or empty data).
+        // slither-disable-next-line calls-loop
         (bool ok, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
         if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {

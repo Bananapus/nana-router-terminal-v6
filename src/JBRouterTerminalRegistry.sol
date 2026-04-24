@@ -278,7 +278,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param shouldReturnHeldFees A boolean to indicate whether held fees should be returned.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    // slither-disable-next-line reentrancy-benign
+    // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -409,7 +409,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
     /// @return result The number of tokens received.
-    // slither-disable-next-line reentrancy-benign
+    // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function pay(
         uint256 projectId,
         address token,
