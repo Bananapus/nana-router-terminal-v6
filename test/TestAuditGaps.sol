@@ -355,7 +355,9 @@ contract TestAuditGaps is Test {
         vm.mockCall(dest, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(42)));
         // Mock terminalOf so _isForwardingTerminal returns true and the 5-hop circular check ends cleanly.
         vm.mockCall(
-            dest, abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, uint256(1)), abi.encode(IJBTerminal(address(1)))
+            dest,
+            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, uint256(1)),
+            abi.encode(IJBTerminal(address(1)))
         );
         // Mock previewPayFor for route scoring.
         vm.mockCall(
