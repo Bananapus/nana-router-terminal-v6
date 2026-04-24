@@ -98,6 +98,42 @@ interface IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal);
 
+    /// @notice External self-call wrapper that previews the fallback route in an isolated context.
+    /// @dev Called via `self.previewFallbackRoute(...)` so `try/catch` can absorb reverts from broken
+    /// terminals or price feeds without bricking the entire best-route preview.
+    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
+    /// @param destProjectId The project being paid through the fallback route.
+    /// @param tokenIn The token the payer is sending.
+    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param beneficiary The address that would receive minted project tokens.
+    /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
+    /// @return destTerminal The terminal the fallback route would deliver funds to.
+    /// @return tokenOut The token `destTerminal` would receive after any intermediate swaps.
+    /// @return amountOut The amount of `tokenOut` that would arrive at `destTerminal`.
+    /// @return ruleset The ruleset that would govern the terminal pay.
+    /// @return beneficiaryTokenCount The number of project tokens `beneficiary` would receive.
+    /// @return reservedTokenCount The number of project tokens that would be reserved.
+    /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
+    function previewFallbackRoute(
+        IJBPayRoutePreviewer routePreviewer,
+        uint256 destProjectId,
+        address tokenIn,
+        uint256 amountIn,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            IJBTerminal destTerminal,
+            address tokenOut,
+            uint256 amountOut,
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        );
+
     /// @notice Resolve a project's primary terminal only when the router can safely forward into it.
     /// @param router The router whose forwarding-terminal rules should be applied.
     /// @param projectId The project whose primary terminal should be checked.

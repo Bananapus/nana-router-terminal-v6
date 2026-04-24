@@ -109,7 +109,8 @@ contract JBRouterTerminal is
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
 
     /// @notice The TWAP window (in seconds) used when querying a V4 oracle hook.
-    uint32 private constant _TWAP_WINDOW = 30;
+    /// @dev Matches the V3 minimum TWAP window (MIN_TWAP_WINDOW = 120) to resist short-window manipulation.
+    uint32 private constant _TWAP_WINDOW = 120;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -196,6 +197,7 @@ contract JBRouterTerminal is
         WETH = weth;
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
+        // slither-disable-next-line missing-zero-check
         UNIV4_HOOK = univ4Hook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
 
@@ -403,7 +405,7 @@ contract JBRouterTerminal is
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 amountToSendToPool = amount0Delta < 0 ? uint256(amount1Delta) : uint256(amount0Delta);
+        uint256 amountToSendToPool = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
 
         // Wrap native tokens if needed.
         if (tokenIn == JBConstants.NATIVE_TOKEN) _wethDeposit(amountToSendToPool);
@@ -988,6 +990,7 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
+        // slither-disable-next-line calls-loop
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
@@ -998,6 +1001,7 @@ contract JBRouterTerminal is
         // Check if the terminal is a forwarding layer that routes back into this router.
         // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
         // cleanly into a no-op (success=false or empty data).
+        // slither-disable-next-line calls-loop
         (bool ok, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
         if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
@@ -1362,14 +1366,15 @@ contract JBRouterTerminal is
 
         // Ask the pool to execute an exact-input swap. The callback settles the input token after the pool
         // computes how much of the output side it owes this router.
+        // Use extreme sqrtPriceLimitX96 values to allow the swap to execute fully. Slippage is enforced
+        // by the post-swap minAmountOut check below, which is more correct than deriving a price limit
+        // from average execution rate.
         (int256 amount0, int256 amount1) = pool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
             // forge-lint: disable-next-line(unsafe-typecast)
             amountSpecified: int256(amount),
-            sqrtPriceLimitX96: JBSwapLib.sqrtPriceLimitFromAmounts({
-                amountIn: amount, minimumAmountOut: minAmountOut, zeroForOne: zeroForOne
-            }),
+            sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             data: callbackData
         });
 
@@ -1377,8 +1382,8 @@ contract JBRouterTerminal is
         // pool sent tokens out to the router, so negate the selected leg to recover the positive amount received.
         amountOut = uint256(-(zeroForOne ? amount1 : amount0));
 
-        // Recheck the realized output against the quote floor so partial fills or price movement cannot slip
-        // through even if the pool call itself completed.
+        // Enforce slippage protection via realized output vs minimum acceptable output.
+        // This is strictly more correct than sqrtPriceLimitX96 (which conflates marginal and average price).
         if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
     }
 
@@ -1405,10 +1410,9 @@ contract JBRouterTerminal is
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
 
-        // Use sqrtPriceLimitFromAmounts for partial-fill protection, consistent with V3 path.
-        uint160 sqrtPriceLimitX96 = JBSwapLib.sqrtPriceLimitFromAmounts({
-            amountIn: amount, minimumAmountOut: minAmountOut, zeroForOne: zeroForOne
-        });
+        // Use extreme sqrtPriceLimitX96 to allow full swap execution. Slippage is enforced by
+        // the post-swap minAmountOut check in the unlock callback.
+        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1;
 
         // V4 sign convention: negative = exact input, positive = exact output.
         // Ask the PoolManager to unlock and call back into this router to execute the swap atomically.
@@ -2335,10 +2339,14 @@ contract JBRouterTerminal is
             try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
                 int56[] memory tickCumulatives, uint160[] memory
             ) {
-                // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
-                // forge-lint: disable-next-line(unsafe-typecast)
-                tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
-                usedTwap = true;
+                // Guard against malicious/broken hooks returning fewer elements than requested.
+                // An OOB access in the try-success block panics and is NOT caught by catch{}.
+                if (tickCumulatives.length >= 2) {
+                    // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
+                    // forge-lint: disable-next-line(unsafe-typecast)
+                    tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
+                    usedTwap = true;
+                }
             } catch {}
         }
 
@@ -2356,14 +2364,35 @@ contract JBRouterTerminal is
         normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
         normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
 
-        minAmountOut = _quoteWithSlippage({
-            amount: amount,
-            liquidity: liquidity,
-            tokenIn: normalizedTokenIn,
-            tokenOut: normalizedTokenOut,
-            tick: tick,
-            poolFeeBps: uint256(key.fee) / 100
-        });
+        if (!usedTwap) {
+            // Without TWAP, instantaneous liquidity and spot price are both JIT-manipulable.
+            // Use a fixed conservative slippage tolerance (15%) instead of the sigmoid formula, which
+            // an attacker could deflate by inflating liquidity via just-in-time provisioning.
+            uint256 fixedSlippage = 1500; // 15% in basis points of _SLIPPAGE_DENOMINATOR (10_000)
+
+            // Quote the gross output at the spot tick.
+            if (amount > type(uint128).max) revert JBRouterTerminal_AmountOverflow(amount);
+
+            minAmountOut = OracleLibrary.getQuoteAtTick({
+                tick: tick,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                baseAmount: uint128(amount),
+                baseToken: normalizedTokenIn,
+                quoteToken: normalizedTokenOut
+            });
+
+            // Apply the fixed slippage tolerance.
+            minAmountOut -= (minAmountOut * fixedSlippage) / _SLIPPAGE_DENOMINATOR;
+        } else {
+            minAmountOut = _quoteWithSlippage({
+                amount: amount,
+                liquidity: liquidity,
+                tokenIn: normalizedTokenIn,
+                tokenOut: normalizedTokenOut,
+                tick: tick,
+                poolFeeBps: uint256(key.fee) / 100
+            });
+        }
     }
 
     /// @notice Parse the optional `cashOutMinReclaimed` metadata.

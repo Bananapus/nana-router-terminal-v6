@@ -410,8 +410,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Test 5: previewBestPayRoute with only reverting terminals produces no
-    //          route (reverts).
+    // Test 5: previewBestPayRoute with only reverting terminals returns
+    //          zero/empty values (fallback is wrapped in try/catch per F3).
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_previewBestPayRoute_allTerminalsRevert_noRoute() public {
@@ -449,9 +449,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        // Should revert since no candidates are found.
-        vm.expectRevert();
-        resolver.previewBestPayRoute({
+        // With the try/catch fallback (F3), the function no longer reverts — it returns zero/empty values.
+        (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
             projectId: PROJECT_ID,
             tokenIn: tokenIn,
@@ -459,5 +458,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             beneficiary: makeAddr("beneficiary"),
             metadata: ""
         });
+
+        assertEq(address(destTerminal), address(0), "destTerminal should be zero when no route is found");
+        assertEq(resolvedTokenOut, address(0), "tokenOut should be zero when no route is found");
+        assertEq(beneficiaryTokenCount, 0, "beneficiaryTokenCount should be zero when no route is found");
     }
 }

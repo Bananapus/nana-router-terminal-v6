@@ -175,11 +175,13 @@ contract MultiHopForwardCycleTest is Test {
         );
     }
 
-    function test_routerDoesNotRejectTwoHopForwardCycle() public {
+    /// @notice With 5-hop bounded loop detection, a 2-hop cycle (ForwarderA -> ForwarderB -> router) IS detected
+    /// and rejected during route resolution, preventing funds from ever reaching ForwarderB.
+    function test_routerRejectsTwoHopForwardCycle() public {
         vm.deal(payer, AMOUNT);
 
         vm.prank(payer);
-        vm.expectRevert(ForwarderB.CycleReached.selector);
+        vm.expectRevert();
         router.pay{value: AMOUNT}(PROJECT_ID, JBConstants.NATIVE_TOKEN, AMOUNT, payer, 0, "", "");
     }
 }

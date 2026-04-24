@@ -1,113 +1,44 @@
-# Router Terminal Risk Register
+# Accepted Security Risks
 
-This file covers the routing, accounting-context, and liquidity-selection risks in the terminal that accepts arbitrary tokens and forwards them into a project's real accounting surface.
+Documented risks that were reviewed and accepted.
 
-## How To Use This File
+## Oracle & Slippage Risks
 
-- Read `Priority risks` first. They explain where routing convenience can diverge from accounting truth.
-- Use the later sections for token-decimal synthesis, swap-path, and integration reasoning.
-- Treat `Accepted behaviors` as explicit statements about what this terminal does not guarantee.
+**Pool-local V3 TWAP trusted as swap floor for permissionless pools.** *(Medium)*
+An attacker could deploy a manipulable pool with higher liquidity to become the selected candidate. Users should provide `quoteForSwap` metadata from off-chain sources. Mitigated by 120s minimum TWAP window and sigmoid slippage formula.
 
-## Priority Risks
+**Liquidity-based pool selection enables unsafe spot quoting.** *(Medium)*
+Pool discovery ranks candidates by instantaneous liquidity, so an attacker could inflate liquidity to force selection of a manipulable pool. Mitigated by V4 TWAP hardening and sigmoid slippage formula. Users should provide off-chain quotes for high-value swaps.
 
-| Priority | Risk | Why it matters | Primary controls |
-|----------|------|----------------|------------------|
-| P0 | Synthetic accounting context misuse | The router synthesizes best-effort decimals and routing context. If downstream systems treat it as accounting truth, they can misprice or mis-lend. | Clear docs, registry scoping, and explicit prohibition on accounting-sensitive reuse. |
-| P1 | Wrong-route or low-liquidity execution | The router chooses among direct forwarding, V3, V4, and cash-out paths. A bad route can degrade user execution. | Route-selection tests, liquidity checks, and user-specified minimum returns. |
-| P1 | Integration fragility with broken tokens | Non-standard ERC-20 metadata or transfer behavior can distort decimal inference or swap execution. | Fallback defaults, defensive probing, receipt checks on terminal-facing hops, and hostile-token testing. |
+**Harmonic-mean liquidity inflates V3 slippage tolerance.** *(Medium)*
+`OracleLibrary.consult` returns harmonic-mean liquidity, which can be deflated by brief low-liquidity periods. However, harmonic mean is more resistant to manipulation than spot liquidity. Mitigated by 120s TWAP minimum and 10-minute default observation window.
 
-## 1. Trust Assumptions
+**`quoteForSwap` / auto-selected tokenOut mismatch.** *(Minor)*
+When a user provides `quoteForSwap` metadata, the quote may not match the auto-selected output token. Frontends should set `quoteForSwap` per the expected output token.
 
-- **Uniswap V3 factory and V4 PoolManager behave correctly.** Pool discovery trusts those external systems to point at real pools.
-- **Canonical V4 hook configuration is correct.** If deployers set the wrong `UNIV4_HOOK`, the router can miss intended hooked pools.
-- **The trusted forwarder is trustworthy.** A compromised forwarder can initiate transfers on behalf of any user.
-- **`JBDirectory` resolves the right terminals.** A compromised directory can redirect funds.
-- **Permit2 allowances are intentional.** Stale approvals can be abused.
-- **The registry owner acts correctly.** The owner controls allowlisting and the default router terminal.
-- **`IJBPayerTracker` callers are trusted to name their own refund recipient.** A caller implementing `originalPayer()` can redirect leftovers from its own route.
+**Multi-hop cashout slippage cleared after first hop.** *(Minor)*
+Only the final output matters; the outer function enforces end-to-end minimum via `minReclaimed`. Intermediate per-hop slippage checks are intentionally omitted.
 
-## 2. Economic And Manipulation Risks
+**Zero oracle quote disables swap protection.** *(Minor)*
+When the oracle returns zero (no liquidity), slippage tolerance becomes zero. The swap would fail anyway due to lack of liquidity, so this has no practical impact.
 
-- **V4 price manipulation.** `_getV4Quote` tries a 30-second TWAP first. If that fails, it falls back to spot pricing, which is manipulable within the block.
-- **Hooked V4 discovery scope.** Auto-discovery checks both vanilla V4 pools and pools using the configured canonical `UNIV4_HOOK`.
-- **V3 TWAP manipulation.** Short history reduces manipulation resistance, especially in new pools.
-- **Cash-out loop value extraction.** `_cashOutLoop` is capped at 20 iterations. `cashOutMinReclaimed` only applies on the first real cash-out hop.
-- **Pre-existing balances are intentionally excluded from route refunds.** Stray balances already sitting in the router are not swept into the next caller's refund.
-- **V4 native ETH settlement is special-cased.** `_settleV4` unwraps WETH when the pool manager expects native ETH.
-- **Pool selection is liquidity-first.** `_discoverPool` picks the deepest discovered pool, not the globally best execution path.
-- **Route selection is heuristic, not best execution.** The router bounds discovery for predictability and gas, not exhaustive optimization.
+> **Note:** The V4 TWAP window was hardened from 30s to 120s. This is no longer an accepted risk -- it was fixed.
 
-## 3. Access Control
+## Registry & Forwarding Risks
 
-- **`pay` and `addToBalanceOf` are permissionless.** Anyone can route payments.
-- **Lossy terminal-facing ERC-20s are unsupported.** Final forwarded ERC-20 hops must settle exactly on the router path.
-- **Credit cash-out path depends on `TRANSFER_CREDITS`.** Broad grants of that permission widen the attack surface.
-- **The registry owner controls allowlisting and the global default.** Disallowing the current default now reverts instead of silently clearing it.
-- **Registry terminal locking can freeze a bad choice.** `lockTerminalFor` is a one-way commitment.
-- **Router accounting contexts are synthetic.** They are safe for discovery, but unsafe as accounting truth for lending, debt, or balance normalization.
+**Registry forwarding uses registry as credit holder.** *(Medium)*
+When payments flow through the registry, credits accrue to the registry address, not the original user. Credit-based cashouts must go directly to the router terminal, not through the registry. This is intentional to prevent `originalPayer()` spoofing attacks.
 
-## 4. DoS Vectors
+**Forwarding-terminal receipt bypass.** *(Minor)*
+`_isForwardingTerminal` bypasses receipt validation on incoming transfers. Forwarding terminals are registered by project owners and therefore trusted to handle receipts correctly.
 
-- **No pool exists.** If no V3 or V4 pool exists for a token pair, automatic swap routing fails.
-- **No observation history.** V3 TWAP quoting can revert on fresh pools.
-- **Cash-out loop limit.** Circular or deep token dependency chains hit `_MAX_CASHOUT_ITERATIONS = 20` and revert.
-- **Zero-liquidity pools.** Pools with no usable liquidity revert.
-- **External terminal reverts.** Final terminal calls are not wrapped in `try/catch`.
-- **Non-standard final ERC-20 transfer behavior.** Lossy terminal-facing tokens revert on the final forwarded hop.
+**Forwarder claim disables receipt check.** *(Minor)*
+Forwarding terminals registered by project owners are trusted to handle receipts correctly, so receipt validation is skipped for these callers.
 
-## 5. Integration Risks
+## Minor Configuration Risks
 
-- **Registry default terminal changes affect unlocked projects.** Projects without explicit assignments follow `defaultTerminal`.
-- **Locked bad-terminal risk remains.** Locking protects against silent migration, but also freezes any mistake.
-- **`forceApprove` is used for terminal transfers.** This resets allowance before setting a new value and avoids stale-allowance accumulation.
-- **Callback data trust matters.** `uniswapV3SwapCallback` validates the pool by reconstructing its address from the expected parameters.
-- **The contract accepts arbitrary ETH.** That is necessary for unwraps and V4 settlement, but stray ETH can remain stranded.
+**Unbounded quadratic candidate enumeration.** *(Minor)*
+`_candidatePayRouteTokens` can enumerate O(n^2) candidates in theory. Bounded in practice to ~5-10 terminals per project, keeping gas costs manageable.
 
-## 6. MEV Surface
-
-- **V3 path is TWAP-protected.** A 10-minute TWAP makes single-block manipulation much harder.
-- **V4 path is TWAP-first, spot-fallback.** When no oracle quote is available, the spot fallback is vulnerable.
-- **Cross-route arbitrage exists.** When JB routing bypasses the AMM, differences between bonding-curve price and AMM price create arbitrage opportunities.
-
-## 7. Invariants To Verify
-
-- after any `pay()` or `addToBalanceOf()`, the router should not retain balances attributable to the just-processed route
-- `minAmountOut` in swaps is never zero when TWAP or spot price is available
-- `uniswapV3SwapCallback` only transfers tokens to verified pool addresses
-- `unlockCallback` only executes when called by `POOL_MANAGER`
-- credit cash-out only transfers credits from `_msgSender()`
-- the cash-out loop always terminates: it finds a terminal, hits the loop limit, or reverts for lack of path
-
-## 8. Accepted Behaviors
-
-### 8.1 No reentrancy guard
-
-The router has no `ReentrancyGuard` or `_routing` flag. This is intentional because the router is designed as a stateless routing layer, not a persistent accounting surface. Each call must fund and resolve its own route, and a blanket reentrancy guard would break legitimate composed routing flows.
-
-### 8.2 Router trusts `originalPayer()` from any caller that implements it
-
-`_resolveRefundWithBackupRecipient` calls `IJBPayerTracker(msg.sender).originalPayer()` in a `try/catch`. If the caller returns a non-zero address, leftovers can be sent there. This is accepted because the caller already supplied the funds being routed.
-
-### 8.3 Cash-out loop slippage is first-hop only
-
-`_cashOutLoop` applies `cashOutMinReclaimed` to the first cash-out step only. Later recursive hops may reclaim different assets with different units, so reusing one minimum across the full loop would be unsound.
-
-### 8.4 Liquidity-first pool selection is intentional
-
-The router does not do an exhaustive best-execution search across every viable V3 and V4 pool. It prefers bounded discovery, lower complexity, and predictable behavior.
-
-### 8.5 Registry owns immediate circular-forward protection
-
-The router and resolver no longer contain registry-specific circular-resolution logic. `JBRouterTerminalRegistry` rejects forwarding back into its immediate caller instead.
-
-### 8.6 V4 spot fallback is an accepted risk for programmatic integrations
-
-Automatic V4 quoting first tries a hook-provided oracle observation and falls back to spot only when that quote is unavailable. The fallback is still manipulable and is accepted only as a bounded on-chain quoting path for integrations that cannot provide `quoteForSwap` metadata.
-
-### 8.7 Credit cash-outs only work when calling the router terminal directly
-
-The credit-cashout path in `_acceptFundsFor` uses `holder = _msgSender()` — the direct caller — as the credit holder. This means credit cash-outs **do not work through the `JBRouterTerminalRegistry`**, because when the registry forwards a `pay()` call, `_msgSender()` inside the router terminal resolves to the registry's address, not the original user. The registry has no credits, so `transferCreditsFrom` would fail.
-
-This is intentional. The previous design used `_resolveOriginalPayer(sender)` to recover the original user from the registry's transient `originalPayer` storage. However, any contract implementing `IJBPayerTracker.originalPayer()` could spoof a victim's address and steal their credits (H-24). The fix uses the direct sender unconditionally for credit transfers, closing the spoofing vector at the cost of registry-mediated credit flows.
-
-Users who need to cash out credits through the router should call `JBRouterTerminal.pay()` directly with `cashOutSource` metadata, not through the registry.
+**Permit2 try/catch falls through to ERC20 allowance.** *(Minor)*
+Standard Permit2 fallback pattern. If Permit2 signature verification fails, the contract falls back to standard ERC20 `transferFrom` using existing allowance.

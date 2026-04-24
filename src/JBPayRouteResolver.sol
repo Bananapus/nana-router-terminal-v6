@@ -340,20 +340,30 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (bool isCircular)
     {
-        // Treat direct self-routes as circular immediately.
-        if (address(terminal) == address(router)) return true;
+        // Follow the forwarding chain up to 5 hops to detect circular routes back to the router.
+        // A bounded loop prevents infinite gas consumption from longer chains while catching realistic cycles.
+        IJBTerminal current = terminal;
+        for (uint256 i; i < 5; i++) {
+            // Treat routes back to the router as circular.
+            if (address(current) == address(router)) return true;
 
-        // Probe via staticcall so plain terminals degrade cleanly.
-        (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
+            // Probe via staticcall so plain terminals degrade cleanly.
+            // slither-disable-next-line calls-loop
+            (bool success, bytes memory data) =
+                address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
-        // Non-forwarding terminals (call fails or returns zero) are not circular.
-        if (!success || data.length < 32) return false;
-        IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
-        if (address(forwardingTarget) == address(0)) return false;
+            // Non-forwarding terminals (call fails or returns zero) end the chain — not circular.
+            if (!success || data.length < 32) return false;
+            IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
+            if (address(forwardingTarget) == address(0)) return false;
 
-        // Forwarding terminals that route back into the router are circular.
-        return address(forwardingTarget) == address(router);
+            // Follow the forwarding chain one more hop.
+            current = forwardingTarget;
+        }
+
+        // If we followed 5 hops without finding a non-forwarding terminal or the router,
+        // treat this as a suspicious deep chain and mark it as circular to be safe.
+        return true;
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
@@ -479,56 +489,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         routedDestTerminal = destTerminal;
         routedTokenOut = routedTokenIn;
         routedAmountOut = routedAmountIn;
-    }
-
-    /// @notice External wrapper so candidate previews can be isolated with `try/catch`.
-    /// @param router The router terminal whose preview helpers should be used.
-    /// @param projectId The destination project that would receive the payment.
-    /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose beneficiary token count is being measured.
-    /// @param metadata Metadata forwarded into both the routing preview and terminal preview.
-    /// @param tokenOut The candidate destination token to preview.
-    /// @param destTerminal The terminal that accepts `tokenOut` for the destination project.
-    /// @return routedDestTerminal The terminal chosen for this candidate route.
-    /// @return routedTokenOut The routed token that would be paid into the destination terminal.
-    /// @return routedAmountOut The routed amount that would be paid into the destination terminal.
-    /// @return ruleset The ruleset returned by the terminal preview.
-    /// @return beneficiaryTokenCount The effective beneficiary token count for this candidate route.
-    /// @return reservedTokenCount The effective reserved token count for this candidate route.
-    /// @return hookSpecifications The hook specifications returned by the terminal preview.
-    function previewPayRouteForCandidate(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
-        address tokenIn,
-        uint256 amount,
-        address beneficiary,
-        bytes calldata metadata,
-        address tokenOut,
-        IJBTerminal destTerminal
-    )
-        external
-        view
-        returns (
-            IJBTerminal routedDestTerminal,
-            address routedTokenOut,
-            uint256 routedAmountOut,
-            JBRuleset memory ruleset,
-            uint256 beneficiaryTokenCount,
-            uint256 reservedTokenCount,
-            JBPayHookSpecification[] memory hookSpecifications
-        )
-    {
-        return _previewPayRouteForCandidate({
-            router: router,
-            projectId: projectId,
-            tokenIn: tokenIn,
-            amount: amount,
-            beneficiary: beneficiary,
-            metadata: metadata,
-            tokenOut: tokenOut,
-            destTerminal: destTerminal
-        });
     }
 
     /// @notice Preview the fallback route that would be used when no candidate token can be scored directly.
@@ -762,6 +722,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal candidateTerminal)
     {
         // Resolve the primary terminal for the candidate token so fallback discovery agrees with preview/execution.
+        // slither-disable-next-line calls-loop
         candidateTerminal = directory.primaryTerminalOf({projectId: projectId, token: candidateToken});
 
         // Drop candidates whose primary terminal disappeared or would route straight back into the router.
@@ -773,38 +734,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
     }
 
-    /// @inheritdoc IJBPayRouteResolver
-    function usablePrimaryTerminalOf(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
-        address token
-    )
-        external
-        view
-        returns (IJBTerminal terminal)
-    {
-        return _usablePrimaryTerminalForCandidate({
-            router: router, directory: DIRECTORY, projectId: projectId, candidateToken: token
-        });
-    }
-
     //*********************************************************************//
     // ------------------------- external views -------------------------- //
     //*********************************************************************//
-
-    /// @inheritdoc IJBPayRouteResolver
-    function resolveTokenOut(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
-        address tokenIn,
-        bytes calldata metadata
-    )
-        external
-        view
-        returns (address tokenOut, IJBTerminal destTerminal)
-    {
-        return _resolveTokenOut({router: router, projectId: projectId, tokenIn: tokenIn, metadata: metadata});
-    }
 
     /// @inheritdoc IJBPayRouteResolver
     // slither-disable-next-line calls-loop
@@ -930,27 +862,168 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 );
         }
 
-        // Fall back to the router's generic route resolution when no candidate token could be scored directly.
+        // No candidate token could be scored — fall back to the router's generic route resolution.
+        // Uses an external self-call (`self.previewFallbackRoute`) so Solidity's try/catch can isolate
+        // reverts from broken terminals or price feeds without bricking the entire best-route preview.
+        try self.previewFallbackRoute(router, projectId, tokenIn, amount, beneficiary, metadata) returns (
+            IJBTerminal fallbackDestTerminal,
+            address fallbackTokenOut,
+            uint256 fallbackAmountOut,
+            JBRuleset memory fallbackRuleset,
+            uint256 fallbackBeneficiaryTokenCount,
+            uint256 fallbackReservedTokenCount,
+            JBPayHookSpecification[] memory fallbackHookSpecifications
+        ) {
+            destTerminal = fallbackDestTerminal;
+            tokenOut = fallbackTokenOut;
+            amountOut = fallbackAmountOut;
+            ruleset = fallbackRuleset;
+            beneficiaryTokenCount = fallbackBeneficiaryTokenCount;
+            reservedTokenCount = fallbackReservedTokenCount;
+            hookSpecifications = fallbackHookSpecifications;
+        } catch {
+            // If the fallback also fails, return default zero values — the caller gets "no route found".
+        }
+    }
+
+    /// @notice External self-call wrapper that previews the fallback route in an isolated context.
+    /// @dev Solidity's `try/catch` only works on external calls. `previewBestPayRoute` calls
+    /// `self.previewFallbackRoute(...)` so that a revert in the fallback path (e.g. a broken terminal or
+    /// price feed) is caught instead of bricking the entire best-route preview.
+    /// @dev This function should only be called by this contract itself — external callers have no reason to use it.
+    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
+    /// @param destProjectId The project being paid through the fallback route.
+    /// @param tokenIn The token the payer is sending.
+    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param beneficiary The address that would receive minted project tokens.
+    /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
+    /// @return destTerminal The terminal the fallback route would deliver funds to.
+    /// @return tokenOut The token `destTerminal` would receive after any intermediate swaps.
+    /// @return amountOut The amount of `tokenOut` that would arrive at `destTerminal`.
+    /// @return ruleset The ruleset that would govern the terminal pay.
+    /// @return beneficiaryTokenCount The number of project tokens `beneficiary` would receive.
+    /// @return reservedTokenCount The number of project tokens that would be reserved.
+    /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
+    function previewFallbackRoute(
+        IJBPayRoutePreviewer routePreviewer,
+        uint256 destProjectId,
+        address tokenIn,
+        uint256 amountIn,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            IJBTerminal destTerminal,
+            address tokenOut,
+            uint256 amountOut,
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
+    {
+        // Resolve which terminal and token the fallback route would use.
         (destTerminal, tokenOut, amountOut) = _previewRoute({
-            router: router, destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata
+            router: routePreviewer, destProjectId: destProjectId, tokenIn: tokenIn, amount: amountIn, metadata: metadata
         });
 
-        // Preview the final terminal pay for that fallback route.
-        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = router.previewTerminalPayOf({
+        // Simulate the terminal pay to get token counts and hook specs.
+        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = routePreviewer.previewTerminalPayOf({
             destTerminal: destTerminal,
-            projectId: projectId,
+            projectId: destProjectId,
             token: tokenOut,
             amount: amountOut,
             beneficiary: beneficiary,
             metadata: metadata
         });
 
-        // Normalize the fallback preview counts so buyback-hook metadata still affects route ranking consistently.
+        // Normalize counts to account for buyback-hook overrides.
         (beneficiaryTokenCount, reservedTokenCount) = _effectivePreviewPayTokenCounts({
-            buybackHook: router.BUYBACK_HOOK(),
+            buybackHook: routePreviewer.BUYBACK_HOOK(),
             beneficiaryTokenCount: beneficiaryTokenCount,
             reservedTokenCount: reservedTokenCount,
             hookSpecifications: hookSpecifications
+        });
+    }
+
+    /// @notice External wrapper so candidate previews can be isolated with `try/catch`.
+    /// @param router The router terminal whose preview helpers should be used.
+    /// @param projectId The destination project that would receive the payment.
+    /// @param tokenIn The token currently available to route.
+    /// @param amount The amount of `tokenIn` being previewed.
+    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param metadata Metadata forwarded into both the routing preview and terminal preview.
+    /// @param tokenOut The candidate destination token to preview.
+    /// @param destTerminal The terminal that accepts `tokenOut` for the destination project.
+    /// @return routedDestTerminal The terminal chosen for this candidate route.
+    /// @return routedTokenOut The routed token that would be paid into the destination terminal.
+    /// @return routedAmountOut The routed amount that would be paid into the destination terminal.
+    /// @return ruleset The ruleset returned by the terminal preview.
+    /// @return beneficiaryTokenCount The effective beneficiary token count for this candidate route.
+    /// @return reservedTokenCount The effective reserved token count for this candidate route.
+    /// @return hookSpecifications The hook specifications returned by the terminal preview.
+    function previewPayRouteForCandidate(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address tokenIn,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata,
+        address tokenOut,
+        IJBTerminal destTerminal
+    )
+        external
+        view
+        returns (
+            IJBTerminal routedDestTerminal,
+            address routedTokenOut,
+            uint256 routedAmountOut,
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
+    {
+        return _previewPayRouteForCandidate({
+            router: router,
+            projectId: projectId,
+            tokenIn: tokenIn,
+            amount: amount,
+            beneficiary: beneficiary,
+            metadata: metadata,
+            tokenOut: tokenOut,
+            destTerminal: destTerminal
+        });
+    }
+
+    /// @inheritdoc IJBPayRouteResolver
+    function resolveTokenOut(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address tokenIn,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (address tokenOut, IJBTerminal destTerminal)
+    {
+        return _resolveTokenOut({router: router, projectId: projectId, tokenIn: tokenIn, metadata: metadata});
+    }
+
+    /// @inheritdoc IJBPayRouteResolver
+    function usablePrimaryTerminalOf(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address token
+    )
+        external
+        view
+        returns (IJBTerminal terminal)
+    {
+        return _usablePrimaryTerminalForCandidate({
+            router: router, directory: DIRECTORY, projectId: projectId, candidateToken: token
         });
     }
 }
