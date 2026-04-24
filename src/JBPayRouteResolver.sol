@@ -541,14 +541,29 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
     }
 
-    /// @notice External wrapper for fallback preview — exists so `previewBestPayRoute` can catch reverts via
-    /// `self.previewFallbackRoute(...)`.
-    /// @dev Must only be called by this contract to isolate failures in the fallback preview path.
+    /// @notice External self-call wrapper that previews the fallback route in an isolated context.
+    /// @dev Solidity's `try/catch` only works on external calls. `previewBestPayRoute` calls
+    /// `self.previewFallbackRoute(...)` so that a revert in the fallback path (e.g. a broken terminal or
+    /// price feed) is caught instead of bricking the entire best-route preview.
+    /// @dev This function should only be called by this contract itself — external callers have no reason to use it.
+    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
+    /// @param destProjectId The project being paid through the fallback route.
+    /// @param tokenIn The token the payer is sending.
+    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param beneficiary The address that would receive minted project tokens.
+    /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
+    /// @return destTerminal The terminal the fallback route would deliver funds to.
+    /// @return tokenOut The token `destTerminal` would receive after any intermediate swaps.
+    /// @return amountOut The amount of `tokenOut` that would arrive at `destTerminal`.
+    /// @return ruleset The ruleset that would govern the terminal pay.
+    /// @return beneficiaryTokenCount The number of project tokens `beneficiary` would receive.
+    /// @return reservedTokenCount The number of project tokens that would be reserved.
+    /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
     function previewFallbackRoute(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
+        IJBPayRoutePreviewer routePreviewer,
+        uint256 destProjectId,
         address tokenIn,
-        uint256 amount,
+        uint256 amountIn,
         address beneficiary,
         bytes calldata metadata
     )
@@ -564,24 +579,24 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             JBPayHookSpecification[] memory hookSpecifications
         )
     {
-        // Preview the fallback route.
+        // Resolve which terminal and token the fallback route would use.
         (destTerminal, tokenOut, amountOut) = _previewRoute({
-            router: router, destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata
+            router: routePreviewer, destProjectId: destProjectId, tokenIn: tokenIn, amount: amountIn, metadata: metadata
         });
 
-        // Preview the final terminal pay for that fallback route.
-        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = router.previewTerminalPayOf({
+        // Simulate the terminal pay to get token counts and hook specs.
+        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = routePreviewer.previewTerminalPayOf({
             destTerminal: destTerminal,
-            projectId: projectId,
+            projectId: destProjectId,
             token: tokenOut,
             amount: amountOut,
             beneficiary: beneficiary,
             metadata: metadata
         });
 
-        // Normalize the fallback preview counts.
+        // Normalize counts to account for buyback-hook overrides.
         (beneficiaryTokenCount, reservedTokenCount) = _effectivePreviewPayTokenCounts({
-            buybackHook: router.BUYBACK_HOOK(),
+            buybackHook: routePreviewer.BUYBACK_HOOK(),
             beneficiaryTokenCount: beneficiaryTokenCount,
             reservedTokenCount: reservedTokenCount,
             hookSpecifications: hookSpecifications
@@ -988,9 +1003,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 );
         }
 
-        // Fall back to the router's generic route resolution when no candidate token could be scored directly.
-        // Wrap in try/catch like the candidate scoring loop so a broken fallback terminal or price feed
-        // doesn't brick the entire preview.
+        // No candidate token could be scored — fall back to the router's generic route resolution.
+        // Uses an external self-call (`self.previewFallbackRoute`) so Solidity's try/catch can isolate
+        // reverts from broken terminals or price feeds without bricking the entire best-route preview.
         try self.previewFallbackRoute(router, projectId, tokenIn, amount, beneficiary, metadata) returns (
             IJBTerminal fallbackDestTerminal,
             address fallbackTokenOut,

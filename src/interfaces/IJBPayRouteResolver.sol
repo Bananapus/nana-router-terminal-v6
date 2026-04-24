@@ -98,18 +98,27 @@ interface IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal);
 
-    /// @notice Preview the fallback route — exists so `previewBestPayRoute` can catch reverts via try/catch.
-    /// @param router The router terminal whose preview helpers should be used.
-    /// @param projectId The destination project being paid.
-    /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose minted token count is being measured.
-    /// @param metadata Metadata forwarded into route and pay previews.
+    /// @notice External self-call wrapper that previews the fallback route in an isolated context.
+    /// @dev Called via `self.previewFallbackRoute(...)` so `try/catch` can absorb reverts from broken
+    /// terminals or price feeds without bricking the entire best-route preview.
+    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
+    /// @param destProjectId The project being paid through the fallback route.
+    /// @param tokenIn The token the payer is sending.
+    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param beneficiary The address that would receive minted project tokens.
+    /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
+    /// @return destTerminal The terminal the fallback route would deliver funds to.
+    /// @return tokenOut The token `destTerminal` would receive after any intermediate swaps.
+    /// @return amountOut The amount of `tokenOut` that would arrive at `destTerminal`.
+    /// @return ruleset The ruleset that would govern the terminal pay.
+    /// @return beneficiaryTokenCount The number of project tokens `beneficiary` would receive.
+    /// @return reservedTokenCount The number of project tokens that would be reserved.
+    /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
     function previewFallbackRoute(
-        IJBPayRoutePreviewer router,
-        uint256 projectId,
+        IJBPayRoutePreviewer routePreviewer,
+        uint256 destProjectId,
         address tokenIn,
-        uint256 amount,
+        uint256 amountIn,
         address beneficiary,
         bytes calldata metadata
     )
