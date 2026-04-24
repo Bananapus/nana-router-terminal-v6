@@ -348,6 +348,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             if (address(current) == address(router)) return true;
 
             // Probe via staticcall so plain terminals degrade cleanly.
+            // slither-disable-next-line calls-loop
             (bool success, bytes memory data) =
                 address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
