@@ -245,7 +245,7 @@ contract RouterTerminalPreviewForkTest is Test {
         jbPermissions = new JBPermissions(address(0));
         jbProjects = new JBProjects(multisig, address(0), address(0));
         jbDirectory = new JBDirectory(jbPermissions, jbProjects, multisig);
-        JBERC20 jbErc20 = new JBERC20(jbPermissions, jbProjects);
+        JBERC20 jbErc20 = new JBERC20();
         jbTokens = new JBTokens(jbDirectory, jbErc20);
         jbRulesets = new JBRulesets(jbDirectory);
         jbPrices = new JBPrices(jbDirectory, jbPermissions, jbProjects, multisig, address(0));

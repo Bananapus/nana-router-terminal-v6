@@ -98,6 +98,33 @@ interface IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal);
 
+    /// @notice Preview the fallback route — exists so `previewBestPayRoute` can catch reverts via try/catch.
+    /// @param router The router terminal whose preview helpers should be used.
+    /// @param projectId The destination project being paid.
+    /// @param tokenIn The token currently available to route.
+    /// @param amount The amount of `tokenIn` being previewed.
+    /// @param beneficiary The address whose minted token count is being measured.
+    /// @param metadata Metadata forwarded into route and pay previews.
+    function previewFallbackRoute(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address tokenIn,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            IJBTerminal destTerminal,
+            address tokenOut,
+            uint256 amountOut,
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        );
+
     /// @notice Resolve a project's primary terminal only when the router can safely forward into it.
     /// @param router The router whose forwarding-terminal rules should be applied.
     /// @param projectId The project whose primary terminal should be checked.

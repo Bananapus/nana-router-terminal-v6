@@ -340,20 +340,29 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (bool isCircular)
     {
-        // Treat direct self-routes as circular immediately.
-        if (address(terminal) == address(router)) return true;
+        // Follow the forwarding chain up to 5 hops to detect circular routes back to the router.
+        // A bounded loop prevents infinite gas consumption from longer chains while catching realistic cycles.
+        IJBTerminal current = terminal;
+        for (uint256 i; i < 5; i++) {
+            // Treat routes back to the router as circular.
+            if (address(current) == address(router)) return true;
 
-        // Probe via staticcall so plain terminals degrade cleanly.
-        (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
+            // Probe via staticcall so plain terminals degrade cleanly.
+            (bool success, bytes memory data) =
+                address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
-        // Non-forwarding terminals (call fails or returns zero) are not circular.
-        if (!success || data.length < 32) return false;
-        IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
-        if (address(forwardingTarget) == address(0)) return false;
+            // Non-forwarding terminals (call fails or returns zero) end the chain — not circular.
+            if (!success || data.length < 32) return false;
+            IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
+            if (address(forwardingTarget) == address(0)) return false;
 
-        // Forwarding terminals that route back into the router are circular.
-        return address(forwardingTarget) == address(router);
+            // Follow the forwarding chain one more hop.
+            current = forwardingTarget;
+        }
+
+        // If we followed 5 hops without finding a non-forwarding terminal or the router,
+        // treat this as a suspicious deep chain and mark it as circular to be safe.
+        return true;
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
@@ -528,6 +537,53 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             metadata: metadata,
             tokenOut: tokenOut,
             destTerminal: destTerminal
+        });
+    }
+
+    /// @notice External wrapper for fallback preview — exists so `previewBestPayRoute` can catch reverts via
+    /// `self.previewFallbackRoute(...)`.
+    /// @dev Must only be called by this contract to isolate failures in the fallback preview path.
+    function previewFallbackRoute(
+        IJBPayRoutePreviewer router,
+        uint256 projectId,
+        address tokenIn,
+        uint256 amount,
+        address beneficiary,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            IJBTerminal destTerminal,
+            address tokenOut,
+            uint256 amountOut,
+            JBRuleset memory ruleset,
+            uint256 beneficiaryTokenCount,
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
+        )
+    {
+        // Preview the fallback route.
+        (destTerminal, tokenOut, amountOut) = _previewRoute({
+            router: router, destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata
+        });
+
+        // Preview the final terminal pay for that fallback route.
+        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = router.previewTerminalPayOf({
+            destTerminal: destTerminal,
+            projectId: projectId,
+            token: tokenOut,
+            amount: amountOut,
+            beneficiary: beneficiary,
+            metadata: metadata
+        });
+
+        // Normalize the fallback preview counts.
+        (beneficiaryTokenCount, reservedTokenCount) = _effectivePreviewPayTokenCounts({
+            buybackHook: router.BUYBACK_HOOK(),
+            beneficiaryTokenCount: beneficiaryTokenCount,
+            reservedTokenCount: reservedTokenCount,
+            hookSpecifications: hookSpecifications
         });
     }
 
@@ -931,26 +987,26 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Fall back to the router's generic route resolution when no candidate token could be scored directly.
-        (destTerminal, tokenOut, amountOut) = _previewRoute({
-            router: router, destProjectId: projectId, tokenIn: tokenIn, amount: amount, metadata: metadata
-        });
-
-        // Preview the final terminal pay for that fallback route.
-        (ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = router.previewTerminalPayOf({
-            destTerminal: destTerminal,
-            projectId: projectId,
-            token: tokenOut,
-            amount: amountOut,
-            beneficiary: beneficiary,
-            metadata: metadata
-        });
-
-        // Normalize the fallback preview counts so buyback-hook metadata still affects route ranking consistently.
-        (beneficiaryTokenCount, reservedTokenCount) = _effectivePreviewPayTokenCounts({
-            buybackHook: router.BUYBACK_HOOK(),
-            beneficiaryTokenCount: beneficiaryTokenCount,
-            reservedTokenCount: reservedTokenCount,
-            hookSpecifications: hookSpecifications
-        });
+        // Wrap in try/catch like the candidate scoring loop so a broken fallback terminal or price feed
+        // doesn't brick the entire preview.
+        try self.previewFallbackRoute(router, projectId, tokenIn, amount, beneficiary, metadata) returns (
+            IJBTerminal fallbackDestTerminal,
+            address fallbackTokenOut,
+            uint256 fallbackAmountOut,
+            JBRuleset memory fallbackRuleset,
+            uint256 fallbackBeneficiaryTokenCount,
+            uint256 fallbackReservedTokenCount,
+            JBPayHookSpecification[] memory fallbackHookSpecifications
+        ) {
+            destTerminal = fallbackDestTerminal;
+            tokenOut = fallbackTokenOut;
+            amountOut = fallbackAmountOut;
+            ruleset = fallbackRuleset;
+            beneficiaryTokenCount = fallbackBeneficiaryTokenCount;
+            reservedTokenCount = fallbackReservedTokenCount;
+            hookSpecifications = fallbackHookSpecifications;
+        } catch {
+            // If the fallback also fails, return default zero values — the caller gets "no route found".
+        }
     }
 }

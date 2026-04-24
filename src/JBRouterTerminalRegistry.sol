@@ -300,6 +300,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
+        // Save any previous payer so nested reentrant calls through pay hooks restore correctly.
+        address previousPayer = originalPayer;
+
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
@@ -320,8 +323,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Revoke any leftover allowance the terminal did not pull.
         if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
 
-        // Clear transient storage.
-        originalPayer = address(0);
+        // Restore the previous payer (supports nested reentrant calls through pay hooks).
+        originalPayer = previousPayer;
     }
 
     /// @notice Allow a terminal.
@@ -431,6 +434,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Trigger any pre-transfer logic.
         uint256 payValue = _beforeTransferFor({to: address(terminal), token: token, amount: amount});
 
+        // Save any previous payer so nested reentrant calls through pay hooks restore correctly.
+        address previousPayer = originalPayer;
+
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer.
         originalPayer = _msgSender();
@@ -452,8 +458,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Revoke any leftover allowance the terminal did not pull.
         if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
 
-        // Clear transient storage.
-        originalPayer = address(0);
+        // Restore the previous payer (supports nested reentrant calls through pay hooks).
+        originalPayer = previousPayer;
     }
 
     /// @notice Set the default terminal.

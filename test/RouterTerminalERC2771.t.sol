@@ -176,11 +176,12 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
-        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and the 5-hop circular check ends cleanly.
+        // Return a distinct non-contract address (not mockTerminal itself) so the forwarding chain terminates.
         vm.mockCall(
             mockTerminal,
             abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, projectId),
-            abi.encode(mockTerminal)
+            abi.encode(IJBTerminal(address(1)))
         );
 
         // Mock terminalsOf so the _routeForPay path finds the project's terminals.
@@ -268,11 +269,12 @@ contract RouterTerminalERC2771Test is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         JBAccountingContext({token: address(token), decimals: 18, currency: uint32(uint160(address(token)))});
         vm.mockCall(mockTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
-        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
+        // Mock terminalOf so _isForwardingTerminal returns true and the 5-hop circular check ends cleanly.
+        // Return a distinct non-contract address (not mockTerminal itself) so the forwarding chain terminates.
         vm.mockCall(
             mockTerminal,
             abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, projectId),
-            abi.encode(mockTerminal)
+            abi.encode(IJBTerminal(address(1)))
         );
 
         // Mock terminalsOf so the _routeForPay path finds the project's terminals.
