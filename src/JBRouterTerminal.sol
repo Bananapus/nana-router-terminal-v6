@@ -2344,7 +2344,11 @@ contract JBRouterTerminal is
                 if (tickCumulatives.length >= 2) {
                     // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
                     // forge-lint: disable-next-line(unsafe-typecast)
-                    tick = int24((tickCumulatives[1] - tickCumulatives[0]) / int56(int32(_TWAP_WINDOW)));
+                    int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+                    int56 period = int56(int32(_TWAP_WINDOW));
+                    tick = int24(tickDelta / period);
+                    // Round towards negative infinity for negative ticks (Uniswap convention).
+                    if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
                     usedTwap = true;
                 }
             } catch {}
