@@ -286,7 +286,8 @@ contract DeployBuybackHookZeroTest is Test {
         reclaimToken = new AuditMockERC20();
         nativeTerminal = new AuditMockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 100);
         tokenBTerminal = new AuditMockPreviewDestTerminal(address(reclaimToken), 150);
-        nativeCashOut = new AuditMockCashOutTerminal{value: 40}(jbToken, JBConstants.NATIVE_TOKEN, 40, 40);
+        vm.deal(address(this), 80);
+        nativeCashOut = new AuditMockCashOutTerminal{value: 80}(jbToken, JBConstants.NATIVE_TOKEN, 40, 40);
         tokenBCashOut = new AuditMockCashOutTerminal(jbToken, address(reclaimToken), 50, 50);
 
         reclaimToken.mint(address(tokenBCashOut), 50);
@@ -392,6 +393,7 @@ contract DeployBuybackHookZeroTest is Test {
                 uint256(0),
                 false,
                 address(0),
+                uint256(0),
                 uint256(0),
                 int24(0),
                 uint128(0),
