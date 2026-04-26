@@ -66,17 +66,7 @@ contract PullingTerminal is IJBTerminal {
 
     function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external {}
 
-    function addToBalanceOf(
-        uint256,
-        address,
-        uint256 amount,
-        bool,
-        string calldata,
-        bytes calldata
-    )
-        external
-        payable
-    {
+    function addToBalanceOf(uint256, address, uint256 amount, bool, string calldata, bytes calldata) external payable {
         // Pull tokens from the router.
         require(TOKEN.transferFrom(msg.sender, address(this), amount));
     }
@@ -156,11 +146,7 @@ contract Pass12M39Test is Test {
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(token))),
             abi.encode(address(terminal))
         );
-        vm.mockCall(
-            tokens,
-            abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(token)))),
-            abi.encode(uint256(0))
-        );
+        vm.mockCall(tokens, abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(token)))), abi.encode(uint256(0)));
 
         router = new JBRouterTerminal({
             directory: IJBDirectory(directory),

@@ -369,6 +369,12 @@ contract JBRouterTerminal is
         });
 
         _afterTransferFor({destTerminal: destTerminal, token: token});
+
+        // NOTE: No ERC-20 receipt enforcement here (unlike addToBalanceOf).
+        // Pay hooks attached to the destination terminal may legitimately consume tokens during
+        // pay(), making a balance-delta check produce false reverts. Fee-on-transfer (FOT) tokens
+        // are therefore NOT supported for routed payments — the terminal will receive fewer tokens
+        // than `amount` but the router cannot detect or prevent this. See RISKS.md for details.
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.

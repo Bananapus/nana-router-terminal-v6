@@ -39,14 +39,7 @@ contract HookForwardingTerminal is IJBTerminal {
         HOOK_AMOUNT = hookAmount_;
     }
 
-    function accountingContextForTokenOf(
-        uint256,
-        address token_
-    )
-        external
-        pure
-        returns (JBAccountingContext memory)
-    {
+    function accountingContextForTokenOf(uint256, address token_) external pure returns (JBAccountingContext memory) {
         return JBAccountingContext({token: token_, decimals: 18, currency: 0});
     }
 
