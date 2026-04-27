@@ -16,7 +16,6 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
-import {IJBForwardingTerminal} from "../../src/interfaces/IJBForwardingTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 /// @notice Minimal ERC20 mock for balance-delta accounting in _acceptFundsFor.
