@@ -10,7 +10,7 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
-import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
+import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -340,7 +340,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         return _normalizedTokenOf(tokenA) == _normalizedTokenOf(tokenB);
     }
 
-    /// @notice Whether previewing through a terminal would immediately cycle back into the router.
+    /// @notice Whether previewing through a terminal would cycle back into the router.
+    /// @dev Delegates to `JBForwardingCheck.isCircularTerminal` — shared with `JBRouterTerminal` so that
+    /// preview and execution use identical cycle-detection logic.
     /// @param router The router whose preview path is being evaluated.
     /// @param projectId The project whose forwarding terminal would be resolved.
     /// @param terminal The terminal that would receive the previewed route.
@@ -354,30 +356,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (bool isCircular)
     {
-        // Follow the forwarding chain up to 5 hops to detect circular routes back to the router.
-        // A bounded loop prevents infinite gas consumption from longer chains while catching realistic cycles.
-        IJBTerminal current = terminal;
-        for (uint256 i; i < 5; i++) {
-            // Treat routes back to the router as circular.
-            if (address(current) == address(router)) return true;
-
-            // Probe via staticcall so plain terminals degrade cleanly.
-            // slither-disable-next-line calls-loop
-            (bool success, bytes memory data) =
-                address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-
-            // Non-forwarding terminals (call fails or returns zero) end the chain — not circular.
-            if (!success || data.length < 32) return false;
-            IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
-            if (address(forwardingTarget) == address(0)) return false;
-
-            // Follow the forwarding chain one more hop.
-            current = forwardingTarget;
-        }
-
-        // If we followed 5 hops without finding a non-forwarding terminal or the router,
-        // treat this as a suspicious deep chain and mark it as circular to be safe.
-        return true;
+        return JBForwardingCheck.isCircularTerminal({target: address(router), projectId: projectId, terminal: terminal});
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
