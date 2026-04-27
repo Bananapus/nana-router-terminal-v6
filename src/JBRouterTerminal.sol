@@ -356,11 +356,6 @@ contract JBRouterTerminal is
         // native.
         uint256 payValue = _beforeTransferFor({to: address(destTerminal), token: token, amount: amount});
 
-        // Snapshot the destination terminal's ERC20 balance and forwarding status for receipt enforcement.
-        // Combines both checks into one call to avoid duplicate _isForwardingTerminal probes.
-        (uint256 terminalReceiptBaseline, bool isForwarding) =
-            _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
-
         // Execute the final payment on the destination terminal and bubble back the beneficiary token count it
         // returned.
         beneficiaryTokenCount = destTerminal.pay{value: payValue}({
@@ -375,14 +370,11 @@ contract JBRouterTerminal is
 
         _afterTransferFor({destTerminal: destTerminal, token: token});
 
-        // Reject fee-on-transfer or otherwise lossy ERC20 terminal pulls on the final forwarded hop.
-        _enforceStandardTerminalReceipt({
-            terminal: destTerminal,
-            token: token,
-            expectedAmount: amount,
-            receiptBaseline: terminalReceiptBaseline,
-            isForwarding: isForwarding
-        });
+        // NOTE: No ERC-20 receipt enforcement here (unlike addToBalanceOf).
+        // Pay hooks attached to the destination terminal may legitimately consume tokens during
+        // pay(), making a balance-delta check produce false reverts. Fee-on-transfer (FOT) tokens
+        // are therefore NOT supported for routed payments — the terminal will receive fewer tokens
+        // than `amount` but the router cannot detect or prevent this. See RISKS.md for details.
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
