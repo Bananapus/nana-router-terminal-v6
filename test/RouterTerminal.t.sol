@@ -2500,8 +2500,8 @@ contract RouterTerminalTest is Test {
             );
         }
 
-        // Router now applies the reclaim minimum on the first concrete cashout hop only.
-        // Later hops intentionally drop the floor because the route may change token units.
+        // The router now passes minTokensReclaimed=0 to the terminal and enforces the user's
+        // minimum via the balance-delta check instead (to support buyback-hook sell-side flows).
         vm.expectCall(
             address(mockCashOutTerminal),
             abi.encodeCall(
@@ -2511,7 +2511,7 @@ contract RouterTerminalTest is Test {
                     2, // sourceProjectId
                     100e18, // amount
                     JBConstants.NATIVE_TOKEN,
-                    50e18, // first hop receives the user-specified reclaim minimum directly
+                    0, // router passes 0 and enforces via balance-delta
                     payable(address(routerTerminal)),
                     bytes("")
                 )

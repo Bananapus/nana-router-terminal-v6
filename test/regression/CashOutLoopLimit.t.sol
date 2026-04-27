@@ -47,6 +47,72 @@ contract MockToken {
     }
 }
 
+/// @notice Cash-out terminal that actually transfers the reclaim token to the beneficiary,
+/// so the router's balance-delta accounting sees a real balance increase.
+contract RealCashOutTerminal {
+    MockToken public immutable RECLAIM_TOKEN;
+    uint256 public immutable RECLAIM_AMOUNT;
+
+    constructor(MockToken reclaimToken_, uint256 reclaimAmount_) {
+        RECLAIM_TOKEN = reclaimToken_;
+        RECLAIM_AMOUNT = reclaimAmount_;
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({
+            token: address(RECLAIM_TOKEN), decimals: 18, currency: uint32(uint160(address(RECLAIM_TOKEN)))
+        });
+    }
+
+    function cashOutTokensOf(
+        address,
+        uint256,
+        uint256,
+        address,
+        uint256,
+        address payable beneficiary,
+        bytes calldata
+    )
+        external
+        returns (uint256)
+    {
+        RECLAIM_TOKEN.transfer(beneficiary, RECLAIM_AMOUNT);
+        return RECLAIM_AMOUNT;
+    }
+}
+
+/// @notice Destination terminal that actually pulls tokens from the sender via transferFrom,
+/// so the router's receipt enforcement (_enforceStandardTerminalReceipt) sees the expected balance.
+contract RealDestTerminal {
+    uint256 public lastReturnValue;
+
+    constructor(uint256 returnValue_) {
+        lastReturnValue = returnValue_;
+    }
+
+    function pay(
+        uint256,
+        address token,
+        uint256 amount,
+        address,
+        uint256,
+        string calldata,
+        bytes calldata
+    )
+        external
+        returns (uint256)
+    {
+        MockToken(token).transferFrom(msg.sender, address(this), amount);
+        return lastReturnValue;
+    }
+}
+
 /// @notice _cashOutLoop should revert with CashOutLoopLimit when circular token
 /// dependencies cause more than 20 iterations, instead of consuming all gas.
 contract CashOutLoopLimitTest is Test {
@@ -176,29 +242,34 @@ contract CashOutLoopLimitTest is Test {
     /// @notice A non-circular path within the iteration cap should succeed normally.
     function test_cashOutLoop_succeedsWithinLimit() public {
         uint256 amount = 10e18;
-        address baseToken = makeAddr("baseToken");
-        vm.etch(baseToken, hex"00");
 
         // Override: tokenB is NOT a JB token (breaks the cycle).
         vm.mockCall(
             address(tokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(tokenB)))), abi.encode(uint256(0))
         );
 
-        // Dest project accepts baseToken via a terminal (so the router can swap tokenB -> baseToken).
-        // For simplicity: dest accepts tokenB directly.
+        // Replace project A's mocked terminal with a real contract that transfers tokenB to
+        // the router so the balance-delta accounting sees the cashout proceeds.
+        RealCashOutTerminal realTerminalA = new RealCashOutTerminal(tokenB, 1e18);
+        tokenB.mint(address(realTerminalA), 1e18);
+
+        {
+            IJBTerminal[] memory terminalList = new IJBTerminal[](1);
+            terminalList[0] = IJBTerminal(address(realTerminalA));
+            vm.mockCall(
+                address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_A_ID)), abi.encode(terminalList)
+            );
+        }
+
+        // Use a real destination terminal that pulls tokens via transferFrom so the router's
+        // receipt enforcement sees the expected balance increase.
+        RealDestTerminal realDestTerminal = new RealDestTerminal(5);
+
+        // Dest project accepts tokenB directly via the real destination terminal.
         vm.mockCall(
             address(directory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (DEST_PROJECT_ID, address(tokenB))),
-            abi.encode(mockTerminal)
-        );
-
-        // Mock dest terminal pay.
-        vm.mockCall(mockTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(5)));
-        // Mock terminalOf so _isForwardingTerminal returns true and circular-terminal check sees a non-router target.
-        vm.mockCall(
-            mockTerminal,
-            abi.encodeWithSelector(IJBForwardingTerminal.terminalOf.selector, DEST_PROJECT_ID),
-            abi.encode(mockTerminal)
+            abi.encode(address(realDestTerminal))
         );
 
         // Mint and approve tokenA.

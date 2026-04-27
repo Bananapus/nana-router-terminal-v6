@@ -557,10 +557,12 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);
 
             assertEq(result, 200, "pay should return dest terminal token count");
+            // The router now passes minTokensReclaimed=0 to the terminal and enforces the user's
+            // minimum via the balance-delta check instead (to support buyback-hook sell-side flows).
             assertEq(
                 cashOutTerminal.lastMinTokensReclaimed(),
-                minReclaimed,
-                "router should forward the metadata floor on the first hop"
+                0,
+                "router should pass 0 to the terminal and enforce via balance-delta"
             );
             assertEq(destTerminal.lastAmount(), 60e18, "dest terminal should receive the reclaimed amount");
             assertEq(destTerminal.lastValue(), 60e18, "dest terminal should receive ETH value");
