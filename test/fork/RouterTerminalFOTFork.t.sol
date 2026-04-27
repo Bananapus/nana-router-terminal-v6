@@ -166,12 +166,13 @@ contract RouterTerminalFOTForkTest is Test {
     // FOT: Direct forward (no swap) — router pays project that accepts FOT
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice FOT direct forward reverts because the second transfer (router → terminal)
-    ///         loses tokens to the fee, causing a receipt mismatch.
+    /// @notice After M-39, the router no longer enforces ERC-20 receipt checks on the pay path
+    ///         (pay hooks may legitimately consume tokens). FOT direct forward now succeeds
+    ///         silently — the terminal receives fewer tokens than `amount`.
     ///
     ///         Flow: payer sends 10,000 FOT → router receives 9,900 (1% fee) →
     ///               router approves terminal for 9,900 → terminal pulls 9,900 from router →
-    ///               terminal receives 9,801 (1% fee) → receipt check: 9,801 != 9,900 → REVERT.
+    ///               terminal receives 9,801 (1% fee) → NO receipt check → succeeds.
     function test_fork_fotDirectForward_reverts() public {
         uint256 amount = 10_000e18;
         fotToken.mint(payer, amount);
@@ -179,8 +180,7 @@ contract RouterTerminalFOTForkTest is Test {
         vm.startPrank(payer);
         fotToken.approve(address(routerTerminal), amount);
 
-        // Reverts with NonStandardTerminalToken because of receipt mismatch.
-        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector);
+        // M-39 FIX: pay path no longer enforces receipt check, so this succeeds.
         routerTerminal.pay({
             projectId: fotProjectId,
             token: address(fotToken),

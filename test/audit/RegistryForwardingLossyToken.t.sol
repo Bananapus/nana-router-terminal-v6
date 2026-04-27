@@ -214,7 +214,12 @@ contract RegistryForwardingLossyTokenTest is Test {
         assertEq(minted, 72.9e18, "call succeeds using the shrunken receipt");
     }
 
-    function test_directRouterPathRevertsOnSameLossyToken() public {
+    /// @notice After M-39 fix, the router no longer enforces ERC-20 receipt checks on the pay path.
+    /// A lossy (fee-on-transfer) token routed directly to a terminal now succeeds silently — the
+    /// terminal receives fewer tokens than `amount` but the router cannot detect or prevent this.
+    /// This test verifies the fix: the call succeeds (no revert) and the terminal receives the
+    /// fee-reduced amount.
+    function test_directRouterPathSucceedsWithLossyTokenAfterM39Fix() public {
         vm.mockCall(
             address(directory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(token))),
@@ -222,7 +227,12 @@ contract RegistryForwardingLossyTokenTest is Test {
         );
 
         vm.prank(payer);
-        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector);
-        router.pay(PROJECT_ID, address(token), AMOUNT, payer, 0, "", "");
+        uint256 minted = router.pay(PROJECT_ID, address(token), AMOUNT, payer, 0, "", "");
+
+        // Router received 90e18 after the first lossy transfer from payer.
+        // Terminal was told amount=90e18 but received 81e18 after the second lossy transfer.
+        assertEq(finalTerminal.lastNominalAmount(), 90e18, "terminal sees the router-received amount as nominal");
+        assertEq(finalTerminal.lastActualReceipt(), 81e18, "terminal receives 81% of original due to two 10% fees");
+        assertEq(minted, 81e18, "beneficiary token count reflects actual receipt");
     }
 }
