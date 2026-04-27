@@ -2323,7 +2323,7 @@ contract JBRouterTerminal is
         if (address(key.hooks) != address(0)) {
             // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, now].
             uint32[] memory secondsAgos = new uint32[](2);
-            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (30 seconds ago).
+            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (120 seconds ago).
             secondsAgos[1] = 0; // End of the window (current block).
 
             // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
