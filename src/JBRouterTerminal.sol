@@ -995,7 +995,7 @@ contract JBRouterTerminal is
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
-        if (address(terminal) == address(0) || _isCircularTerminal(projectId, terminal)) {
+        if (address(terminal) == address(0) || _isCircularTerminal({projectId: projectId, terminal: terminal})) {
             return IJBTerminal(address(0));
         }
 
