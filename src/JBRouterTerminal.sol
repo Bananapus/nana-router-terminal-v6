@@ -995,7 +995,10 @@ contract JBRouterTerminal is
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
-        if (address(terminal) == address(0) || _isCircularTerminal({projectId: projectId, terminal: terminal})) {
+        if (
+            address(terminal) == address(0)
+                || JBForwardingCheck.isCircularTerminal({target: address(this), projectId: projectId, terminal: terminal})
+        ) {
             return IJBTerminal(address(0));
         }
 
@@ -1030,16 +1033,6 @@ contract JBRouterTerminal is
             // slither-disable-next-line calls-loop
             sourceProjectId = _projectIdOf(token);
         }
-    }
-
-    /// @notice Whether routing through a terminal would cycle back into the router.
-    /// @dev Delegates to `JBForwardingCheck.isCircularTerminal` — shared with `JBPayRouteResolver` so that
-    /// execution and preview use identical cycle-detection logic.
-    /// @param projectId The project whose forwarding terminal would be resolved.
-    /// @param terminal The terminal that would receive the route.
-    /// @return isCircular A flag indicating whether `terminal` is this router or forwards back into it.
-    function _isCircularTerminal(uint256 projectId, IJBTerminal terminal) internal view returns (bool isCircular) {
-        return JBForwardingCheck.isCircularTerminal({target: address(this), projectId: projectId, terminal: terminal});
     }
 
     /// @notice Accepts a token being paid in.
