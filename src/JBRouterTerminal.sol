@@ -997,7 +997,9 @@ contract JBRouterTerminal is
         // Drop terminals that would route straight back into the router (circular).
         if (
             address(terminal) == address(0)
-                || JBForwardingCheck.isCircularTerminal({target: address(this), projectId: projectId, terminal: terminal})
+                || JBForwardingCheck.isCircularTerminal({
+                    target: address(this), projectId: projectId, terminal: terminal
+                })
         ) {
             return IJBTerminal(address(0));
         }
