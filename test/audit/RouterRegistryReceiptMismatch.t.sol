@@ -21,7 +21,7 @@ import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract CodexToken {
+contract MockToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -49,7 +49,7 @@ contract CodexToken {
     }
 }
 
-contract CodexTerminal {
+contract MockTerminal {
     uint256 public totalReceived;
 
     function pay(
@@ -64,13 +64,13 @@ contract CodexTerminal {
         external
         returns (uint256)
     {
-        require(CodexToken(token).transferFrom(msg.sender, address(this), amount), "CodexTerminal: transferFrom failed");
+        require(MockToken(token).transferFrom(msg.sender, address(this), amount), "MockTerminal: transferFrom failed");
         totalReceived += amount;
         return amount;
     }
 
     function addToBalanceOf(uint256, address token, uint256 amount, bool, string calldata, bytes calldata) external {
-        require(CodexToken(token).transferFrom(msg.sender, address(this), amount), "CodexTerminal: transferFrom failed");
+        require(MockToken(token).transferFrom(msg.sender, address(this), amount), "MockTerminal: transferFrom failed");
         totalReceived += amount;
     }
 
@@ -137,8 +137,8 @@ contract RouterRegistryReceiptMismatchTest is Test {
     IUniswapV3Factory internal factory;
     IPoolManager internal poolManager;
 
-    CodexToken internal token;
-    CodexTerminal internal finalTerminal;
+    MockToken internal token;
+    MockTerminal internal finalTerminal;
 
     address internal owner = makeAddr("owner");
     address internal payer = makeAddr("payer");
@@ -178,8 +178,8 @@ contract RouterRegistryReceiptMismatchTest is Test {
             permissions: permissions, projects: projects, permit2: permit2, owner: owner, trustedForwarder: address(0)
         });
 
-        finalTerminal = new CodexTerminal();
-        token = new CodexToken();
+        finalTerminal = new MockTerminal();
+        token = new MockToken();
 
         vm.prank(owner);
         registry.setDefaultTerminal(IJBTerminal(address(finalTerminal)));
