@@ -975,14 +975,12 @@ contract JBRouterTerminal is
     /// @param projectId The project whose forwarding target should be resolved.
     /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
     function _isForwardingTerminal(IJBTerminal terminal, uint256 projectId) internal view returns (bool isForwarding) {
-        // Probe via staticcall so non-forwarding terminals degrade cleanly.
-        (bool success, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-
-        // Treat terminals that do not implement the capability or return zero as final receivers.
-        if (!success || data.length < 32) return false;
-
-        return address(abi.decode(data, (IJBTerminal))) != address(0);
+        // Non-forwarding terminals (no terminalOf or returns zero) are treated as final receivers.
+        try IJBForwardingTerminal(address(terminal)).terminalOf(projectId) returns (IJBTerminal forwardingTarget) {
+            return address(forwardingTarget) != address(0);
+        } catch {
+            return false;
+        }
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
@@ -1005,14 +1003,10 @@ contract JBRouterTerminal is
         }
 
         // Check if the terminal is a forwarding layer that routes back into this router.
-        // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
-        // cleanly into a no-op (success=false or empty data).
         // slither-disable-next-line calls-loop
-        (bool ok, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-        if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
-            return IJBTerminal(address(0));
-        }
+        try IJBForwardingTerminal(address(terminal)).terminalOf(projectId) returns (IJBTerminal forwardingTarget) {
+            if (address(forwardingTarget) == address(this)) return IJBTerminal(address(0));
+        } catch {} // solhint-disable-line no-empty-blocks
     }
 
     /// @notice Resolve which source project a routed token should cash out from.

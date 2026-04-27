@@ -25,17 +25,14 @@ library JBForwardingCheck {
         for (uint256 i; i < 5; i++) {
             if (address(current) == target) return true;
 
-            // Probe via staticcall so plain terminals degrade cleanly.
+            // Follow the forwarding chain. Non-forwarding terminals end the chain — not circular.
             // slither-disable-next-line calls-loop
-            (bool success, bytes memory data) =
-                address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-
-            // Non-forwarding terminals (call fails or returns zero) end the chain — not circular.
-            if (!success || data.length < 32) return false;
-            IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
-            if (address(forwardingTarget) == address(0)) return false;
-
-            current = forwardingTarget;
+            try IJBForwardingTerminal(address(current)).terminalOf(projectId) returns (IJBTerminal forwardingTarget) {
+                if (address(forwardingTarget) == address(0)) return false;
+                current = forwardingTarget;
+            } catch {
+                return false;
+            }
         }
 
         // 5 hops without resolution — treat as circular to be safe.
