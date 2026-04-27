@@ -61,7 +61,7 @@ contract MockPlainTerminal {
     function addToBalanceOf(uint256, address, uint256, bool, string calldata, bytes calldata) external payable {}
 }
 
-/// @title Pass 13 — L-19: Shared circular terminal check via JBForwardingCheck library
+/// @title Shared circular terminal check via JBForwardingCheck library
 contract Pass13L19Test is Test {
     address constant ROUTER = address(0x1234);
     uint256 constant PROJECT_ID = 1;
@@ -124,7 +124,7 @@ contract Pass13L19Test is Test {
     }
 }
 
-/// @title Pass 13 — M-47: Cash-out minimum reverts on buyback sell-side
+/// @title Cash-out minimum must not revert on buyback sell-side
 /// @notice Validates that the router passes minTokensReclaimed=0 to the terminal and enforces the minimum itself.
 contract Pass13M47Test is Test {
     /// @notice The router's balance-delta check enforces the user's minimum even when the terminal returns 0.

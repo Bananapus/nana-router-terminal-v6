@@ -1034,7 +1034,7 @@ contract JBRouterTerminal is
 
     /// @notice Whether routing through a terminal would cycle back into the router.
     /// @dev Delegates to `JBForwardingCheck.isCircularTerminal` — shared with `JBPayRouteResolver` so that
-    /// execution and preview use identical cycle-detection logic (L-19).
+    /// execution and preview use identical cycle-detection logic.
     /// @param projectId The project whose forwarding terminal would be resolved.
     /// @param terminal The terminal that would receive the route.
     /// @return isCircular A flag indicating whether `terminal` is this router or forwards back into it.
