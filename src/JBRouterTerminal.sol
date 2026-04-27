@@ -44,6 +44,7 @@ import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
+import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
 import {CashOutPathCandidates} from "./structs/CashOutPathCandidates.sol";
@@ -986,13 +987,16 @@ contract JBRouterTerminal is
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
-        if (address(terminal) == address(0) || _isCircularTerminal(terminal)) {
+        if (
+            address(terminal) == address(0)
+                || JBForwardingCheck.isCircularTerminal({
+                    target: address(this), projectId: projectId, terminal: terminal
+                })
+        ) {
             return IJBTerminal(address(0));
         }
 
         // Check if the terminal is a forwarding layer that routes back into this router.
-        // Uses the same low-level staticcall pattern as _isForwardingTerminal — non-forwarding terminals degrade
-        // cleanly into a no-op (success=false or empty data).
         // slither-disable-next-line calls-loop
         (bool ok, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
@@ -1021,13 +1025,6 @@ contract JBRouterTerminal is
             // slither-disable-next-line calls-loop
             sourceProjectId = _projectIdOf(token);
         }
-    }
-
-    /// @notice Whether routing through a terminal would cycle back into the router.
-    /// @param terminal The terminal that would receive the route.
-    /// @return isCircular A flag indicating whether `terminal` is this router itself.
-    function _isCircularTerminal(IJBTerminal terminal) internal view returns (bool isCircular) {
-        return address(terminal) == address(this);
     }
 
     /// @notice Accepts a token being paid in.
@@ -1205,15 +1202,16 @@ contract JBRouterTerminal is
             // Cash out the source project's tokens.
             // Don't rely on the terminal return value here. Buyback-hook sell-side execution returns 0 reclaimAmount
             // from nana-core, then transfers the real proceeds during the hook callback.
-            // Pass the metadata-level minimum only on the first hop, while the amount is still expressed in the unit
-            // the caller supplied. Later hops may reclaim different assets, so reusing this floor would be unsound.
+            // Pass minTokensReclaimed=0 to the terminal because the buyback hook's sell-side delivers tokens via
+            // callback (reclaimAmount=0 from the terminal's perspective), which would fail the terminal's own min
+            // check. The router enforces the user's minimum via the balance-delta check below instead.
             // slither-disable-next-line unused-return,calls-loop
             cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
                 cashOutCount: amount,
                 tokenToReclaim: tokenToReclaim,
-                minTokensReclaimed: minTokensReclaimed,
+                minTokensReclaimed: 0,
                 beneficiary: payable(address(this)),
                 metadata: ""
             });
