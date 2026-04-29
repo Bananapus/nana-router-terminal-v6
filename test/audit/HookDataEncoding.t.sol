@@ -48,9 +48,9 @@ contract CapturingPoolManager {
     receive() external payable {}
 }
 
-/// @notice M-41: When the V4 pool key has hooks != address(0), the hookData passed to PoolManager.swap()
+/// @notice When the V4 pool key has hooks != address(0), the hookData passed to PoolManager.swap()
 /// must contain abi.encode(minAmountOut), not empty bytes. Otherwise hooks like JBUniswapV4Hook will revert.
-contract M41_HookDataEncodingTest is Test {
+contract HookDataEncodingTest is Test {
     JBRouterTerminal internal router;
     CapturingPoolManager internal poolManager;
 
@@ -91,7 +91,7 @@ contract M41_HookDataEncodingTest is Test {
     }
 
     /// @notice When a hooked V4 pool is used, hookData must contain abi.encode(minAmountOut).
-    function test_M41_hookData_containsMinAmountOut_whenHooksConfigured() public {
+    function test_hookData_containsMinAmountOut_whenHooksConfigured() public {
         // Build a pool key with hooks.
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(tokenA),
@@ -124,7 +124,7 @@ contract M41_HookDataEncodingTest is Test {
     }
 
     /// @notice When a pool has no hooks (address(0)), hookData should remain empty.
-    function test_M41_hookData_isEmpty_whenNoHooks() public {
+    function test_hookData_isEmpty_whenNoHooks() public {
         // Build a pool key WITHOUT hooks.
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(tokenA),
