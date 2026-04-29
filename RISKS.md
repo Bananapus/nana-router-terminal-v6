@@ -47,3 +47,8 @@ The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validat
 
 **Permit2 try/catch falls through to ERC20 allowance.** *(Minor)*
 Standard Permit2 fallback pattern. If Permit2 signature verification fails, the contract falls back to standard ERC20 `transferFrom` using existing allowance.
+
+## Pool Discovery Risks
+
+**Fresh high-liquidity V3 pool without TWAP history can block auto-quoting.** *(Minor)*
+`_discoverPool` selects the highest-liquidity V3 pool, but `_getV3TwapQuote` requires sufficient observation history. A freshly deployed pool with high liquidity wins discovery but fails the TWAP check, reverting the routing flow while lower-liquidity pools with adequate TWAP are ignored. Accepted because: (1) this is self-correcting — the pool accumulates observations over time, (2) the griefing cost is high — attacker must deploy real liquidity, (3) callers can bypass auto-quoting entirely by providing `quoteForSwap` metadata, and (4) the condition is temporary and resolves within the TWAP observation window (default 10 minutes).
