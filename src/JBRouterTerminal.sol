@@ -429,7 +429,7 @@ contract JBRouterTerminal is
             params: SwapParams({
                 zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
             }),
-            hookData: ""
+            hookData: address(key.hooks) != address(0) ? abi.encode(minAmountOut) : bytes("")
         });
 
         // Determine input/output amounts from the delta.
