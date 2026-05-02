@@ -41,8 +41,11 @@ contract ProportionalPreviewTerminal {
         payable
         returns (uint256)
     {
-        if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "ProportionalPreviewTerminal: ETH mismatch");
-        else IERC20(token).transferFrom(msg.sender, address(this), amount);
+        if (token == JBConstants.NATIVE_TOKEN) {
+            require(msg.value == amount, "ProportionalPreviewTerminal: ETH mismatch");
+        } else {
+            require(IERC20(token).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
+        }
 
         totalReceived += amount;
         return amount;
@@ -160,9 +163,7 @@ contract RawBuybackQuoteRouteMisrankTest is RouterTerminalTest {
         destTerminals[0] = IJBTerminal(address(nativeTerminal));
         destTerminals[1] = IJBTerminal(address(tokenBTerminal));
         vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (destProjectId)),
-            abi.encode(destTerminals)
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (destProjectId)), abi.encode(destTerminals)
         );
 
         bytes4 buybackInterfaceId = bytes4(keccak256("MAX_TWAP_WINDOW()"));

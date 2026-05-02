@@ -313,6 +313,7 @@ contract RouterTerminalFOTForkTest is Test {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: 0,
+            // forge-lint: disable-next-line(unsafe-typecast)
             baseCurrency: uint32(uint160(acceptedToken)),
             pausePay: false,
             pauseCreditTransfers: false,
@@ -343,8 +344,12 @@ contract RouterTerminalFOTForkTest is Test {
         rulesetConfigs[0].fundAccessLimitGroups = new JBFundAccessLimitGroup[](0);
 
         JBAccountingContext[] memory tokensToAccept = new JBAccountingContext[](1);
-        tokensToAccept[0] =
-            JBAccountingContext({token: acceptedToken, decimals: decimals, currency: uint32(uint160(acceptedToken))});
+        tokensToAccept[0] = JBAccountingContext({
+            token: acceptedToken,
+            decimals: decimals,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            currency: uint32(uint160(acceptedToken))
+        });
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](1);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: tokensToAccept});

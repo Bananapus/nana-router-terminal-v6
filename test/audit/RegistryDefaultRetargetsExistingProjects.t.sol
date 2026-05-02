@@ -61,9 +61,7 @@ contract RegistryDefaultRetargetsExistingProjectsTest is Test {
         registry.setDefaultTerminal(terminalB);
 
         assertEq(
-            address(registry.terminalOf(PROJECT_ID_ONE)),
-            address(terminalA),
-            "locked project snapshots the old default"
+            address(registry.terminalOf(PROJECT_ID_ONE)), address(terminalA), "locked project snapshots the old default"
         );
         assertEq(
             address(registry.terminalOf(PROJECT_ID_TWO)),

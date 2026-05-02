@@ -81,7 +81,7 @@ contract RealCashOutTerminal {
         external
         returns (uint256)
     {
-        RECLAIM_TOKEN.transfer(beneficiary, RECLAIM_AMOUNT);
+        require(RECLAIM_TOKEN.transfer(beneficiary, RECLAIM_AMOUNT), "reclaim transfer failed");
         return RECLAIM_AMOUNT;
     }
 }
@@ -107,7 +107,7 @@ contract RealDestTerminal {
         external
         returns (uint256)
     {
-        MockToken(token).transferFrom(msg.sender, address(this), amount);
+        require(MockToken(token).transferFrom(msg.sender, address(this), amount), "pay transfer failed");
         return lastReturnValue;
     }
 }

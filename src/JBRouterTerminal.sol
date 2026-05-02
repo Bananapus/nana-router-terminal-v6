@@ -4,14 +4,11 @@ pragma solidity 0.8.28;
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
-import {IJBFeeTerminal} from "@bananapus/core-v6/src/interfaces/IJBFeeTerminal.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
-import {JBFees} from "@bananapus/core-v6/src/libraries/JBFees.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
@@ -809,7 +806,8 @@ contract JBRouterTerminal is
                 continue;
             }
 
-            // Decode only the executable floor needed to determine the user-visible sell-side output implied by the hook.
+            // Decode only the executable floor needed to determine the user-visible sell-side output implied by the
+            // hook.
             (uint256 minimumSwapAmountOut,,,,,,) =
                 abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
@@ -820,55 +818,6 @@ contract JBRouterTerminal is
                 ++i;
             }
         }
-    }
-
-    /// @notice Estimate the net reclaim amount a fee-aware terminal would deliver to this router.
-    /// @param reclaimAmount The gross reclaim amount returned by `previewCashOutFrom`.
-    /// @param cashOutTerminal The terminal that would execute the cash-out.
-    /// @return netReclaimAmount The reclaim amount after any discoverable Juicebox terminal fee.
-    function _netPreviewCashOutAmount(
-        uint256 reclaimAmount,
-        IJBCashOutTerminal cashOutTerminal
-    )
-        internal
-        view
-        returns (uint256 netReclaimAmount)
-    {
-        netReclaimAmount = reclaimAmount;
-        if (reclaimAmount == 0) return 0;
-
-        // Juicebox fee terminals expose their fee. Other terminals fall back to the raw preview.
-        (bool success, bytes memory data) =
-            address(cashOutTerminal).staticcall(abi.encodeCall(IJBFeeTerminal.FEE, ()));
-        if (!success || data.length < 32) return reclaimAmount;
-
-        uint256 fee = abi.decode(data, (uint256));
-        if (fee == 0 || _isCashOutPreviewBeneficiaryFeeless(cashOutTerminal)) return reclaimAmount;
-        if (fee > JBConstants.MAX_FEE) fee = JBConstants.MAX_FEE;
-
-        netReclaimAmount -= JBFees.feeAmountFrom({amountBeforeFee: netReclaimAmount, feePercent: fee});
-    }
-
-    /// @notice Check whether this router would be fee-exempt as the cash-out beneficiary.
-    /// @param cashOutTerminal The fee-aware terminal being previewed.
-    /// @return isFeeless A flag indicating whether the router is fee-exempt for that terminal.
-    function _isCashOutPreviewBeneficiaryFeeless(
-        IJBCashOutTerminal cashOutTerminal
-    )
-        internal
-        view
-        returns (bool isFeeless)
-    {
-        (bool success, bytes memory data) =
-            address(cashOutTerminal).staticcall(abi.encodeCall(IJBFeeTerminal.FEELESS_ADDRESSES, ()));
-        if (!success || data.length < 32) return false;
-
-        IJBFeelessAddresses feelessAddresses = abi.decode(data, (IJBFeelessAddresses));
-        if (address(feelessAddresses).code.length == 0) return false;
-
-        (success, data) =
-            address(feelessAddresses).staticcall(abi.encodeCall(IJBFeelessAddresses.isFeeless, (address(this))));
-        if (success && data.length >= 32) isFeeless = abi.decode(data, (bool));
     }
 
     /// @notice Preview the best pay route using the resolver helper.
@@ -2389,9 +2338,12 @@ contract JBRouterTerminal is
                 // An OOB access in the try-success block panics and is NOT caught by catch{}.
                 if (tickCumulatives.length >= 2) {
                     // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
-                    // forge-lint: disable-next-line(unsafe-typecast)
                     int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+                    // The TWAP window is a small protocol constant that fits in int32 and int56.
+                    // forge-lint: disable-next-line(unsafe-typecast)
                     int56 period = int56(int32(_TWAP_WINDOW));
+                    // The cumulative tick values come from Uniswap observations, whose average tick is int24-bounded.
+                    // forge-lint: disable-next-line(unsafe-typecast)
                     tick = int24(tickDelta / period);
                     // Round towards negative infinity for negative ticks (Uniswap convention).
                     if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
@@ -2678,7 +2630,8 @@ contract JBRouterTerminal is
             metadata: ""
         });
 
-        reclaimAmount = _netPreviewCashOutAmount(reclaimAmount, cashOutTerminal);
+        // Deployment config makes this router a feeless cash-out beneficiary, so previews use the terminal's raw
+        // reclaim amount and avoid carrying fee-discovery bytecode in the router.
         reclaimAmount = _effectivePreviewCashOutAmount(reclaimAmount, hookSpecifications);
     }
 

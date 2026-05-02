@@ -239,7 +239,7 @@ contract MockDestinationTerminal {
         return (ruleset, amount, 0, hookSpecifications);
     }
 
-    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+    function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](0);
     }
 

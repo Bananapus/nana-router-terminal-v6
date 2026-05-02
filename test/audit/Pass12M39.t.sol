@@ -88,6 +88,8 @@ contract PullingTerminal is IJBTerminal {
         )
     {
         beneficiaryTokenCount = 1;
+        reservedTokenCount = 0;
+        hookSpecifications = new JBPayHookSpecification[](0);
         ruleset.id = 1;
     }
 

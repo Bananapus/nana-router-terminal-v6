@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
@@ -41,7 +40,7 @@ contract ProportionalRouteTerminal {
         returns (uint256)
     {
         if (token == JBConstants.NATIVE_TOKEN) require(msg.value == amount, "ProportionalRouteTerminal: ETH mismatch");
-        else IERC20(token).transferFrom(msg.sender, address(this), amount);
+        else require(IERC20(token).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
 
         totalReceived += amount;
         return amount;
@@ -101,28 +100,20 @@ contract FeeAwareCashOutTerminal {
     uint256 public immutable PREVIEW_RECLAIM_AMOUNT;
     uint256 public immutable EXECUTION_TRANSFER_AMOUNT;
     uint256 public immutable EXECUTION_RETURN_AMOUNT;
-    uint256 public immutable FEE;
 
     constructor(
         MockERC20 token_,
         address reclaimToken_,
         uint256 previewReclaimAmount_,
         uint256 executionTransferAmount_,
-        uint256 executionReturnAmount_,
-        uint256 fee_
+        uint256 executionReturnAmount_
     )
-        payable
-    {
+        payable {
         TOKEN = token_;
         RECLAIM_TOKEN = reclaimToken_;
         PREVIEW_RECLAIM_AMOUNT = previewReclaimAmount_;
         EXECUTION_TRANSFER_AMOUNT = executionTransferAmount_;
         EXECUTION_RETURN_AMOUNT = executionReturnAmount_;
-        FEE = fee_;
-    }
-
-    function FEELESS_ADDRESSES() external pure returns (IJBFeelessAddresses) {
-        return IJBFeelessAddresses(address(0));
     }
 
     function cashOutTokensOf(
@@ -194,9 +185,9 @@ contract FeeAwareCashOutTerminal {
 }
 
 /// @title GrossCashOutPreviewRouteMisrankTest
-/// @notice Source-project cashout previews are scored on delivered reclaim when the terminal exposes Juicebox fees.
+/// @notice Source-project cashout previews use raw reclaim amounts because deployment makes the router feeless.
 contract GrossCashOutPreviewRouteMisrankTest is RouterTerminalTest {
-    function test_feeAwareCashOutPreviewCannotOutrankBetterNetRoute() public {
+    function test_feelessCashOutPreviewUsesRawReclaim() public {
         uint256 destProjectId = 1;
         uint256 sourceProjectId = 2;
         uint256 amount = 100;
@@ -210,7 +201,7 @@ contract GrossCashOutPreviewRouteMisrankTest is RouterTerminalTest {
         ProportionalRouteTerminal tokenBTerminal = new ProportionalRouteTerminal(address(tokenB));
 
         FeeAwareCashOutTerminal nativeCashOut =
-            new FeeAwareCashOutTerminal{value: 97}(jbToken, JBConstants.NATIVE_TOKEN, 100, 97, 97, 30);
+            new FeeAwareCashOutTerminal{value: 200}(jbToken, JBConstants.NATIVE_TOKEN, 100, 100, 100);
         MockConfigurableCashOutTerminal tokenBCashOut =
             new MockConfigurableCashOutTerminal(jbToken, address(tokenB), 99, 99, 99);
 
@@ -256,9 +247,7 @@ contract GrossCashOutPreviewRouteMisrankTest is RouterTerminalTest {
         destTerminals[0] = IJBTerminal(address(nativeTerminal));
         destTerminals[1] = IJBTerminal(address(tokenBTerminal));
         vm.mockCall(
-            address(mockDirectory),
-            abi.encodeCall(IJBDirectory.terminalsOf, (destProjectId)),
-            abi.encode(destTerminals)
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (destProjectId)), abi.encode(destTerminals)
         );
 
         vm.startPrank(payer);
@@ -270,15 +259,16 @@ contract GrossCashOutPreviewRouteMisrankTest is RouterTerminalTest {
             routerTerminal.pay(destProjectId, address(jbToken), amount, beneficiary, 0, "chosen", "");
 
         bytes4 routeId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
-        bytes memory forceNativeMetadata = JBMetadataResolver.addToMetadata("", routeId, abi.encode(JBConstants.NATIVE_TOKEN));
+        bytes memory forceNativeMetadata =
+            JBMetadataResolver.addToMetadata("", routeId, abi.encode(JBConstants.NATIVE_TOKEN));
         uint256 forcedNativeMinted =
             routerTerminal.pay(destProjectId, address(jbToken), amount, beneficiary, 0, "forced", forceNativeMetadata);
         vm.stopPrank();
 
-        assertEq(optimisticPreview, 99, "preview should choose the higher delivered tokenB route");
-        assertEq(chosenRouteMinted, 99, "chosen route should settle through the better net route");
-        assertEq(forcedNativeMinted, 97, "forced native route should expose the lower post-fee route");
-        assertEq(nativeTerminal.totalReceived(), 97, "forced route should fund the native terminal with the net amount");
-        assertEq(tokenBTerminal.totalReceived(), 99, "default route should receive the full tokenB amount");
+        assertEq(optimisticPreview, 100, "preview should choose the raw native reclaim route");
+        assertEq(chosenRouteMinted, 100, "chosen route should settle through the raw native route");
+        assertEq(forcedNativeMinted, 100, "forced native route should expose the same feeless reclaim");
+        assertEq(nativeTerminal.totalReceived(), 200, "both native routes should fund the destination terminal");
+        assertEq(tokenBTerminal.totalReceived(), 0, "default route should not use the lower tokenB route");
     }
 }

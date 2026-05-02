@@ -53,7 +53,7 @@ contract ConservativeBuybackPreviewTerminal {
         if (token == JBConstants.NATIVE_TOKEN) {
             require(msg.value == amount, "ConservativeBuybackPreviewTerminal: ETH mismatch");
         } else {
-            IERC20(token).transferFrom(msg.sender, address(this), amount);
+            require(IERC20(token).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
         }
 
         totalReceived += amount;
@@ -246,7 +246,7 @@ contract ProportionalPreviewTerminal {
         if (token == JBConstants.NATIVE_TOKEN) {
             require(msg.value == amount, "ProportionalPreviewTerminal: ETH mismatch");
         } else {
-            IERC20(token).transferFrom(msg.sender, address(this), amount);
+            require(IERC20(token).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
         }
 
         totalReceived += amount;

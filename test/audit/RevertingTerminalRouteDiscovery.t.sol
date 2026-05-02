@@ -28,9 +28,12 @@ contract GoodTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        contexts[0] =
-            JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+        contexts[0] = JBAccountingContext({
+            token: ACCEPTED_TOKEN,
+            decimals: 18,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            currency: uint32(uint160(ACCEPTED_TOKEN))
+        });
     }
 
     function accountingContextForTokenOf(uint256, address token) external pure returns (JBAccountingContext memory) {
