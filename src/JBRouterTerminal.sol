@@ -4,11 +4,14 @@ pragma solidity 0.8.28;
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
+import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
+import {IJBFeeTerminal} from "@bananapus/core-v6/src/interfaces/IJBFeeTerminal.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBFees} from "@bananapus/core-v6/src/libraries/JBFees.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
@@ -75,6 +78,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_AmountOverflow(uint256 amount);
     error JBRouterTerminal_CallerNotPool(address caller);
     error JBRouterTerminal_CallerNotPoolManager(address caller);
+    error JBRouterTerminal_CashOutDidNotDeliver(address sourceToken, address tokenToReclaim, uint256 cashOutCount);
     error JBRouterTerminal_CashOutLoopLimit();
     error JBRouterTerminal_InsufficientTwapHistory();
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
@@ -805,20 +809,66 @@ contract JBRouterTerminal is
                 continue;
             }
 
-            // Decode only the fields needed to determine the user-visible sell-side output implied by the hook.
-            (uint256 minimumSwapAmountOut,,,,,, uint256 rawSwapQuote) =
+            // Decode only the executable floor needed to determine the user-visible sell-side output implied by the hook.
+            (uint256 minimumSwapAmountOut,,,,,,) =
                 abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
-            // Prefer the raw quote when present, otherwise fall back to the hook's minimum swap commitment.
-            uint256 quotedAmount = rawSwapQuote != 0 ? rawSwapQuote : minimumSwapAmountOut;
-
-            // Keep whichever understood hook quote implies the strongest previewed cash-out output.
-            if (quotedAmount > effectiveAmount) effectiveAmount = quotedAmount;
+            // Keep whichever understood hook commitment implies the strongest executable cash-out output.
+            if (minimumSwapAmountOut > effectiveAmount) effectiveAmount = minimumSwapAmountOut;
 
             unchecked {
                 ++i;
             }
         }
+    }
+
+    /// @notice Estimate the net reclaim amount a fee-aware terminal would deliver to this router.
+    /// @param reclaimAmount The gross reclaim amount returned by `previewCashOutFrom`.
+    /// @param cashOutTerminal The terminal that would execute the cash-out.
+    /// @return netReclaimAmount The reclaim amount after any discoverable Juicebox terminal fee.
+    function _netPreviewCashOutAmount(
+        uint256 reclaimAmount,
+        IJBCashOutTerminal cashOutTerminal
+    )
+        internal
+        view
+        returns (uint256 netReclaimAmount)
+    {
+        netReclaimAmount = reclaimAmount;
+        if (reclaimAmount == 0) return 0;
+
+        // Juicebox fee terminals expose their fee. Other terminals fall back to the raw preview.
+        (bool success, bytes memory data) =
+            address(cashOutTerminal).staticcall(abi.encodeCall(IJBFeeTerminal.FEE, ()));
+        if (!success || data.length < 32) return reclaimAmount;
+
+        uint256 fee = abi.decode(data, (uint256));
+        if (fee == 0 || _isCashOutPreviewBeneficiaryFeeless(cashOutTerminal)) return reclaimAmount;
+        if (fee > JBConstants.MAX_FEE) fee = JBConstants.MAX_FEE;
+
+        netReclaimAmount -= JBFees.feeAmountFrom({amountBeforeFee: netReclaimAmount, feePercent: fee});
+    }
+
+    /// @notice Check whether this router would be fee-exempt as the cash-out beneficiary.
+    /// @param cashOutTerminal The fee-aware terminal being previewed.
+    /// @return isFeeless A flag indicating whether the router is fee-exempt for that terminal.
+    function _isCashOutPreviewBeneficiaryFeeless(
+        IJBCashOutTerminal cashOutTerminal
+    )
+        internal
+        view
+        returns (bool isFeeless)
+    {
+        (bool success, bytes memory data) =
+            address(cashOutTerminal).staticcall(abi.encodeCall(IJBFeeTerminal.FEELESS_ADDRESSES, ()));
+        if (!success || data.length < 32) return false;
+
+        IJBFeelessAddresses feelessAddresses = abi.decode(data, (IJBFeelessAddresses));
+        if (address(feelessAddresses).code.length == 0) return false;
+
+        (success, data) =
+            address(feelessAddresses).staticcall(abi.encodeCall(IJBFeelessAddresses.isFeeless, (address(this))));
+        if (success && data.length >= 32) isFeeless = abi.decode(data, (bool));
     }
 
     /// @notice Preview the best pay route using the resolver helper.
@@ -1197,6 +1247,7 @@ contract JBRouterTerminal is
                 sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
             });
 
+            uint256 cashOutCount = amount;
             uint256 balanceBefore = _balanceOf({token: tokenToReclaim, account: address(this)});
 
             // Cash out the source project's tokens.
@@ -1217,6 +1268,11 @@ contract JBRouterTerminal is
             });
 
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
+            if (cashOutCount != 0 && amount == 0) {
+                revert JBRouterTerminal_CashOutDidNotDeliver({
+                    sourceToken: token, tokenToReclaim: tokenToReclaim, cashOutCount: cashOutCount
+                });
+            }
             if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
 
             // Clear the reclaim minimum after the first hop.
@@ -2622,6 +2678,7 @@ contract JBRouterTerminal is
             metadata: ""
         });
 
+        reclaimAmount = _netPreviewCashOutAmount(reclaimAmount, cashOutTerminal);
         reclaimAmount = _effectivePreviewCashOutAmount(reclaimAmount, hookSpecifications);
     }
 

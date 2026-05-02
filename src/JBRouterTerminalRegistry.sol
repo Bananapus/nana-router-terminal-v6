@@ -357,9 +357,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Lock a terminal for a project.
     /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.
-    /// @dev Locking a circular or self-referential terminal (e.g. one that routes back to this registry) will
-    /// permanently brick routing for the project through this registry. Because locks are irreversible, callers must
-    /// verify that the terminal is valid and non-circular before locking.
+    /// @dev Circular or self-referential terminals are rejected before the irreversible lock is written.
     /// @param projectId The ID of the project to lock the terminal for.
     /// @param expectedTerminal The terminal the caller expects to lock. Prevents race conditions where the default
     /// changes between transaction submission and execution.
@@ -383,6 +381,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (terminal != expectedTerminal) {
             revert JBRouterTerminalRegistry_TerminalMismatch(terminal, expectedTerminal);
         }
+
+        // Prevent permanently locking a route that would forward back into this registry.
+        _requireNonCircularTerminalFor(projectId, terminal);
 
         hasLockedTerminal[projectId] = true;
 
@@ -467,6 +468,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param terminal The terminal to set as the default.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
         if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress();
+        if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
 
         defaultTerminal = terminal;
 
@@ -485,6 +487,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (hasLockedTerminal[projectId]) revert JBRouterTerminalRegistry_TerminalLocked(projectId);
 
         if (!isTerminalAllowed[terminal]) revert JBRouterTerminalRegistry_TerminalNotAllowed(terminal);
+
+        _requireNonCircularTerminalFor(projectId, terminal);
 
         // Enforce permissions.
         _requirePermissionFrom({
@@ -569,6 +573,20 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IERC20(token).forceApprove({spender: to, value: amount});
 
         return 0;
+    }
+
+    /// @notice Reject terminal choices that would forward the project back into this registry.
+    /// @param projectId The project whose forwarding target is being validated.
+    /// @param terminal The terminal being configured or locked.
+    function _requireNonCircularTerminalFor(uint256 projectId, IJBTerminal terminal) internal view {
+        if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
+        if (address(terminal).code.length == 0) return;
+
+        try IJBForwardingTerminal(address(terminal)).terminalOf(projectId) returns (IJBTerminal downstreamTerminal) {
+            if (address(downstreamTerminal) == address(this)) {
+                revert JBRouterTerminalRegistry_CircularForward(terminal);
+            }
+        } catch {}
     }
 
     /// @notice Transfers tokens.

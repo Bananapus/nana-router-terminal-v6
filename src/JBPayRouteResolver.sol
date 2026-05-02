@@ -9,6 +9,7 @@ import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataRes
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
@@ -273,8 +274,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Decode only the minimum token-count commitments needed to score the buyback-enhanced preview.
-            (,,,,,,,,,, uint256 minimumBeneficiaryTokenCount, uint256 minimumReservedTokenCount,) = abi.decode(
+            // Decode the buyback hook's routing metadata. The minimum token-count commitments are the settlement floor;
+            // `rawSwapQuote`, when present, is the live pool quote the hook expects to execute against.
+            (
+                ,
+                uint256 amountToMintWith,
+                uint256 minimumSwapAmountOut,,,
+                uint256 tokenCountWithoutHook,,,,,
+                uint256 minimumBeneficiaryTokenCount,
+                uint256 minimumReservedTokenCount,
+                uint256 rawSwapQuote
+            ) = abi.decode(
                 specification.metadata,
                 (
                     bool,
@@ -293,19 +303,97 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 )
             );
 
-            // Keep whichever decoded hook commitment implies the stronger user-visible preview outcome.
-            if (
-                minimumBeneficiaryTokenCount > effectiveBeneficiaryTokenCount
-                    || (minimumBeneficiaryTokenCount == effectiveBeneficiaryTokenCount
-                        && minimumReservedTokenCount > effectiveReservedTokenCount)
-            ) {
-                effectiveBeneficiaryTokenCount = minimumBeneficiaryTokenCount;
-                effectiveReservedTokenCount = minimumReservedTokenCount;
+            uint256 directMintTokenCount;
+            if (amountToMintWith != 0 && specification.amount != 0 && tokenCountWithoutHook != 0) {
+                directMintTokenCount =
+                    mulDiv({x: amountToMintWith, y: tokenCountWithoutHook, denominator: specification.amount});
+            }
+
+            // Keep the conservative floor available for callers that supplied metadata without a live raw quote.
+            (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
+                tokenCount: minimumSwapAmountOut + directMintTokenCount,
+                referenceTokenCount: minimumSwapAmountOut,
+                referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
+                referenceReservedTokenCount: minimumReservedTokenCount
+            });
+            (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
+                currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
+                currentReservedTokenCount: effectiveReservedTokenCount,
+                candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
+                candidateReservedTokenCount: candidateReservedTokenCount
+            });
+
+            // If the hook surfaced a stronger live quote, score the expected executable route as well. This keeps
+            // buyback-hooked buy routes comparable with ordinary terminal previews that already reflect live output.
+            if (rawSwapQuote > minimumSwapAmountOut) {
+                (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
+                    tokenCount: rawSwapQuote + directMintTokenCount,
+                    referenceTokenCount: minimumSwapAmountOut,
+                    referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
+                    referenceReservedTokenCount: minimumReservedTokenCount
+                });
+                (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
+                    currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
+                    currentReservedTokenCount: effectiveReservedTokenCount,
+                    candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
+                    candidateReservedTokenCount: candidateReservedTokenCount
+                });
             }
             unchecked {
                 ++i;
             }
         }
+    }
+
+    /// @notice Scale a known beneficiary/reserved token split to a different total token count.
+    /// @param tokenCount The total token count being scored.
+    /// @param referenceTokenCount The total token count the reference split was computed from.
+    /// @param referenceBeneficiaryTokenCount The beneficiary share of the reference split.
+    /// @param referenceReservedTokenCount The reserved share of the reference split.
+    /// @return beneficiaryTokenCount The scaled beneficiary token count.
+    /// @return reservedTokenCount The scaled reserved token count.
+    function _scaledPreviewPayTokenCounts(
+        uint256 tokenCount,
+        uint256 referenceTokenCount,
+        uint256 referenceBeneficiaryTokenCount,
+        uint256 referenceReservedTokenCount
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        if (tokenCount == 0) {
+            return (referenceBeneficiaryTokenCount, referenceReservedTokenCount);
+        }
+
+        uint256 referenceTotal = referenceBeneficiaryTokenCount + referenceReservedTokenCount;
+        if (referenceTotal == 0) referenceTotal = referenceTokenCount;
+        if (referenceTotal == 0) return (tokenCount, 0);
+
+        beneficiaryTokenCount = mulDiv({x: tokenCount, y: referenceBeneficiaryTokenCount, denominator: referenceTotal});
+        reservedTokenCount = tokenCount - beneficiaryTokenCount;
+    }
+
+    /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
+    function _strongerPreviewPayTokenCounts(
+        uint256 currentBeneficiaryTokenCount,
+        uint256 currentReservedTokenCount,
+        uint256 candidateBeneficiaryTokenCount,
+        uint256 candidateReservedTokenCount
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        if (
+            candidateBeneficiaryTokenCount > currentBeneficiaryTokenCount
+                || (candidateBeneficiaryTokenCount == currentBeneficiaryTokenCount
+                    && candidateReservedTokenCount > currentReservedTokenCount)
+        ) {
+            return (candidateBeneficiaryTokenCount, candidateReservedTokenCount);
+        }
+
+        return (currentBeneficiaryTokenCount, currentReservedTokenCount);
     }
 
     /// @notice Read a metadata entry from the router-scoped metadata namespace.

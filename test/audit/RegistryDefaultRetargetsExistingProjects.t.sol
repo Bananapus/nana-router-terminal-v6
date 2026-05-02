@@ -12,19 +12,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 
-contract RegistrySelfLockForwarder {
-    IJBTerminal internal immutable _downstream;
-
-    constructor(IJBTerminal downstream) {
-        _downstream = downstream;
-    }
-
-    function terminalOf(uint256) external view returns (IJBTerminal) {
-        return _downstream;
-    }
-}
-
-contract RegistrySelfLockDoSTest is Test {
+contract RegistryDefaultRetargetsExistingProjectsTest is Test {
     JBRouterTerminalRegistry internal registry;
 
     IJBPermissions internal permissions = IJBPermissions(makeAddr("permissions"));
@@ -34,19 +22,23 @@ contract RegistrySelfLockDoSTest is Test {
     address internal owner = makeAddr("owner");
     address internal projectOwner = makeAddr("projectOwner");
 
-    uint256 internal constant PROJECT_ID = 1;
+    IJBTerminal internal terminalA = IJBTerminal(makeAddr("terminalA"));
+    IJBTerminal internal terminalB = IJBTerminal(makeAddr("terminalB"));
+
+    uint256 internal constant PROJECT_ID_ONE = 1;
+    uint256 internal constant PROJECT_ID_TWO = 2;
 
     function setUp() public {
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 
-        vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (PROJECT_ID)), abi.encode(projectOwner));
+        vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (PROJECT_ID_ONE)), abi.encode(projectOwner));
         vm.mockCall(
             address(permissions),
             abi.encodeWithSignature(
                 "hasPermission(address,address,uint256,uint256,bool,bool)",
                 projectOwner,
                 projectOwner,
-                PROJECT_ID,
+                PROJECT_ID_ONE,
                 JBPermissionIds.SET_ROUTER_TERMINAL,
                 true,
                 true
@@ -55,28 +47,28 @@ contract RegistrySelfLockDoSTest is Test {
         );
     }
 
-    function test_setDefaultTerminal_rejectsRegistryItself() public {
+    function test_existingProjectsFollowNewDefaultUntilExplicitlyLocked() public {
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_CircularForward.selector, registry)
-        );
-        registry.setDefaultTerminal(registry);
-    }
+        registry.setDefaultTerminal(terminalA);
 
-    function test_lockingForwarderThatResolvesToRegistryRevertsBeforeLock() public {
-        IJBTerminal forwarder = IJBTerminal(address(new RegistrySelfLockForwarder(registry)));
-
-        vm.prank(owner);
-        registry.setDefaultTerminal(forwarder);
+        assertEq(address(registry.terminalOf(PROJECT_ID_ONE)), address(terminalA), "project one starts on default");
+        assertEq(address(registry.terminalOf(PROJECT_ID_TWO)), address(terminalA), "project two starts on default");
 
         vm.prank(projectOwner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                JBRouterTerminalRegistry.JBRouterTerminalRegistry_CircularForward.selector, forwarder
-            )
-        );
-        registry.lockTerminalFor(PROJECT_ID, forwarder);
+        registry.lockTerminalFor(PROJECT_ID_ONE, terminalA);
 
-        assertFalse(registry.hasLockedTerminal(PROJECT_ID), "bad route is not locked");
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        assertEq(
+            address(registry.terminalOf(PROJECT_ID_ONE)),
+            address(terminalA),
+            "locked project snapshots the old default"
+        );
+        assertEq(
+            address(registry.terminalOf(PROJECT_ID_TWO)),
+            address(terminalB),
+            "unlocked project silently follows the new default"
+        );
     }
 }
