@@ -345,57 +345,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
     }
 
-    /// @notice Scale a known beneficiary/reserved token split to a different total token count.
-    /// @param tokenCount The total token count being scored.
-    /// @param referenceTokenCount The total token count the reference split was computed from.
-    /// @param referenceBeneficiaryTokenCount The beneficiary share of the reference split.
-    /// @param referenceReservedTokenCount The reserved share of the reference split.
-    /// @return beneficiaryTokenCount The scaled beneficiary token count.
-    /// @return reservedTokenCount The scaled reserved token count.
-    function _scaledPreviewPayTokenCounts(
-        uint256 tokenCount,
-        uint256 referenceTokenCount,
-        uint256 referenceBeneficiaryTokenCount,
-        uint256 referenceReservedTokenCount
-    )
-        internal
-        pure
-        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
-    {
-        if (tokenCount == 0) {
-            return (referenceBeneficiaryTokenCount, referenceReservedTokenCount);
-        }
-
-        uint256 referenceTotal = referenceBeneficiaryTokenCount + referenceReservedTokenCount;
-        if (referenceTotal == 0) referenceTotal = referenceTokenCount;
-        if (referenceTotal == 0) return (tokenCount, 0);
-
-        beneficiaryTokenCount = mulDiv({x: tokenCount, y: referenceBeneficiaryTokenCount, denominator: referenceTotal});
-        reservedTokenCount = tokenCount - beneficiaryTokenCount;
-    }
-
-    /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
-    function _strongerPreviewPayTokenCounts(
-        uint256 currentBeneficiaryTokenCount,
-        uint256 currentReservedTokenCount,
-        uint256 candidateBeneficiaryTokenCount,
-        uint256 candidateReservedTokenCount
-    )
-        internal
-        pure
-        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
-    {
-        if (
-            candidateBeneficiaryTokenCount > currentBeneficiaryTokenCount
-                || (candidateBeneficiaryTokenCount == currentBeneficiaryTokenCount
-                    && candidateReservedTokenCount > currentReservedTokenCount)
-        ) {
-            return (candidateBeneficiaryTokenCount, candidateReservedTokenCount);
-        }
-
-        return (currentBeneficiaryTokenCount, currentReservedTokenCount);
-    }
-
     /// @notice Read a metadata entry from the router-scoped metadata namespace.
     /// @param router The router whose metadata namespace should be used.
     /// @param metadata The metadata blob to query.
@@ -756,6 +705,45 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         return abi.decode(data, (IJBTerminal[]));
     }
 
+    /// @notice Scale a known beneficiary/reserved token split to a different total token count.
+    /// @param tokenCount The total token count being scored.
+    /// @param referenceTokenCount The total token count the reference split was computed from.
+    /// @param referenceBeneficiaryTokenCount The beneficiary share of the reference split.
+    /// @param referenceReservedTokenCount The reserved share of the reference split.
+    /// @return beneficiaryTokenCount The scaled beneficiary token count.
+    /// @return reservedTokenCount The scaled reserved token count.
+    function _scaledPreviewPayTokenCounts(
+        uint256 tokenCount,
+        uint256 referenceTokenCount,
+        uint256 referenceBeneficiaryTokenCount,
+        uint256 referenceReservedTokenCount
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        // A zero candidate means there is no stronger route output to scale, so preserve the known reference split.
+        if (tokenCount == 0) {
+            return (referenceBeneficiaryTokenCount, referenceReservedTokenCount);
+        }
+
+        // Prefer the already-previewed beneficiary/reserved total because it includes the destination's reserve logic.
+        uint256 referenceTotal = referenceBeneficiaryTokenCount + referenceReservedTokenCount;
+
+        // Fall back to the original token count when previewed counts were unavailable but the hook reported a floor.
+        if (referenceTotal == 0) referenceTotal = referenceTokenCount;
+
+        // If both reference totals are zero, treat the whole candidate as beneficiary tokens so the route stays
+        // comparable instead of disappearing from scoring.
+        if (referenceTotal == 0) return (tokenCount, 0);
+
+        // Scale the beneficiary share proportionally from the reference split to the candidate total being scored.
+        beneficiaryTokenCount = mulDiv({x: tokenCount, y: referenceBeneficiaryTokenCount, denominator: referenceTotal});
+
+        // Assign the residual to reserved tokens so rounding cannot lose supply during route comparison.
+        reservedTokenCount = tokenCount - beneficiaryTokenCount;
+    }
+
     /// @notice Resolve whether the current route input should first be treated as a project-token cashout source.
     /// @param router The router terminal whose project-token lookup should be used.
     /// @param tokenIn The current route input token.
@@ -784,6 +772,39 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
             sourceProjectId = router.TOKENS().projectIdOf(IJBToken(tokenIn));
         }
+    }
+
+    /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
+    /// @param currentBeneficiaryTokenCount The beneficiary token count from the strongest route so far.
+    /// @param currentReservedTokenCount The reserved token count from the strongest route so far.
+    /// @param candidateBeneficiaryTokenCount The beneficiary token count from the candidate route.
+    /// @param candidateReservedTokenCount The reserved token count from the candidate route.
+    /// @return beneficiaryTokenCount The beneficiary token count to keep.
+    /// @return reservedTokenCount The reserved token count to keep.
+    function _strongerPreviewPayTokenCounts(
+        uint256 currentBeneficiaryTokenCount,
+        uint256 currentReservedTokenCount,
+        uint256 candidateBeneficiaryTokenCount,
+        uint256 candidateReservedTokenCount
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        // Prefer the route that gives the beneficiary more tokens, since that is the user's primary output.
+        if (
+            candidateBeneficiaryTokenCount > currentBeneficiaryTokenCount
+                || (
+                    // When beneficiary output ties, keep the route that also mints more reserved tokens.
+                    candidateBeneficiaryTokenCount == currentBeneficiaryTokenCount
+                    && candidateReservedTokenCount > currentReservedTokenCount
+                )
+        ) {
+            return (candidateBeneficiaryTokenCount, candidateReservedTokenCount);
+        }
+
+        // Keep the current winner when the candidate does not improve beneficiary output or the reserved tie-break.
+        return (currentBeneficiaryTokenCount, currentReservedTokenCount);
     }
 
     /// @notice Resolve the usable primary terminal for a discovered candidate token.

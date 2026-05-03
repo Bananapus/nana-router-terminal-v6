@@ -195,31 +195,13 @@ contract CashOutLoopLimitTest is Test {
     }
 
     function _setupCashOutTerminal(uint256 projectId, address reclaimToken) internal {
-        address terminal = makeAddr(string(abi.encodePacked("terminal", projectId)));
-        vm.etch(terminal, hex"00");
+        RealCashOutTerminal terminal = new RealCashOutTerminal(MockToken(reclaimToken), 1e18);
+        MockToken(reclaimToken).mint(address(terminal), 25e18);
 
         // Register as the project's terminal.
         IJBTerminal[] memory terminalList = new IJBTerminal[](1);
-        terminalList[0] = IJBTerminal(terminal);
+        terminalList[0] = IJBTerminal(address(terminal));
         vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminalList));
-
-        // Supports IJBCashOutTerminal.
-        vm.mockCall(
-            terminal,
-            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-            abi.encode(true)
-        );
-
-        // Accounting context: terminal accepts the reclaim token.
-        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        contexts[0] = JBAccountingContext({token: reclaimToken, decimals: 18, currency: uint32(uint160(reclaimToken))});
-        vm.mockCall(terminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
-
-        // cashOutTokensOf returns 1e18 each time (simulating a successful cashout).
-        vm.mockCall(
-            terminal, abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector), abi.encode(uint256(1e18))
-        );
     }
 
     /// @notice A circular cashout chain (A -> B -> A -> ...) must revert with CashOutLoopLimit, not OOG.

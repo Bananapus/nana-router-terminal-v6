@@ -450,7 +450,10 @@ contract JBRouterTerminal is
             amountOut = uint256(uint128(delta0));
         }
 
-        if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
+        // Enforce the caller's V4 minimum against the realized delta before settling/taking pool balances.
+        if (amountOut < minAmountOut) {
+            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
+        }
 
         // Settle input (pay what we owe to the PoolManager).
         Currency inputCurrency = zeroForOne ? key.currency0 : key.currency1;
@@ -1216,13 +1219,20 @@ contract JBRouterTerminal is
                 metadata: ""
             });
 
+            // Measure the reclaimed-token balance delta so fee-on-transfer behavior cannot fake delivery.
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
+
+            // A non-zero cashout that delivers no reclaim tokens means this hop cannot safely continue.
             if (cashOutCount != 0 && amount == 0) {
                 revert JBRouterTerminal_CashOutDidNotDeliver({
                     sourceToken: token, tokenToReclaim: tokenToReclaim, cashOutCount: cashOutCount
                 });
             }
-            if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
+
+            // Enforce the caller's first-hop reclaim floor against the actual balance delta received.
+            if (amount < minTokensReclaimed) {
+                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
+            }
 
             // Clear the reclaim minimum after the first hop.
             // Multi-hop routes can change token units between hops, so there is no sound generic way to rescale a
@@ -1379,7 +1389,9 @@ contract JBRouterTerminal is
 
         // Enforce slippage protection via realized output vs minimum acceptable output.
         // This is strictly more correct than sqrtPriceLimitX96 (which conflates marginal and average price).
-        if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
+        if (amountOut < minAmountOut) {
+            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
+        }
     }
 
     /// @notice Execute a swap through a V4 pool via PoolManager.unlock().
@@ -2574,7 +2586,9 @@ contract JBRouterTerminal is
             });
 
             // Enforce the caller's minimum reclaim amount only on the first hop.
-            if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
+            if (amount < minTokensReclaimed) {
+                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
+            }
 
             // Clear the reclaim minimum after the first hop because later hops may operate in different token units.
             minTokensReclaimed = 0;
