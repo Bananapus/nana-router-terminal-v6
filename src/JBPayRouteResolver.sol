@@ -274,8 +274,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Decode the buyback hook's routing metadata. The minimum token-count commitments are the settlement floor;
-            // `rawSwapQuote`, when present, is the live pool quote the hook expects to execute against.
+            // Decode the buyback hook's routing metadata. When the hook mints in `afterPayRecordedWith`, the terminal
+            // preview returns zero token counts and the router must score the route from the hook's commitments.
             (
                 ,
                 uint256 amountToMintWith,
@@ -303,13 +303,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 )
             );
 
+            // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
+            // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
+            // amount so the router compares a whole-route token count against ordinary terminal previews.
             uint256 directMintTokenCount;
             if (amountToMintWith != 0 && specification.amount != 0 && tokenCountWithoutHook != 0) {
                 directMintTokenCount =
                     mulDiv({x: amountToMintWith, y: tokenCountWithoutHook, denominator: specification.amount});
             }
 
-            // Keep the conservative floor available for callers that supplied metadata without a live raw quote.
+            // Score the executable floor first. This supports callers that only provide a minimum and no live quote.
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
                 tokenCount: minimumSwapAmountOut + directMintTokenCount,
                 referenceTokenCount: minimumSwapAmountOut,
@@ -323,8 +326,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 candidateReservedTokenCount: candidateReservedTokenCount
             });
 
-            // If the hook surfaced a stronger live quote, score the expected executable route as well. This keeps
-            // buyback-hooked buy routes comparable with ordinary terminal previews that already reflect live output.
+            // If the hook also surfaced a stronger live quote, score it too. This lets programmatic buyback routes win
+            // when the expected executable output is better than the conservative minimum.
             if (rawSwapQuote > minimumSwapAmountOut) {
                 (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
                     tokenCount: rawSwapQuote + directMintTokenCount,
