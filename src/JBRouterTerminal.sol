@@ -809,12 +809,12 @@ contract JBRouterTerminal is
                 continue;
             }
 
-            // Decode only the executable floor needed to determine the user-visible sell-side output implied by the
-            // hook.
+            // Decode only the buyback field used for route scoring. `minimumSwapAmountOut` is executable because the
+            // hook will enforce it; the later raw quote word is diagnostic and can overstate what execution can prove.
             (uint256 minimumSwapAmountOut,,,,,,) =
                 abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
-            // Keep whichever understood hook commitment implies the strongest executable cash-out output.
+            // Keep whichever understood executable hook commitment implies the strongest cash-out output.
             if (minimumSwapAmountOut > effectiveAmount) effectiveAmount = minimumSwapAmountOut;
 
             unchecked {
