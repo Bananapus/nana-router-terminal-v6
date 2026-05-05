@@ -16,7 +16,8 @@ import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 
-/// @notice Resolves the best pay route preview for `JBRouterTerminal`.
+/// @notice Evaluates every token a destination project accepts and returns the route that yields the most project
+/// tokens for the beneficiary, deployed as a helper to keep `JBRouterTerminal` within runtime size limits.
 contract JBPayRouteResolver is IJBPayRouteResolver {
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -578,8 +579,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param amount The current route input amount.
     /// @param metadata Metadata that may include a cashout-source override.
     /// @param preferredToken The preferred token to target during any previewed cashout loop.
-    /// @return resolvedTerminal The terminal found by the previewed cashout loop, or address(0) if conversion should
-    /// continue. @return routedTokenIn The token that remains to be routed after the previewed cashout step.
+    /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion continues.
+    /// @return routedTokenIn The token that remains to be routed after the previewed cashout step.
     /// @return routedAmountIn The amount of `routedTokenIn` that remains to be routed.
     function _previewRouteInputFromSource(
         IJBPayRoutePreviewer router,

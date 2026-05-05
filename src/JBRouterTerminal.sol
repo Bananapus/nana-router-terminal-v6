@@ -50,9 +50,9 @@ import {JBPayRouteResolver} from "./JBPayRouteResolver.sol";
 import {CashOutPathCandidates} from "./structs/CashOutPathCandidates.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
 
-/// @notice The `JBRouterTerminal` accepts any token and dynamically discovers what token each destination project
-/// accepts, then routes the payment there — via direct forwarding, Uniswap swap, JB token cashout, or a combination.
-/// Supports both Uniswap V3 and V4 pools, choosing whichever offers better liquidity.
+/// @notice A universal payment terminal that accepts any token and automatically converts it into whatever token the
+/// destination project accepts. Routes payments via direct forwarding, Uniswap V3/V4 swaps, recursive JB token
+/// cashouts, or a combination — always selecting the path that yields the most project tokens for the beneficiary.
 /// @custom:benediction DEVS BENEDICAT ET PROTEGAT CONTRACTVS MEAM
 contract JBRouterTerminal is
     ERC2771Context,
@@ -1698,7 +1698,8 @@ contract JBRouterTerminal is
         if (_unwrapCurrency(currency) == address(0)) _wethDeposit(amount);
     }
 
-    /// @notice Transfers tokens.
+    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
+    /// fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
     /// @param token The address of the token being transferred.

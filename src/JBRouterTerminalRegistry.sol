@@ -27,7 +27,8 @@ import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 
-/// @notice Lets projects pick, lock, and forward through a router terminal or a shared default router terminal.
+/// @notice A forwarding layer that lets each project choose which router terminal receives its payments, with an
+/// owner-managed default for projects that have not opted in. Projects can lock their choice to guarantee permanence.
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
@@ -154,9 +155,29 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return terminal.accountingContextsOf(projectId);
     }
 
-    /// @notice Empty implementation to satisfy the interface. This terminal has no surplus.
-    /// @return currentSurplus Always returns 0 because the registry is only a forwarding layer.
-    function currentSurplusOf(uint256, address[] calldata, uint256, uint256) external pure override returns (uint256) {}
+    /// @notice Always returns 0 because the registry only forwards funds and does not hold project balances.
+    /// @param projectId Unused.
+    /// @param tokens Unused.
+    /// @param decimals Unused.
+    /// @param currency Unused.
+    /// @return currentSurplus Always 0.
+    function currentSurplusOf(
+        uint256 projectId,
+        address[] calldata tokens,
+        uint256 decimals,
+        uint256 currency
+    )
+        external
+        pure
+        override
+        returns (uint256)
+    {
+        projectId;
+        tokens;
+        decimals;
+        currency;
+        return 0;
+    }
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
@@ -294,13 +315,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
     {}
 
-    /// @notice Accept funds for a project and add them to the balance of the resolved terminal.
-    /// @param projectId The ID of the project for which funds are being accepted.
+    /// @notice Add funds to a project's balance by forwarding them through the project's resolved router terminal.
+    /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
+    /// @param projectId The ID of the project receiving the balance addition.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
-    /// @param shouldReturnHeldFees A boolean to indicate whether held fees should be returned.
+    /// @param shouldReturnHeldFees Whether held fees should be returned based on the amount added.
     /// @param memo A memo to pass along to the emitted event.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).
     // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function addToBalanceOf(
         uint256 projectId,
@@ -350,8 +372,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         originalPayer = previousPayer;
     }
 
-    /// @notice Allow a terminal.
-    /// @dev Only the owner can allow a terminal.
+    /// @notice Add a terminal to the allowlist so projects can select it as their router.
+    /// @dev Only the registry owner can call this.
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external onlyOwner {
         // Mark the terminal as selectable for future project-level configuration.
@@ -361,8 +383,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
     }
 
-    /// @notice Disallow a terminal.
-    /// @dev Only the owner can disallow a terminal. Cannot disallow the current default terminal — call
+    /// @notice Remove a terminal from the allowlist so no new projects can select it.
+    /// @dev Only the registry owner can call this. Cannot disallow the current default terminal — call
     /// `setDefaultTerminal` to change the default first.
     /// @param terminal The terminal to disallow.
     function disallowTerminal(IJBTerminal terminal) external onlyOwner {
@@ -378,7 +400,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
 
-    /// @notice Lock a terminal for a project.
+    /// @notice Permanently lock a project's router terminal choice so it can never be changed again.
     /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.
     /// @dev Circular or self-referential terminals are rejected before the irreversible lock is written.
     /// @param projectId The ID of the project to lock the terminal for.
@@ -413,26 +435,38 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         emit JBRouterTerminalRegistry_LockTerminal(projectId, _msgSender());
     }
 
-    /// @notice Empty implementation to satisfy the interface.
+    /// @notice Always returns 0 because the registry holds no project balances to migrate.
+    /// @param projectId Unused.
+    /// @param token Unused.
+    /// @param to Unused.
+    /// @return balance Always 0.
     function migrateBalanceOf(
         uint256 projectId,
         address token,
         IJBTerminal to
     )
         external
+        pure
         override
-        returns (uint256 balance)
-    {}
+        returns (uint256)
+    {
+        projectId;
+        token;
+        to;
+        return 0;
+    }
 
-    /// @notice Pay a project by forwarding the payment to the resolved terminal.
+    /// @notice Pay a project by accepting the caller's tokens and forwarding them to the project's resolved router
+    /// terminal.
+    /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
     /// @param projectId The ID of the project being paid.
     /// @param token The address of the token being paid in.
     /// @param amount The amount of tokens being paid in.
-    /// @param beneficiary The beneficiary address to pass along.
+    /// @param beneficiary The address that will receive any project tokens minted by the destination.
     /// @param minReturnedTokens The minimum number of project tokens expected in return.
     /// @param memo A memo to pass along to the emitted event.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format.
-    /// @return result The number of tokens received.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).
+    /// @return result The number of project tokens minted for the beneficiary.
     // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function pay(
         uint256 projectId,
@@ -486,8 +520,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         originalPayer = previousPayer;
     }
 
-    /// @notice Set the default terminal.
-    /// @dev Only the owner can set the default terminal.
+    /// @notice Change the registry-wide default terminal that all projects without an explicit override will use.
+    /// @dev Only the registry owner can call this. Automatically allowlists the new default.
     /// @param terminal The terminal to set as the default.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
         if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress();
@@ -501,7 +535,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         emit JBRouterTerminalRegistry_SetDefaultTerminal(terminal, _msgSender());
     }
 
-    /// @notice Set the terminal for a project.
+    /// @notice Choose which router terminal a project's payments are forwarded through.
     /// @dev Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can set.
     /// @param projectId The ID of the project to set the terminal for.
     /// @param terminal The terminal to set for the project.
@@ -599,7 +633,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return 0;
     }
 
-    /// @notice Transfers tokens.
+    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
+    /// fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
     /// @param token The address of the token being transferred.
