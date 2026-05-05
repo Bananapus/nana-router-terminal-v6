@@ -22,9 +22,9 @@ interface IJBPayRoutePreviewer {
     /// @return tokens The token store used to map project tokens back to project IDs.
     function TOKENS() external view returns (IJBTokens tokens);
 
-    /// @notice The wrapped native token used for router token normalization.
-    /// @return weth The wrapped native token used for router token normalization.
-    function WETH() external view returns (IWETH9 weth);
+    /// @notice The ERC-20 wrapper for the chain's native token, used for router token normalization.
+    /// @return weth The ERC-20 wrapper for the chain's native token.
+    function WRAPPED_NATIVE_TOKEN() external view returns (IWETH9 weth);
 
     /// @notice Preview the recursive cashout loop the router would use for a project-token input.
     /// @param destProjectId The destination project the router is trying to pay.

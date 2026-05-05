@@ -140,7 +140,7 @@ contract JBRouterTerminal is
     IJBTokens public immutable TOKENS;
 
     /// @notice The ERC-20 wrapper for the native token.
-    IWETH9 public immutable WETH;
+    IWETH9 public immutable WRAPPED_NATIVE_TOKEN;
 
     //*********************************************************************//
     // -------------- internal immutable stored properties -------------- //
@@ -172,7 +172,7 @@ contract JBRouterTerminal is
     /// @param directory A contract storing directories of terminals and controllers for each project.
     /// @param tokens A contract managing project token balances.
     /// @param permit2 A permit2 utility.
-    /// @param weth A contract which wraps the native token.
+    /// @param weth The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum, WCELO on Celo).
     /// @param factory The Uniswap V3 factory for pool discovery.
     /// @param poolManager The Uniswap V4 PoolManager (address(0) if V4 not available).
     /// @param univ4Hook The canonical Uniswap V4 router hook used by supported hooked pools.
@@ -196,7 +196,7 @@ contract JBRouterTerminal is
         FACTORY = factory;
         POOL_MANAGER = poolManager;
         PERMIT2 = permit2;
-        WETH = weth;
+        WRAPPED_NATIVE_TOKEN = weth;
         // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
         // slither-disable-next-line missing-zero-check
@@ -214,7 +214,7 @@ contract JBRouterTerminal is
     // ---------------------- receive / fallback ------------------------- //
     //*********************************************************************//
 
-    /// @notice Receive native tokens from cash out reclaims, WETH unwraps, and V4 PoolManager takes.
+    /// @notice Receive native tokens from cash out reclaims, wrapped-native-token unwraps, and V4 PoolManager takes.
     receive() external payable {}
 
     //*********************************************************************//
@@ -402,7 +402,7 @@ contract JBRouterTerminal is
         uint256 amountToSendToPool = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
 
         // Wrap native tokens if needed.
-        if (tokenIn == JBConstants.NATIVE_TOKEN) _wethDeposit(amountToSendToPool);
+        if (tokenIn == JBConstants.NATIVE_TOKEN) _wrapNativeToken(amountToSendToPool);
 
         // Transfer the tokens to the pool.
         IERC20(normalizedTokenIn).safeTransfer({to: msg.sender, value: amountToSendToPool});
@@ -883,8 +883,8 @@ contract JBRouterTerminal is
         view
         returns (uint256 amountOut)
     {
-        // Normalize native-token sentinels into WETH so pool discovery and quoting use canonical pair addresses.
-        // _pickPoolAndQuote already discovers the best pool and reverts with NoPoolFound when none exists,
+        // Normalize native-token sentinels into wrapped native tokens so pool discovery and quoting use canonical pair
+        // addresses. _pickPoolAndQuote already discovers the best pool and reverts with NoPoolFound when none exists,
         // so no separate liquidity guard is needed here.
         (amountOut,) = _pickPoolAndQuote({
             metadata: metadata,
@@ -902,7 +902,7 @@ contract JBRouterTerminal is
         // Treat exact-token matches as the same asset without doing any normalization work.
         if (tokenA == tokenB) return true;
 
-        // Otherwise compare normalized representations so ETH and WETH share one routing identity.
+        // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
         return _normalize(tokenA) == _normalize(tokenB);
     }
 
@@ -1252,7 +1252,7 @@ contract JBRouterTerminal is
         revert JBRouterTerminal_CashOutLoopLimit();
     }
 
-    /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for NATIVE/WETH, or swap via Uniswap.
+    /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for native/wrapped-native, or swap via Uniswap.
     /// @param tokenIn The token to convert from.
     /// @param tokenOut The token to convert into.
     /// @param amount The amount to convert.
@@ -1280,8 +1280,8 @@ contract JBRouterTerminal is
 
         if (nIn == nOut) {
             // Same underlying token — just wrap or unwrap.
-            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethDeposit(amount);
-            else _wethWithdraw(amount);
+            if (tokenIn == JBConstants.NATIVE_TOKEN) _wrapNativeToken(amount);
+            else _unwrapNativeToken(amount);
             return amount;
         }
 
@@ -1411,8 +1411,8 @@ contract JBRouterTerminal is
         internal
         returns (uint256 amountOut)
     {
-        // Convert WETH addresses to V4's native ETH (address(0)) for currency comparison.
-        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
+        // Convert wrapped-native-token addresses to V4's native representation (address(0)) for currency comparison.
+        address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
@@ -1471,11 +1471,11 @@ contract JBRouterTerminal is
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
         // In partial fills, the swap callback only wraps the amount the pool consumed, leaving excess as raw ETH.
         if (tokenIn == JBConstants.NATIVE_TOKEN && address(this).balance > nativeBalanceBaseline) {
-            _wethDeposit(address(this).balance - nativeBalanceBaseline);
+            _wrapNativeToken(address(this).balance - nativeBalanceBaseline);
         }
 
         // Unwrap if output is native token.
-        if (tokenOut == JBConstants.NATIVE_TOKEN) _wethWithdraw(amountOut);
+        if (tokenOut == JBConstants.NATIVE_TOKEN) _unwrapNativeToken(amountOut);
 
         // Refund only the leftover portion attributable to this swap. Pre-existing balances are not part of the
         // caller's route and should not be swept into the current refund.
@@ -1483,12 +1483,12 @@ contract JBRouterTerminal is
         if (balanceAfter > refundBalanceBaseline) {
             uint256 refundAmount = balanceAfter - refundBalanceBaseline;
             if (tokenIn == JBConstants.NATIVE_TOKEN) {
-                _wethWithdraw(refundAmount);
-                // Try native refund; fall back to WETH if the recipient cannot accept ETH.
+                _unwrapNativeToken(refundAmount);
+                // Try native refund; fall back to wrapped native token if the recipient cannot accept native tokens.
                 (bool success,) = refundTo.call{value: refundAmount}("");
                 if (!success) {
-                    _wethDeposit(refundAmount);
-                    IERC20(address(WETH)).safeTransfer(refundTo, refundAmount);
+                    _wrapNativeToken(refundAmount);
+                    IERC20(address(WRAPPED_NATIVE_TOKEN)).safeTransfer(refundTo, refundAmount);
                 }
             } else {
                 _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: refundAmount});
@@ -1670,18 +1670,20 @@ contract JBRouterTerminal is
     /// @notice Settle the input side of a V4 swap by transferring the owed input asset into the PoolManager.
     /// @param currency The V4 currency to settle with the PoolManager.
     /// @param amount The amount of `currency` to settle.
-    /// @param canUseExistingNativeBalance Whether already-held raw ETH can be used before unwrapping WETH.
+    /// @param canUseExistingNativeBalance Whether already-held raw native tokens can be used before unwrapping.
     function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
         if (_unwrapCurrency(currency) == address(0)) {
             // Native-funded routes may spend the ETH they already hold.
-            // WETH-funded routes must not consume unrelated raw ETH already sitting on the router.
+            // Wrapped-native-funded routes must not consume unrelated raw native tokens already sitting on the router.
             if (canUseExistingNativeBalance) {
-                // Only unwrap the shortfall so routes funded by direct ETH do not churn through WETH unnecessarily.
+                // Only unwrap the shortfall so routes funded by direct native tokens do not churn through wrapping
+                // unnecessarily.
                 uint256 deficit = amount > address(this).balance ? amount - address(this).balance : 0;
-                if (deficit > 0) _wethWithdraw(deficit);
+                if (deficit > 0) _unwrapNativeToken(deficit);
             } else {
-                // WETH-funded routes should unwrap the full amount because they are not allowed to consume ambient ETH.
-                _wethWithdraw(amount);
+                // Wrapped-native-funded routes should unwrap the full amount because they are not allowed to consume
+                // ambient native tokens.
+                _unwrapNativeToken(amount);
             }
             // Native settlement uses `msg.value` because PoolManager expects ETH to accompany the settle call.
             // slither-disable-next-line unused-return
@@ -1703,8 +1705,8 @@ contract JBRouterTerminal is
         // Pull the owed output asset into the router before any later wrapping/unwrapping or forwarding logic runs.
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
-        // If native ETH output, wrap to WETH (downstream _handleSwap unwraps if needed).
-        if (_unwrapCurrency(currency) == address(0)) _wethDeposit(amount);
+        // If native token output, wrap it (downstream _handleSwap unwraps if needed).
+        if (_unwrapCurrency(currency) == address(0)) _wrapNativeToken(amount);
     }
 
     /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
@@ -1733,8 +1735,8 @@ contract JBRouterTerminal is
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }
 
-    /// @notice Convert native ETH and WETH into the preferred concrete asset when both normalize to the same token.
-    /// @param token The token currently held by the router.
+    /// @notice Convert native tokens and wrapped native tokens into the preferred concrete asset when both normalize to
+    /// the same token. @param token The token currently held by the router.
     /// @param amount The amount of `token` currently held.
     /// @param preferredToken The exact token the downstream route expects.
     /// @return alignedToken The token to surface to downstream routing.
@@ -1750,15 +1752,15 @@ contract JBRouterTerminal is
         // Leave exact-token matches untouched.
         if (token == preferredToken) return (token, amount);
 
-        // Wrap ETH into WETH when the preferred token is the ERC20 wrapper.
-        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WETH)) {
-            _wethDeposit(amount);
+        // Wrap native tokens when the preferred token is the ERC-20 wrapper.
+        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WRAPPED_NATIVE_TOKEN)) {
+            _wrapNativeToken(amount);
             return (preferredToken, amount);
         }
 
-        // Unwrap WETH into ETH when the preferred token is the native-token sentinel.
-        if (token == address(WETH) && preferredToken == JBConstants.NATIVE_TOKEN) {
-            _wethWithdraw(amount);
+        // Unwrap wrapped native tokens when the preferred token is the native-token sentinel.
+        if (token == address(WRAPPED_NATIVE_TOKEN) && preferredToken == JBConstants.NATIVE_TOKEN) {
+            _unwrapNativeToken(amount);
             return (preferredToken, amount);
         }
 
@@ -1766,18 +1768,18 @@ contract JBRouterTerminal is
         return (token, amount);
     }
 
-    /// @notice Wrap native tokens into WETH.
+    /// @notice Wrap native tokens into their ERC-20 wrapped representation.
     /// @param amount The amount of native tokens to wrap.
     // slither-disable-next-line calls-loop
-    function _wethDeposit(uint256 amount) internal {
-        WETH.deposit{value: amount}();
+    function _wrapNativeToken(uint256 amount) internal {
+        WRAPPED_NATIVE_TOKEN.deposit{value: amount}();
     }
 
-    /// @notice Unwrap WETH into native tokens.
-    /// @param amount The amount of WETH to unwrap.
+    /// @notice Unwrap wrapped native tokens into native tokens.
+    /// @param amount The amount of wrapped native tokens to unwrap.
     // slither-disable-next-line calls-loop
-    function _wethWithdraw(uint256 amount) internal {
-        WETH.withdraw(amount);
+    function _unwrapNativeToken(uint256 amount) internal {
+        WRAPPED_NATIVE_TOKEN.withdraw(amount);
     }
 
     //*********************************************************************//
@@ -1989,9 +1991,9 @@ contract JBRouterTerminal is
         // Exit early on chains where V4 is not deployed.
         if (address(POOL_MANAGER) == address(0)) return updatedBestPool;
 
-        // Convert WETH -> address(0) for V4 native ETH representation.
-        address v4In = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
-        address v4Out = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+        // Convert wrapped native token -> address(0) for V4 native representation.
+        address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
+        address v4Out = normalizedTokenOut == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenOut;
 
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
@@ -2384,9 +2386,10 @@ contract JBRouterTerminal is
 
         if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
 
-        // V4 uses address(0) for native ETH; map WETH so OracleLibrary token sorting matches the pool.
-        normalizedTokenIn = normalizedTokenIn == address(WETH) ? address(0) : normalizedTokenIn;
-        normalizedTokenOut = normalizedTokenOut == address(WETH) ? address(0) : normalizedTokenOut;
+        // V4 uses address(0) for native tokens; map the wrapped native token so OracleLibrary token sorting matches the
+        // pool.
+        normalizedTokenIn = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = normalizedTokenOut == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenOut;
 
         if (!usedTwap) {
             // Without TWAP, instantaneous liquidity and spot price are both JIT-manipulable.
@@ -2449,12 +2452,12 @@ contract JBRouterTerminal is
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
     }
 
-    /// @notice Normalize a token address by replacing the native token sentinel with WETH.
+    /// @notice Normalize a token address by replacing the native token sentinel with the wrapped native token.
     /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
     function _normalize(address token) internal view returns (address) {
-        // Replace the native-token sentinel with WETH so ETH and WETH share one routing representation.
-        return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
+        // Replace the native-token sentinel with the wrapped native token so both share one routing representation.
+        return token == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : token;
     }
 
     /// @notice Discover a pool and compute the minimum acceptable output for a swap. Uses a user-provided quote if

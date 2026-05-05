@@ -52,3 +52,8 @@ Standard Permit2 fallback pattern. If Permit2 signature verification fails, the 
 
 **Fresh high-liquidity V3 pool without TWAP history can block auto-quoting.** *(Minor)*
 `_discoverPool` selects the highest-liquidity V3 pool, but `_getV3TwapQuote` requires sufficient observation history. A freshly deployed pool with high liquidity wins discovery but fails the TWAP check, reverting the routing flow while lower-liquidity pools with adequate TWAP are ignored. Accepted because: (1) this is self-correcting — the pool accumulates observations over time, (2) the griefing cost is high — attacker must deploy real liquidity, (3) callers can bypass auto-quoting entirely by providing `quoteForSwap` metadata, and (4) the condition is temporary and resolves within the TWAP observation window (default 10 minutes).
+
+## Multi-Chain Native Token Assumption
+
+**Router assumes the chain has a native token with a WETH9-compatible wrapper.** *(Informational)*
+The `WRAPPED_NATIVE_TOKEN` constructor parameter must be a WETH9-compatible contract (`deposit()` / `withdraw()` interface). On Ethereum this is WETH, on Celo it would be WCELO, etc. On chains without a native token (e.g. Tempo), the router's native-token swap and refund paths are not applicable — the router should either not be deployed, or the `WRAPPED_NATIVE_TOKEN` should be set to a no-op wrapper. All native-token routing logic (`_wrapNativeToken`, `_unwrapNativeToken`, `receive()`, V4 settlement with `msg.value`) depends on this assumption.
