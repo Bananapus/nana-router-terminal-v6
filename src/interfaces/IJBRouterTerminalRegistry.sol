@@ -11,17 +11,17 @@ import {IJBPayerTracker} from "./IJBPayerTracker.sol";
 /// @notice A registry that maps projects to their preferred router terminal.
 interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPayerTracker {
     /// @notice Emitted when a terminal is allowed for use by projects.
-    /// @param terminal The terminal that was allowed.
+    /// @param terminal The terminal allowed.
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_AllowTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a terminal is disallowed from use by projects.
-    /// @param terminal The terminal that was disallowed.
+    /// @param terminal The terminal disallowed.
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_DisallowTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a project's terminal is locked and can no longer be changed.
-    /// @param projectId The ID of the project whose terminal was locked.
+    /// @param projectId The ID of the project locked.
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller);
 
@@ -31,8 +31,8 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     event JBRouterTerminalRegistry_SetDefaultTerminal(IJBTerminal terminal, address caller);
 
     /// @notice Emitted when a project's terminal is set.
-    /// @param projectId The ID of the project whose terminal was set.
-    /// @param terminal The terminal that was set.
+    /// @param projectId The ID of the project updated.
+    /// @param terminal The terminal set for the project.
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller);
 
@@ -62,7 +62,7 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external;
 
-    /// @notice Disallow a terminal from being used by projects.
+    /// @notice Disallow a terminal from use by projects.
     /// @param terminal The terminal to disallow.
     function disallowTerminal(IJBTerminal terminal) external;
 

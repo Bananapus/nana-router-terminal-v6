@@ -52,25 +52,25 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------- public immutable properties ------------------ //
     //*********************************************************************//
 
-    /// @notice The project registry.
+    /// @notice The Juicebox project registry used to verify project existence and ownership.
     IJBProjects public immutable override PROJECTS;
 
-    /// @notice The permit2 utility.
+    /// @notice The Permit2 contract used for token approvals and transfers.
     IPermit2 public immutable override PERMIT2;
 
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
 
-    /// @notice The default terminal to use.
+    /// @notice The default terminal used for payments when a project hasn't registered a specific one.
     IJBTerminal public override defaultTerminal;
 
     /// @notice Whether the terminal for a given project has been locked against future updates.
-    /// @custom:param projectId The ID of the project whose lock state is being tracked.
+    /// @custom:param projectId The ID of the project to check lock state for.
     mapping(uint256 projectId => bool) public override hasLockedTerminal;
 
     /// @notice Whether a terminal is allowlisted for project-level selection.
-    /// @custom:param terminal The terminal whose allowlist status is being tracked.
+    /// @custom:param terminal The terminal to check allowlist status for.
     mapping(IJBTerminal terminal => bool) public override isTerminalAllowed;
 
     //*********************************************************************//
@@ -78,7 +78,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
 
     /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
-    /// @custom:param projectId The ID of the project whose explicit terminal assignment is being tracked.
+    /// @custom:param projectId The ID of the project to look up the explicit terminal for.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
     //*********************************************************************//
@@ -181,8 +181,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
-    /// @param projectId The ID of the project being paid.
-    /// @param token The token that would be paid into the resolved terminal.
+    /// @param projectId The ID of the project to pay.
+    /// @param token The token to pay into the resolved terminal.
     /// @param amount The amount of the input token to preview.
     /// @param beneficiary The address that would receive any minted project tokens.
     /// @param metadata Extra data to forward unchanged to the resolved terminal preview.
@@ -229,9 +229,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
-    /// @notice Whether the registry supports a given interface ID.
+    /// @notice Check whether the registry supports a given interface ID.
     /// @param interfaceId The interface ID to check.
-    /// @return supported A flag indicating whether `interfaceId` is implemented.
+    /// @return supported Whether `interfaceId` is implemented.
     function supportsInterface(bytes4 interfaceId) public pure override returns (bool supported) {
         supported = interfaceId == type(IJBRouterTerminalRegistry).interfaceId
             || interfaceId == type(IJBForwardingTerminal).interfaceId || interfaceId == type(IJBTerminal).interfaceId
@@ -248,7 +248,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Prevent the registry from forwarding straight back into its immediate caller.
-    /// @param terminal The terminal the registry is about to forward into.
+    /// @param terminal The terminal to check for circular forwarding.
     function _enforceNoCircularForward(IJBTerminal terminal) internal view {
         // Reject immediate caller cycles so router -> registry -> same router cannot recurse indefinitely.
         if (msg.sender == address(terminal)) revert JBRouterTerminalRegistry_CircularForward(terminal);
@@ -267,8 +267,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Reject terminal choices that would forward the project back into this registry.
-    /// @param projectId The project whose forwarding target is being validated.
-    /// @param terminal The terminal being configured or locked.
+    /// @param projectId The project to validate forwarding for.
+    /// @param terminal The terminal to validate.
     function _requireNonCircularTerminalFor(uint256 projectId, IJBTerminal terminal) internal view {
         // Reject direct self-selection so the registry cannot forward a project to itself.
         if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
@@ -290,7 +290,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Resolve the effective terminal for a project, falling back to the default terminal when unset.
-    /// @param projectId The project whose terminal should be resolved.
+    /// @param projectId The project to resolve the terminal for.
     /// @return terminal The project-specific terminal, or the default terminal if no override exists.
     function _resolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
         // Start from the project-specific override, if one was configured.
@@ -317,9 +317,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Add funds to a project's balance by forwarding them through the project's resolved router terminal.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
-    /// @param projectId The ID of the project receiving the balance addition.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @param projectId The ID of the project to add balance to.
+    /// @param token The address of the token to pay in.
+    /// @param amount The amount of tokens to send.
     /// @param shouldReturnHeldFees Whether held fees should be returned based on the amount added.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).
@@ -459,9 +459,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Pay a project by accepting the caller's tokens and forwarding them to the project's resolved router
     /// terminal.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
-    /// @param projectId The ID of the project being paid.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @param projectId The ID of the project to pay.
+    /// @param token The address of the token to pay with.
+    /// @param amount The amount of tokens to send.
     /// @param beneficiary The address that will receive any project tokens minted by the destination.
     /// @param minReturnedTokens The minimum number of project tokens expected in return.
     /// @param memo A memo to pass along to the emitted event.
@@ -564,12 +564,12 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
 
-    /// @notice Accepts a token being paid in.
+    /// @notice Accept a token paid in by the caller.
     /// @dev Measures the actual received balance so forwarded amounts stay in sync with lossy ERC-20 transfers.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @param token The address of the token to accept.
+    /// @param amount The amount of tokens to accept.
     /// @param metadata The metadata in which `permit2` context is provided.
-    /// @return amount The amount of tokens that have been accepted.
+    /// @return amount The amount of tokens accepted.
     // slither-disable-next-line reentrancy-events
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // If native tokens are being paid in, return the `msg.value`.
@@ -618,11 +618,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return IERC20(token).balanceOf(address(this)) - balanceBefore;
     }
 
-    /// @notice Logic to be triggered before transferring tokens from this terminal.
+    /// @notice Logic to trigger before transferring tokens from this terminal.
     /// @param to The address to transfer tokens to.
-    /// @param token The token being transferred.
+    /// @param token The token to transfer.
     /// @param amount The amount of tokens to transfer.
-    /// @return payValue The amount that'll be paid as a `msg.value`.
+    /// @return payValue The amount that will be paid as a `msg.value`.
     function _beforeTransferFor(address to, address token, uint256 amount) internal virtual returns (uint256) {
         // If the token is the native token, return early.
         if (token == JBConstants.NATIVE_TOKEN) return amount;
@@ -637,7 +637,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
-    /// @param token The address of the token being transferred.
+    /// @param token The address of the token to transfer.
     /// @param amount The amount of tokens to transfer.
     function _transferFrom(address from, address payable to, address token, uint256 amount) internal virtual {
         if (from == address(this)) {
