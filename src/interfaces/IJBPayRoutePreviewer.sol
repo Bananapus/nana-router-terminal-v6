@@ -28,8 +28,8 @@ interface IJBPayRoutePreviewer {
 
     /// @notice Preview the recursive cashout loop the router would use for a project-token input.
     /// @param destProjectId The destination project the router is trying to pay.
-    /// @param token The current token being routed.
-    /// @param amount The amount of `token` being previewed.
+    /// @param token The current token to route.
+    /// @param amount The amount of `token` to preview.
     /// @param sourceProjectIdOverride The one-shot source project override encoded in metadata, if any.
     /// @param metadata Metadata forwarded into preview helpers.
     /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
@@ -51,7 +51,7 @@ interface IJBPayRoutePreviewer {
     /// @notice Preview the amount a direct token-to-token swap would return.
     /// @param tokenIn The input token.
     /// @param tokenOut The output token.
-    /// @param amount The amount of `tokenIn` being swapped.
+    /// @param amount The amount of `tokenIn` to swap.
     /// @param metadata Metadata forwarded into quote selection.
     /// @return amountOut The quoted amount of `tokenOut`.
     function previewSwapAmountOutOf(
@@ -71,11 +71,11 @@ interface IJBPayRoutePreviewer {
     function bestPoolLiquidityOf(address tokenA, address tokenB) external view returns (uint128 bestLiquidity);
 
     /// @notice Preview a destination terminal payment from the router's caller context.
-    /// @param destTerminal The terminal whose pay preview should be queried.
+    /// @param destTerminal The terminal whose pay preview to query.
     /// @param projectId The destination project that would receive the payment.
     /// @param token The token the destination terminal would receive.
     /// @param amount The amount of `token` the destination terminal would receive.
-    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param beneficiary The address to measure beneficiary token count for.
     /// @param metadata Metadata forwarded unchanged into the destination terminal preview.
     /// @return ruleset The ruleset returned by the destination terminal preview.
     /// @return beneficiaryTokenCount The beneficiary token count returned by the destination terminal preview.

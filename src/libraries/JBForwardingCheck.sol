@@ -9,7 +9,7 @@ import {IJBForwardingTerminal} from "../interfaces/IJBForwardingTerminal.sol";
 library JBForwardingCheck {
     /// @notice Whether routing through `terminal` would cycle back to `target` within 5 hops.
     /// @param target The address to detect cycles against (typically the router).
-    /// @param projectId The project whose forwarding chain is being followed.
+    /// @param projectId The project to follow the forwarding chain for.
     /// @param terminal The starting terminal to check.
     /// @return isCircular True if the terminal forwards (directly or transitively) back to `target`.
     function isCircularTerminal(

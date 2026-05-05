@@ -10,11 +10,11 @@ import {IJBPayRoutePreviewer} from "./IJBPayRoutePreviewer.sol";
 /// @notice Resolves the best pay route preview for a router terminal.
 interface IJBPayRouteResolver {
     /// @notice Preview the best pay route for a router terminal.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose minted token count should be optimized.
+    /// @param amount The amount of `tokenIn` to preview.
+    /// @param beneficiary The address whose minted token count to optimize.
     /// @param metadata Metadata forwarded into route and pay previews.
     /// @return destTerminal The terminal chosen for the best previewed route.
     /// @return tokenOut The token `destTerminal` would receive.
@@ -44,11 +44,11 @@ interface IJBPayRouteResolver {
         );
 
     /// @notice Preview a specific candidate pay route so callers can isolate revert-prone candidates with `try/catch`.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose minted token count is being measured.
+    /// @param amount The amount of `tokenIn` to preview.
+    /// @param beneficiary The address to measure minted token count for.
     /// @param metadata Metadata forwarded into route and pay previews.
     /// @param tokenOut The candidate destination token to preview.
     /// @param destTerminal The terminal that accepts `tokenOut` for the destination project.
@@ -82,9 +82,9 @@ interface IJBPayRouteResolver {
         );
 
     /// @notice Determine what output token a project accepts for a given input token.
-    /// @param router The router whose view helpers should be used.
-    /// @param projectId The destination project being paid.
-    /// @param tokenIn The input token being routed.
+    /// @param router The router whose view helpers to use.
+    /// @param projectId The destination project to pay.
+    /// @param tokenIn The input token to route.
     /// @param metadata Metadata forwarded into route-token resolution.
     /// @return tokenOut The token the project accepts.
     /// @return destTerminal The terminal that accepts `tokenOut`.
@@ -101,10 +101,10 @@ interface IJBPayRouteResolver {
     /// @notice External self-call wrapper that previews the fallback route in an isolated context.
     /// @dev Called via `self.previewFallbackRoute(...)` so `try/catch` can absorb reverts from broken
     /// terminals or price feeds without bricking the entire best-route preview.
-    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
-    /// @param destProjectId The project being paid through the fallback route.
+    /// @param routePreviewer The router terminal whose preview helpers to use for simulating the route.
+    /// @param destProjectId The project to pay through the fallback route.
     /// @param tokenIn The token the payer is sending.
-    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param amountIn The amount of `tokenIn` to route.
     /// @param beneficiary The address that would receive minted project tokens.
     /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
     /// @return destTerminal The terminal the fallback route would deliver funds to.
@@ -135,8 +135,8 @@ interface IJBPayRouteResolver {
         );
 
     /// @notice Resolve a project's primary terminal only when the router can safely forward into it.
-    /// @param router The router whose forwarding-terminal rules should be applied.
-    /// @param projectId The project whose primary terminal should be checked.
+    /// @param router The router whose forwarding-terminal rules to apply.
+    /// @param projectId The project to check the primary terminal for.
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function usablePrimaryTerminalOf(

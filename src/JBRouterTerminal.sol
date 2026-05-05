@@ -234,8 +234,8 @@ contract JBRouterTerminal is
 
     /// @notice Add funds to a project's balance by routing the incoming token to whatever token the project accepts.
     /// @param projectId The ID of the destination project.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @param token The address of the token to pay in.
+    /// @param amount The amount of tokens to send.
     /// @param shouldReturnHeldFees Whether held fees should be returned based on the amount added.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
@@ -317,9 +317,9 @@ contract JBRouterTerminal is
 
     /// @notice Pay a project by routing the incoming token to whatever token the project accepts.
     /// @dev Automatically handles direct forwarding, Uniswap swaps, JB token cashouts, or combinations.
-    /// @param projectId The ID of the destination project being paid.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @param projectId The ID of the destination project to pay.
+    /// @param token The address of the token to pay with.
+    /// @param amount The amount of tokens to send.
     /// @param beneficiary The address to receive any tokens minted by the destination project.
     /// @param minReturnedTokens The minimum number of destination project tokens expected in return.
     /// @param memo A memo to pass along to the emitted event.
@@ -381,8 +381,8 @@ contract JBRouterTerminal is
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
     /// @dev Verifies the caller is a legitimate pool via the factory using the encoded tokenIn/tokenOut pair.
-    /// @param amount0Delta The amount of token 0 being used for the swap.
-    /// @param amount1Delta The amount of token 1 being used for the swap.
+    /// @param amount0Delta The amount of token 0 used for the swap.
+    /// @param amount1Delta The amount of token 1 used for the swap.
     /// @param data Data passed in by the swap operation: abi.encode(projectId, tokenIn, tokenOut).
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
         // Unpack the data from the original swap config.
@@ -473,7 +473,7 @@ contract JBRouterTerminal is
     /// @notice Returns a best-effort accounting context for any token the router can route.
     /// @dev This surface is still synthetic for routing discovery, but it probes ERC-20 decimals when available and
     /// falls back to 18 if a token omits or breaks `decimals()`.
-    /// @param token The address of the token to get the accounting context for.
+    /// @param token The address of the token to get accounting context for.
     function accountingContextForTokenOf(
         uint256,
         address token
@@ -579,9 +579,9 @@ contract JBRouterTerminal is
 
     /// @notice Preview a payment by simulating the router's routing logic in view context.
     /// @dev Returns the router's best estimate using current routing and quote data, including swap quotes when needed.
-    /// @param projectId The ID of the destination project being paid.
-    /// @param token The token that would be provided to the router.
-    /// @param amount The amount of the input token that would be provided.
+    /// @param projectId The ID of the destination project to pay.
+    /// @param token The token to provide to the router.
+    /// @param amount The amount of the input token to provide.
     /// @param beneficiary The address that would receive any minted project tokens.
     /// @param metadata Extra data used to preview fund acceptance, routing, and the destination terminal call.
     /// @return ruleset The current ruleset the destination terminal would use.
@@ -613,8 +613,8 @@ contract JBRouterTerminal is
 
     /// @notice Preview the recursive cashout loop the router would use for a project-token input.
     /// @param destProjectId The destination project the router is trying to pay.
-    /// @param token The current token being routed.
-    /// @param amount The amount of `token` being previewed.
+    /// @param token The current token to route.
+    /// @param amount The amount of `token` to preview.
     /// @param sourceProjectIdOverride The one-shot source project override encoded in metadata, if any.
     /// @param metadata Metadata forwarded into preview helpers.
     /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
@@ -646,7 +646,7 @@ contract JBRouterTerminal is
     /// @notice Preview the amount a direct token-to-token swap would return.
     /// @param tokenIn The input token.
     /// @param tokenOut The output token.
-    /// @param amount The amount of `tokenIn` being swapped.
+    /// @param amount The amount of `tokenIn` to swap.
     /// @param metadata Metadata forwarded into quote selection.
     /// @return amountOut The quoted amount of `tokenOut`.
     function previewSwapAmountOutOf(
@@ -663,11 +663,11 @@ contract JBRouterTerminal is
     }
 
     /// @notice Preview a destination terminal payment from the router's caller context.
-    /// @param destTerminal The terminal whose pay preview should be queried.
+    /// @param destTerminal The terminal whose pay preview to query.
     /// @param projectId The destination project that would receive the payment.
     /// @param token The token the destination terminal would receive.
     /// @param amount The amount of `token` the destination terminal would receive.
-    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param beneficiary The address to measure beneficiary token count for.
     /// @param metadata Metadata forwarded unchanged into the destination terminal preview.
     /// @return ruleset The ruleset returned by the destination terminal preview.
     /// @return beneficiaryTokenCount The beneficiary token count returned by the destination terminal preview.
@@ -706,7 +706,7 @@ contract JBRouterTerminal is
     /// @notice Indicates if this contract adheres to the specified interface.
     /// @dev See {IERC165-supportsInterface}.
     /// @param interfaceId The ID of the interface to check for adherence to.
-    /// @return A flag indicating if the provided interface ID is supported.
+    /// @return A flag indicating whether the provided interface ID is supported.
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
         return interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IJBPermitTerminal).interfaceId
             || interfaceId == type(IJBRouterTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
@@ -732,12 +732,12 @@ contract JBRouterTerminal is
     }
 
     /// @notice Route a payment using the destination token that yields the highest previewed beneficiary output.
-    /// @param destProjectId The project receiving the routed payment.
+    /// @param destProjectId The project to route the payment to.
     /// @param tokenIn The token currently held by the router for this payment.
     /// @param amount The amount of `tokenIn` available to route.
-    /// @param beneficiary The address whose beneficiary token count should be maximized.
+    /// @param beneficiary The address whose beneficiary token count to maximize.
     /// @param metadata Metadata forwarded into route discovery and the final destination payment.
-    /// @param refundTo The address that should receive any leftover input tokens from partial fills.
+    /// @param refundTo The address to receive any leftover input tokens from partial fills.
     /// @return destTerminal The terminal selected for the winning route.
     /// @return tokenOut The token `destTerminal` should receive for the winning route.
     /// @return amountOut The amount of `tokenOut` that will be delivered to `destTerminal`.
@@ -824,10 +824,10 @@ contract JBRouterTerminal is
     }
 
     /// @notice Preview the best pay route using the resolver helper.
-    /// @param projectId The destination project being paid.
+    /// @param projectId The destination project to pay.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose minted token count should be optimized.
+    /// @param amount The amount of `tokenIn` to preview.
+    /// @param beneficiary The address whose minted token count to optimize.
     /// @param metadata Metadata forwarded into route and pay previews.
     /// @return destTerminal The terminal chosen for the best previewed route.
     /// @return tokenOut The token `destTerminal` would receive.
@@ -870,7 +870,7 @@ contract JBRouterTerminal is
     /// @notice Preview the output amount for a direct token-to-token swap route.
     /// @param tokenIn The token currently available to swap.
     /// @param tokenOut The token the swap should deliver.
-    /// @param amount The amount of `tokenIn` being previewed.
+    /// @param amount The amount of `tokenIn` to preview.
     /// @param metadata Metadata that can provide an explicit quote override for the swap.
     /// @return amountOut The predicted amount of `tokenOut` the router would receive.
     function _previewSwapAmountOut(
@@ -911,7 +911,7 @@ contract JBRouterTerminal is
     /// `_isForwardingTerminal` calls in the pay/addToBalance flows.
     /// @param terminal The destination terminal that will receive the final forwarded funds.
     /// @param token The token the terminal is expected to receive.
-    /// @param projectId The project whose forwarding status should be checked.
+    /// @param projectId The project to check forwarding status for.
     /// @return receiptBaseline The terminal's balance in `token` before the final forwarded call.
     /// @return isForwarding Whether the terminal forwards calls onward.
     function _terminalReceiptBaselineOf(
@@ -965,8 +965,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Whether a terminal forwards terminal-facing calls onward instead of acting as the final receiver.
-    /// @param terminal The terminal being checked for forwarding behavior.
-    /// @param projectId The project whose forwarding target should be resolved.
+    /// @param terminal The terminal to check for forwarding behavior.
+    /// @param projectId The project to resolve forwarding target for.
     /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
     function _isForwardingTerminal(IJBTerminal terminal, uint256 projectId) internal view returns (bool isForwarding) {
         // Probe via staticcall so non-forwarding terminals degrade cleanly.
@@ -981,7 +981,7 @@ contract JBRouterTerminal is
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
     /// @dev Inlined from the resolver to avoid a cross-contract roundtrip (saves 3 external calls per lookup).
-    /// @param projectId The project whose primary terminal should be checked.
+    /// @param projectId The project to check the primary terminal for.
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
@@ -1009,7 +1009,7 @@ contract JBRouterTerminal is
 
     /// @notice Resolve which source project a routed token should cash out from.
     /// @param sourceProjectIdOverride A one-shot source-project override decoded from routing metadata.
-    /// @param token The current route token that may itself be a JB project token.
+    /// @param token The current route token that may be a JB project token.
     /// @return sourceProjectId The project to cash out from, or 0 if the token is not a JB project token.
     function _sourceProjectIdOf(
         uint256 sourceProjectIdOverride,
@@ -1029,11 +1029,11 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice Accepts a token being paid in.
-    /// @param token The address of the token being paid in.
-    /// @param amount The amount of tokens being paid in.
+    /// @notice Accept a token paid in by the caller.
+    /// @param token The address of the token to accept.
+    /// @param amount The amount of tokens to accept.
     /// @param metadata The metadata in which `permit2` and credit context is provided.
-    /// @return The amount of tokens that have been accepted.
+    /// @return The amount of tokens accepted.
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // Cache _msgSender() once to avoid repeated ERC-2771 context resolution.
         address sender = _msgSender();
@@ -1115,9 +1115,9 @@ contract JBRouterTerminal is
         if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(destTerminal), value: 0});
     }
 
-    /// @notice Logic to be triggered before transferring tokens from this terminal.
+    /// @notice Logic to trigger before transferring tokens from this terminal.
     /// @param to The address to transfer tokens to.
-    /// @param token The token being transferred.
+    /// @param token The token to transfer.
     /// @param amount The amount of tokens to transfer.
     /// @return payValue The amount that will be paid as a `msg.value`.
     function _beforeTransferFor(address to, address token, uint256 amount) internal returns (uint256) {
@@ -1131,7 +1131,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Snapshot the normalized input-token balance used to measure refundable leftovers for one route.
-    /// @param tokenIn The token currently being routed.
+    /// @param tokenIn The token to route.
     /// @param amount The fresh route input amount currently held by the router.
     /// @return baseline The normalized input-token balance attributable only to pre-existing funds.
     function _refundBalanceBaselineOf(address tokenIn, uint256 amount) internal view returns (uint256 baseline) {
@@ -1144,7 +1144,7 @@ contract JBRouterTerminal is
 
     /// @notice Recursively cash out JB project tokens until reaching a token the destination accepts or a base token.
     /// @param destProjectId The ID of the destination project.
-    /// @param token The current token being processed.
+    /// @param token The current token to process.
     /// @param amount The amount of the current token.
     /// @param sourceProjectIdOverride When non-zero, use this as the source project ID instead of looking up via
     /// `TOKENS.projectIdOf()`. Reset to 0 after first use.
@@ -1254,7 +1254,7 @@ contract JBRouterTerminal is
 
     /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for NATIVE/WETH, or swap via Uniswap.
     /// @param tokenIn The token to convert from.
-    /// @param tokenOut The token to convert to.
+    /// @param tokenOut The token to convert into.
     /// @param amount The amount to convert.
     /// @param projectId The project ID (passed through to swap callback data).
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
@@ -1299,8 +1299,8 @@ contract JBRouterTerminal is
 
     /// @notice Discover a pool, get a quote, and execute the swap (dispatches to V3 or V4).
     /// @dev Separated from _handleSwap to manage stack depth.
-    /// @param normalizedTokenIn The normalized token being swapped in.
-    /// @param normalizedTokenOut The normalized token being swapped out.
+    /// @param normalizedTokenIn The normalized token to swap in.
+    /// @param normalizedTokenOut The normalized token to swap out.
     /// @param amount The amount of `normalizedTokenIn` to swap.
     /// @param metadata Bytes in `JBMetadataResolver`'s format, used for quote overrides.
     /// @param callbackData ABI-encoded callback data for the V3 swap path.
@@ -1348,8 +1348,8 @@ contract JBRouterTerminal is
 
     /// @notice Execute a swap through a V3 pool.
     /// @param pool The V3 pool to swap through.
-    /// @param normalizedTokenIn The normalized token being sold.
-    /// @param normalizedTokenOut The normalized token being bought.
+    /// @param normalizedTokenIn The normalized token to sell.
+    /// @param normalizedTokenOut The normalized token to buy.
     /// @param amount The exact input amount to swap.
     /// @param minAmountOut The minimum acceptable output after slippage protection.
     /// @param callbackData ABI-encoded data that the V3 callback will use to settle the input side.
@@ -1396,7 +1396,7 @@ contract JBRouterTerminal is
 
     /// @notice Execute a swap through a V4 pool via PoolManager.unlock().
     /// @param key The V4 pool key describing the pool to swap through.
-    /// @param normalizedTokenIn The normalized token being swapped in.
+    /// @param normalizedTokenIn The normalized token to swap in.
     /// @param canUseExistingNativeBalance Whether raw ETH already held by the router can fund the input side.
     /// @param amount The amount of `normalizedTokenIn` to swap.
     /// @param minAmountOut The minimum acceptable amount out for the swap.
@@ -1436,8 +1436,8 @@ contract JBRouterTerminal is
 
     /// @notice Execute a Uniswap swap from tokenIn to tokenOut (V3 or V4).
     /// @param projectId The project ID (included in callback data).
-    /// @param tokenIn The input token.
-    /// @param tokenOut The output token.
+    /// @param tokenIn The token to swap from.
+    /// @param tokenOut The token to swap into.
     /// @param amount The amount of tokenIn to swap.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
     /// @param refundTo The address to receive leftover input tokens from partial fills.
@@ -1490,8 +1490,8 @@ contract JBRouterTerminal is
     /// @notice Core routing logic shared by pay() and addToBalanceOf().
     /// @dev Determines whether to forward directly, cashout JB tokens, swap via Uniswap, or a combination.
     /// @param destProjectId The ID of the destination project.
-    /// @param tokenIn The address of the token being routed.
-    /// @param amount The amount of tokens being routed.
+    /// @param tokenIn The address of the token to route.
+    /// @param amount The amount of tokens to route.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return destTerminal The terminal to forward funds to.
@@ -1537,12 +1537,12 @@ contract JBRouterTerminal is
     }
 
     /// @notice Route funds to a specific destination token.
-    /// @param destProjectId The project receiving the routed payment.
+    /// @param destProjectId The project to route the payment to.
     /// @param tokenIn The token currently held by the router for this route.
     /// @param amount The amount of `tokenIn` available to route.
-    /// @param tokenOut The destination token the caller wants the project to receive.
+    /// @param tokenOut The destination token for the project to receive.
     /// @param metadata Metadata forwarded into any source cashout and swap logic.
-    /// @param refundTo The address that should receive any leftover input tokens from partial fills.
+    /// @param refundTo The address to receive any leftover input tokens from partial fills.
     /// @return destTerminal The terminal that accepts the resolved destination token.
     /// @return resolvedTokenOut The concrete destination token the router routed into.
     /// @return amountOut The amount of `resolvedTokenOut` that will be delivered to `destTerminal`.
@@ -1588,7 +1588,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Route the current input through a project-token cashout first when the route starts from a JB token.
-    /// @param destProjectId The destination project the route is trying to reach.
+    /// @param destProjectId The destination project to reach.
     /// @param tokenIn The current route input token.
     /// @param amount The current route input amount.
     /// @param metadata Metadata that may include a cashout-source override.
@@ -1659,8 +1659,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Settle the input side of a V4 swap by transferring the owed input asset into the PoolManager.
-    /// @param currency The V4 currency the router owes to the PoolManager.
-    /// @param amount The amount of `currency` the router must settle.
+    /// @param currency The V4 currency to settle with the PoolManager.
+    /// @param amount The amount of `currency` to settle.
     /// @param canUseExistingNativeBalance Whether already-held raw ETH can be used before unwrapping WETH.
     function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
         if (_unwrapCurrency(currency) == address(0)) {
@@ -1687,8 +1687,8 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice Take the output side of a V4 swap by pulling the owed asset out of the PoolManager.
-    /// @param currency The V4 currency the router is owed.
+    /// @notice Take the output side of a V4 swap by pulling the owed asset from the PoolManager.
+    /// @param currency The V4 currency to take from the PoolManager.
     /// @param amount The amount of `currency` to take.
     function _takeV4(Currency currency, uint256 amount) internal {
         // Pull the owed output asset into the router before any later wrapping/unwrapping or forwarding logic runs.
@@ -1702,7 +1702,7 @@ contract JBRouterTerminal is
     /// fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
-    /// @param token The address of the token being transferred.
+    /// @param token The address of the token to transfer.
     /// @param amount The amount of tokens to transfer.
     function _transferFrom(address from, address payable to, address token, uint256 amount) internal {
         if (from == address(this)) {
@@ -1757,14 +1757,14 @@ contract JBRouterTerminal is
         return (token, amount);
     }
 
-    /// @notice Deposit native tokens into WETH.
+    /// @notice Wrap native tokens into WETH.
     /// @param amount The amount of native tokens to wrap.
     // slither-disable-next-line calls-loop
     function _wethDeposit(uint256 amount) internal {
         WETH.deposit{value: amount}();
     }
 
-    /// @notice Withdraw native tokens from WETH.
+    /// @notice Unwrap WETH into native tokens.
     /// @param amount The amount of WETH to unwrap.
     // slither-disable-next-line calls-loop
     function _wethWithdraw(uint256 amount) internal {
@@ -1775,7 +1775,7 @@ contract JBRouterTerminal is
     // ------------------------- internal views -------------------------- //
     //*********************************************************************//
 
-    /// @notice Look up the best pool address from the V3 factory.
+    /// @notice Look up a pool address from the V3 factory.
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
     /// @param fee The fee tier to query.
@@ -1785,15 +1785,15 @@ contract JBRouterTerminal is
         return FACTORY.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
     }
 
-    /// @notice Look up the in-range liquidity for a V4 pool.
-    /// @param id The pool ID.
+    /// @notice Look up the in-range liquidity of a V4 pool.
+    /// @param id The pool ID to query.
     /// @return The pool's current in-range liquidity.
     function _getLiquidity(PoolId id) internal view returns (uint128) {
         return POOL_MANAGER.getLiquidity(id);
     }
 
     /// @notice Read slot0 from a V4 pool.
-    /// @param id The pool ID.
+    /// @param id The pool ID to query.
     /// @return sqrtPriceX96 The current sqrt price.
     /// @return tick The current tick.
     /// @return protocolFee The protocol fee.
@@ -1808,7 +1808,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Look up the primary terminal for a project and token.
-    /// @param projectId The ID of the project.
+    /// @param projectId The ID of the project to look up.
     /// @param token The token to look up.
     /// @return The primary terminal, or IJBTerminal(address(0)) if none.
     // slither-disable-next-line calls-loop
@@ -1825,7 +1825,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Read a project's terminal list from the directory.
-    /// @param projectId The project whose terminals should be read.
+    /// @param projectId The project to read terminals for.
     /// @param shouldIgnoreFailure Whether a reverting directory call should degrade into an empty list.
     /// @return terminals The project's terminal list, or an empty list if `shouldIgnoreFailure` is true and the call
     /// failed.
@@ -1864,7 +1864,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Parse the optional `cashOutSource` metadata.
-    /// @param metadata The metadata to inspect for a credit cashout override.
+    /// @param metadata The metadata to inspect for credit cashout overrides.
     /// @return sourceProjectId The source project override, or 0 if none is specified.
     /// @return amount The credit amount, or 0 if none is specified.
     function _cashOutSourceFrom(bytes calldata metadata)
@@ -1888,7 +1888,7 @@ contract JBRouterTerminal is
 
     /// @notice Check whether a cashout route can complete at the current destination.
     /// @dev Shared by _cashOutLoop and _previewCashOutLoop to keep destination logic in sync.
-    /// @param destProjectId The destination project.
+    /// @param destProjectId The destination project to check.
     /// @param token The current token in the route.
     /// @param preferredToken The caller's preferred output token (or address(0) for none).
     /// @return terminal The usable terminal if a route was found, or IJBTerminal(address(0)).
@@ -1958,8 +1958,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Search supported V4 pools and update the best pool candidate if a deeper V4 pool exists.
-    /// @param normalizedTokenIn The normalized input token used for pool discovery.
-    /// @param normalizedTokenOut The normalized output token used for pool discovery.
+    /// @param normalizedTokenIn The normalized input token to search pools for.
+    /// @param normalizedTokenOut The normalized output token to search pools for.
     /// @param currentBestLiquidity The highest liquidity found so far from prior discovery passes.
     /// @param bestPool The current best pool candidate to preserve unless a better V4 pool is found.
     /// @return updatedBestPool The winning pool after evaluating all supported V4 fee, tick-spacing, and hook
@@ -2051,7 +2051,7 @@ contract JBRouterTerminal is
     /// @notice Find which terminal to cash out from and which token to reclaim.
     /// @dev Prioritizes: 1) tokens the destination directly accepts, 2) base tokens that can exit the recursion
     /// immediately, 3) JB project tokens (recursable) only when no direct or base-token exit exists.
-    /// @param sourceProjectId The ID of the project whose tokens are being cashed out.
+    /// @param sourceProjectId The ID of the project to cash out tokens from.
     /// @param destProjectId The ID of the destination project.
     /// @return tokenToReclaim The token to reclaim from the cash out.
     /// @return cashOutTerminal The terminal to cash out from.
@@ -2186,7 +2186,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Get the slippage tolerance for a given swap using the continuous sigmoid formula.
-    /// @param amountIn The amount of tokens being swapped.
+    /// @param amountIn The amount of tokens to swap.
     /// @param liquidity The pool's in-range liquidity.
     /// @param tokenOut The output token.
     /// @param tokenIn The input token.
@@ -2226,10 +2226,10 @@ contract JBRouterTerminal is
     }
 
     /// @notice Get a TWAP-based quote with dynamic slippage for a V3 pool.
-    /// @param pool The V3 pool being quoted.
-    /// @param normalizedTokenIn The normalized token being swapped in.
-    /// @param normalizedTokenOut The normalized token being swapped out.
-    /// @param amount The amount of `normalizedTokenIn` being quoted.
+    /// @param pool The V3 pool to quote.
+    /// @param normalizedTokenIn The normalized token to swap in.
+    /// @param normalizedTokenOut The normalized token to swap out.
+    /// @param amount The amount of `normalizedTokenIn` to quote.
     /// @return minAmountOut The minimum amount out implied by the TWAP quote and dynamic slippage model.
     function _getV3TwapQuote(
         IUniswapV3Pool pool,
@@ -2313,9 +2313,9 @@ contract JBRouterTerminal is
     /// tolerance reflects a recent, off-chain-verified price. When no external quote can be provided, this fallback
     /// is still available as an accepted-risk convenience path.
     /// @param key The V4 pool key describing the pool to quote against.
-    /// @param normalizedTokenIn The normalized token being sold into the pool.
-    /// @param normalizedTokenOut The normalized token being bought from the pool.
-    /// @param amount The exact input amount being quoted.
+    /// @param normalizedTokenIn The normalized token to sell into the pool.
+    /// @param normalizedTokenOut The normalized token to buy from the pool.
+    /// @param amount The exact input amount to quote.
     /// @return minAmountOut The quoted minimum output after the router's slippage model is applied.
     function _getV4SpotQuote(
         PoolKey memory key,
@@ -2411,7 +2411,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Parse the optional `cashOutMinReclaimed` metadata.
-    /// @param metadata The metadata to inspect for a minimum reclaim amount.
+    /// @param metadata The metadata to inspect for minimum reclaim amounts.
     /// @return minTokensReclaimed The minimum reclaim amount, or 0 if none is specified.
     function _minReclaimedFrom(bytes calldata metadata) internal view returns (uint256 minTokensReclaimed) {
         (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, id: _CASH_OUT_MIN_RECLAIMED_ID});
@@ -2431,8 +2431,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Return the balance of an account for a token, using ETH balance for the native token sentinel.
-    /// @param token The token whose balance should be read.
-    /// @param account The account whose balance should be returned.
+    /// @param token The token to read the balance of.
+    /// @param account The account to read the balance of.
     /// @return balance The account's balance in `token`.
     // slither-disable-next-line calls-loop
     function _balanceOf(address token, address account) internal view returns (uint256) {
@@ -2441,16 +2441,15 @@ contract JBRouterTerminal is
     }
 
     /// @notice Normalize a token address by replacing the native token sentinel with WETH.
-    /// @param token The token to normalize for internal routing comparisons.
+    /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
     function _normalize(address token) internal view returns (address) {
         // Replace the native-token sentinel with WETH so ETH and WETH share one routing representation.
         return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
     }
 
-    /// @notice Discover a pool and compute the minimum acceptable output for a swap.
-    /// @dev Uses a user-provided quote if available, otherwise falls back to TWAP (V3) or automatic V4 quoting
-    /// with dynamic slippage.
+    /// @notice Discover a pool and compute the minimum acceptable output for a swap. Uses a user-provided quote if
+    /// available, otherwise falls back to TWAP (V3) or automatic V4 quoting with dynamic slippage.
     /// @dev For V4 pools without TWAP-capable hooks, `minAmountOut` is derived from the same-block spot tick, which is
     /// manipulable via sandwich attacks. This is an accepted risk for integrations that cannot source external quotes,
     /// especially when routing through deep pools and routine swap sizes, but it should not be treated as full MEV
@@ -2518,7 +2517,7 @@ contract JBRouterTerminal is
     /// @notice A view-only mirror of `_acceptFundsFor` used for previews.
     /// @dev Preview semantics use the caller-supplied `amount` as the intended input amount.
     /// @param amount The caller-supplied payment amount.
-    /// @param metadata The metadata to inspect for a credit cashout override.
+    /// @param metadata The metadata to inspect for credit cashout overrides.
     /// @return The effective amount that routing should use.
     function _previewAcceptFundsFor(uint256 amount, bytes calldata metadata) internal view returns (uint256) {
         // Credit cashouts use the credit amount encoded in metadata rather than the raw token amount.
@@ -2534,7 +2533,7 @@ contract JBRouterTerminal is
 
     /// @notice A view-only mirror of `_cashOutLoop`.
     /// @param destProjectId The ID of the destination project.
-    /// @param token The current token being processed.
+    /// @param token The current token to process.
     /// @param amount The amount of the current token.
     /// @param sourceProjectIdOverride An optional source project override from metadata.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
@@ -2610,8 +2609,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Preview a single cashout hop in the recursive cashout path.
-    /// @param sourceProjectId The project whose tokens are being cashed out.
-    /// @param destProjectId The final destination project being paid.
+    /// @param sourceProjectId The project to cash out tokens from.
+    /// @param destProjectId The final destination project to pay.
     /// @param amount The amount of source-project tokens to cash out.
     /// @return tokenToReclaim The token that would be reclaimed from the source terminal.
     /// @return reclaimAmount The amount of that token that would be reclaimed.
@@ -2653,8 +2652,8 @@ contract JBRouterTerminal is
     /// @notice Get a minimum-amount-out quote at the given tick, applying dynamic slippage.
     /// @param amount The input amount.
     /// @param liquidity The pool's in-range liquidity.
-    /// @param tokenIn The input token address (used for token sorting and quoting).
-    /// @param tokenOut The output token address (used for token sorting and quoting).
+    /// @param tokenIn The input token address for sorting and quoting.
+    /// @param tokenOut The output token address for sorting and quoting.
     /// @param tick The tick to quote at (TWAP mean tick or spot tick).
     /// @param poolFeeBps The pool fee in basis points.
     /// @return minAmountOut The quoted output amount after slippage.
@@ -2702,7 +2701,7 @@ contract JBRouterTerminal is
     /// @notice Read a metadata entry from the router's metadata namespace.
     /// @param metadata The metadata blob to query.
     /// @param id The pre-computed metadata ID to look up.
-    /// @return exists A flag indicating whether the metadata entry was present.
+    /// @return exists Whether the metadata entry was present.
     /// @return data The raw metadata payload for `id`.
     function _getDataFor(bytes calldata metadata, bytes4 id) internal pure returns (bool exists, bytes memory data) {
         // slither-disable-next-line unused-return

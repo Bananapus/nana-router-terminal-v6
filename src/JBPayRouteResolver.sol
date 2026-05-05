@@ -384,8 +384,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @notice Whether previewing through a terminal would cycle back into the router.
     /// @dev Delegates to `JBForwardingCheck.isCircularTerminal` — shared with `JBRouterTerminal` so that
     /// preview and execution use identical cycle-detection logic.
-    /// @param router The router whose preview path is being evaluated.
-    /// @param projectId The project whose forwarding terminal would be resolved.
+    /// @param router The router whose preview path to evaluate.
+    /// @param projectId The project to resolve forwarding terminal for.
     /// @param terminal The terminal that would receive the previewed route.
     /// @return isCircular A flag indicating whether `terminal` is the router itself or forwards back into it.
     function _isCircularTerminal(
@@ -408,10 +408,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Preview the amount that would be routed into a specific destination token.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param destProjectId The destination project the router is trying to pay.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
+    /// @param amount The amount of `tokenIn` to preview.
     /// @param metadata Metadata that may encode cashout-source and route-token overrides.
     /// @param tokenOut The preferred destination token to preview.
     /// @return routedTokenIn The token that would actually be provided to the destination terminal.
@@ -454,11 +454,11 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Preview a pay route for a specific destination token.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param amount The amount of `tokenIn` to preview.
+    /// @param beneficiary The address to measure beneficiary token count for.
     /// @param metadata Metadata forwarded into both the routing preview and terminal preview.
     /// @param tokenOut The candidate destination token to preview.
     /// @param destTerminal The terminal that accepts `tokenOut` for the destination project.
@@ -526,10 +526,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Preview the fallback route that would be used when no candidate token can be scored directly.
-    /// @param router The router terminal whose preview helpers should be used.
-    /// @param destProjectId The destination project being paid.
+    /// @param router The router terminal whose preview helpers to use.
+    /// @param destProjectId The destination project to pay.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
+    /// @param amount The amount of `tokenIn` to preview.
     /// @param metadata Metadata forwarded into preview helpers.
     /// @return destTerminal The terminal the router would use.
     /// @return tokenOut The token `destTerminal` would receive.
@@ -573,7 +573,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Preview how the current route input would change after cashing out a project-token source if needed.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param destProjectId The destination project the route is trying to reach.
     /// @param tokenIn The current route input token.
     /// @param amount The current route input amount.
@@ -614,9 +614,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Resolve what output token a project accepts for a given input token.
-    /// @param router The router whose view helpers should be used.
-    /// @param projectId The destination project being paid.
-    /// @param tokenIn The input token being routed.
+    /// @param router The router whose view helpers to use.
+    /// @param projectId The destination project to pay.
+    /// @param tokenIn The input token to route.
     /// @param metadata Metadata forwarded into route-token resolution.
     /// @return tokenOut The token the project accepts.
     /// @return destTerminal The terminal that accepts `tokenOut`.
@@ -688,7 +688,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
     /// @notice Best-effort terminal lookup that degrades to an empty list if the directory call reverts.
     /// @param directory The directory storing project terminal relationships.
-    /// @param projectId The project whose terminals should be looked up.
+    /// @param projectId The project to look up terminals for.
     /// @return terminals The terminal list, or an empty list if the directory call failed.
     function _safeTerminalsOf(
         IJBDirectory directory,
@@ -710,7 +710,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Scale a known beneficiary/reserved token split to a different total token count.
-    /// @param tokenCount The total token count being scored.
+    /// @param tokenCount The total token count to score.
     /// @param referenceTokenCount The total token count the reference split was computed from.
     /// @param referenceBeneficiaryTokenCount The beneficiary share of the reference split.
     /// @param referenceReservedTokenCount The reserved share of the reference split.
@@ -812,9 +812,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Resolve the usable primary terminal for a discovered candidate token.
-    /// @param router The router whose circular-terminal rule should be applied.
+    /// @param router The router whose circular-terminal rule to apply.
     /// @param directory The directory used to resolve primary terminals.
-    /// @param projectId The destination project being inspected.
+    /// @param projectId The destination project to inspect.
     /// @param candidateToken The discovered accepted token candidate.
     /// @return candidateTerminal The candidate token's primary terminal, or address(0) if unusable.
     function _usablePrimaryTerminalForCandidate(
@@ -997,10 +997,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// `self.previewFallbackRoute(...)` so that a revert in the fallback path (e.g. a broken terminal or
     /// price feed) is caught instead of bricking the entire best-route preview.
     /// @dev This function should only be called by this contract itself — external callers have no reason to use it.
-    /// @param routePreviewer The router terminal whose preview helpers are used to simulate the route.
-    /// @param destProjectId The project being paid through the fallback route.
+    /// @param routePreviewer The router terminal whose preview helpers to use for simulating the route.
+    /// @param destProjectId The project to pay through the fallback route.
     /// @param tokenIn The token the payer is sending.
-    /// @param amountIn The amount of `tokenIn` being routed.
+    /// @param amountIn The amount of `tokenIn` to route.
     /// @param beneficiary The address that would receive minted project tokens.
     /// @param metadata Arbitrary bytes forwarded into route and terminal pay previews.
     /// @return destTerminal The terminal the fallback route would deliver funds to.
@@ -1055,11 +1055,11 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice External wrapper so candidate previews can be isolated with `try/catch`.
-    /// @param router The router terminal whose preview helpers should be used.
+    /// @param router The router terminal whose preview helpers to use.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
-    /// @param amount The amount of `tokenIn` being previewed.
-    /// @param beneficiary The address whose beneficiary token count is being measured.
+    /// @param amount The amount of `tokenIn` to preview.
+    /// @param beneficiary The address to measure beneficiary token count for.
     /// @param metadata Metadata forwarded into both the routing preview and terminal preview.
     /// @param tokenOut The candidate destination token to preview.
     /// @param destTerminal The terminal that accepts `tokenOut` for the destination project.
