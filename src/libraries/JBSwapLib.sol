@@ -6,9 +6,10 @@ import {mulDiv} from "@prb/math/src/Common.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 
 /// @custom:benediction DEVS BENEDICAT ET PROTEGAT CONTRACTVS MEAM
-/// @notice Shared library for slippage tolerance and price limit calculations.
-/// @dev V3-compatible port of the V4 JBSwapLib. Uses continuous sigmoid formula instead of
-///      stepped if/else brackets for smoother slippage tolerance across all swap sizes.
+/// @notice Math library that computes dynamic slippage tolerances for Uniswap swaps using a continuous sigmoid curve
+/// based on estimated price impact, and derives sqrtPriceLimitX96 values from minimum output amounts.
+/// @dev Uses continuous sigmoid formula instead of stepped if/else brackets for smoother slippage tolerance across all
+/// swap sizes. Floor of 2% (or pool fee + 1%), ceiling of 88%.
 library JBSwapLib {
     /// @notice The denominator used for slippage tolerance basis points.
     uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
