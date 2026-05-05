@@ -32,18 +32,18 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @notice The directory storing project terminal relationships, cached from the router at construction time.
     IJBDirectory public immutable DIRECTORY;
 
-    /// @notice The wrapped native token, cached from the router at construction time.
-    IWETH9 public immutable WETH;
+    /// @notice The ERC-20 wrapper for the chain's native token, cached from the router at construction time.
+    IWETH9 public immutable WRAPPED_NATIVE_TOKEN;
 
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
     /// @param directory The directory storing project terminal relationships.
-    /// @param weth The wrapped native token used for router token normalization.
+    /// @param weth The ERC-20 wrapper for the chain's native token, used for router token normalization.
     constructor(IJBDirectory directory, IWETH9 weth) {
         DIRECTORY = directory;
-        WETH = weth;
+        WRAPPED_NATIVE_TOKEN = weth;
     }
 
     //*********************************************************************//
@@ -188,7 +188,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 // Pull the candidate token out of the accounting context being inspected.
                 address candidateToken = contexts[j].token;
 
-                // Normalize the candidate so native-vs-WETH comparisons behave the same as the router.
+                // Normalize the candidate so native-vs-wrapped comparisons behave the same as the router.
                 address normalizedCandidate = _normalizedTokenOf(candidateToken);
 
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
@@ -377,7 +377,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Treat exact-token matches as the same routing asset without extra normalization work.
         if (tokenA == tokenB) return true;
 
-        // Otherwise compare normalized representations so ETH and WETH share one routing identity.
+        // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
         return _normalizedTokenOf(tokenA) == _normalizedTokenOf(tokenB);
     }
 
@@ -404,7 +404,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
     function _normalizedTokenOf(address token) internal view returns (address normalizedToken) {
-        return token == JBConstants.NATIVE_TOKEN ? address(WETH) : token;
+        return token == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : token;
     }
 
     /// @notice Preview the amount that would be routed into a specific destination token.
@@ -663,8 +663,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Then try the native-token and wrapped-native-token equivalent form before falling back to pool discovery.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WETH)) {
-            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WETH) : JBConstants.NATIVE_TOKEN;
+        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WRAPPED_NATIVE_TOKEN)) {
+            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : JBConstants.NATIVE_TOKEN;
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) != address(0)
