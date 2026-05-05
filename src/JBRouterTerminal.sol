@@ -1482,8 +1482,17 @@ contract JBRouterTerminal is
         uint256 balanceAfter = IERC20(normalizedTokenIn).balanceOf(address(this));
         if (balanceAfter > refundBalanceBaseline) {
             uint256 refundAmount = balanceAfter - refundBalanceBaseline;
-            if (tokenIn == JBConstants.NATIVE_TOKEN) _wethWithdraw(refundAmount);
-            _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: refundAmount});
+            if (tokenIn == JBConstants.NATIVE_TOKEN) {
+                _wethWithdraw(refundAmount);
+                // Try native refund; fall back to WETH if the recipient cannot accept ETH.
+                (bool success,) = refundTo.call{value: refundAmount}("");
+                if (!success) {
+                    _wethDeposit(refundAmount);
+                    IERC20(address(WETH)).safeTransfer(refundTo, refundAmount);
+                }
+            } else {
+                _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: refundAmount});
+            }
         }
     }
 
