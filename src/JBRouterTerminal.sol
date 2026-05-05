@@ -130,7 +130,7 @@ contract JBRouterTerminal is
     /// @notice The Uniswap V3 factory used for pool discovery and verification.
     IUniswapV3Factory public immutable FACTORY;
 
-    /// @notice The permit2 utility.
+    /// @notice The Permit2 contract used for token approvals and transfers.
     IPermit2 public immutable override PERMIT2;
 
     /// @notice The Uniswap V4 PoolManager. Can be address(0) if V4 is not deployed on this chain.

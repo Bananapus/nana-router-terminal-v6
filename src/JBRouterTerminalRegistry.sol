@@ -52,17 +52,17 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------- public immutable properties ------------------ //
     //*********************************************************************//
 
-    /// @notice The project registry.
+    /// @notice The Juicebox project registry used to verify project existence and ownership.
     IJBProjects public immutable override PROJECTS;
 
-    /// @notice The permit2 utility.
+    /// @notice The Permit2 contract used for token approvals and transfers.
     IPermit2 public immutable override PERMIT2;
 
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
 
-    /// @notice The default terminal to use.
+    /// @notice The default terminal used for payments when a project hasn't registered a specific one.
     IJBTerminal public override defaultTerminal;
 
     /// @notice Whether the terminal for a given project has been locked against future updates.
