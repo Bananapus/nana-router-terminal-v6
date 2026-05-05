@@ -41,6 +41,65 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
     }
 }
 
+    contract SpoofedPayerDestinationTerminal {
+        uint256 public immutable RETURN_VALUE;
+
+        constructor(uint256 returnValue) {
+            RETURN_VALUE = returnValue;
+        }
+
+        function pay(
+            uint256,
+            address,
+            uint256,
+            address,
+            uint256,
+            string calldata,
+            bytes calldata
+        )
+            external
+            payable
+            returns (uint256)
+        {
+            return RETURN_VALUE;
+        }
+    }
+
+    contract SpoofedPayerCashOutTerminal {
+        uint256 public immutable RECLAIM_AMOUNT;
+
+        constructor(uint256 reclaimAmount) payable {
+            RECLAIM_AMOUNT = reclaimAmount;
+        }
+
+        function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+            return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+        }
+
+        function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
+            contexts = new JBAccountingContext[](1);
+            contexts[0] = JBAccountingContext({
+                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+            });
+        }
+
+        function cashOutTokensOf(
+            address,
+            uint256,
+            uint256,
+            address,
+            uint256,
+            address payable beneficiary,
+            bytes calldata
+        )
+            external
+            returns (uint256)
+        {
+            beneficiary.transfer(RECLAIM_AMOUNT);
+            return RECLAIM_AMOUNT;
+        }
+    }
+
     /// @notice H-24: Verify that spoofing originalPayer() cannot steal another user's credits.
     contract CreditCashoutSpoofedPayerTest is Test {
         JBRouterTerminal routerTerminal;
@@ -89,11 +148,9 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
             uint256 destProjectId = 1;
             uint256 sourceProjectId = 2;
             uint256 creditAmount = 100e18;
-            address mockDestTerminal = makeAddr("destTerminal");
-            address mockCashOutTerminal = makeAddr("cashOutTerminal");
             vm.etch(controller, hex"00");
-            vm.etch(mockDestTerminal, hex"00");
-            vm.etch(mockCashOutTerminal, hex"00");
+            SpoofedPayerDestinationTerminal destTerminal = new SpoofedPayerDestinationTerminal(500);
+            SpoofedPayerCashOutTerminal cashOutTerminal = new SpoofedPayerCashOutTerminal{value: 60e18}(60e18);
 
             // Attacker contract spoofs originalPayer() to return victim's address.
             AttackerSpoofingPayer attacker = new AttackerSpoofingPayer(victim);
@@ -128,40 +185,16 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-                abi.encode(mockDestTerminal)
+                abi.encode(address(destTerminal))
             );
 
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
                 abi.encode(sourceTerminals)
             );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-                abi.encode(true)
-            );
-
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-                abi.encode(uint256(60e18))
-            );
-            vm.deal(address(routerTerminal), 60e18);
-            vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(500)));
 
             attacker.attackViaPay(routerTerminal, destProjectId, metadata);
         }
@@ -173,11 +206,9 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
             uint256 destProjectId = 1;
             uint256 sourceProjectId = 2;
             uint256 creditAmount = 50e18;
-            address mockDestTerminal = makeAddr("destTerminal");
-            address mockCashOutTerminal = makeAddr("cashOutTerminal");
             vm.etch(controller, hex"00");
-            vm.etch(mockDestTerminal, hex"00");
-            vm.etch(mockCashOutTerminal, hex"00");
+            SpoofedPayerDestinationTerminal destTerminal = new SpoofedPayerDestinationTerminal(200);
+            SpoofedPayerCashOutTerminal cashOutTerminal = new SpoofedPayerCashOutTerminal{value: 30e18}(30e18);
 
             bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
             bytes memory metadata =
@@ -207,40 +238,16 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-                abi.encode(mockDestTerminal)
+                abi.encode(address(destTerminal))
             );
 
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
                 abi.encode(sourceTerminals)
             );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-                abi.encode(true)
-            );
-
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-                abi.encode(uint256(30e18))
-            );
-            vm.deal(address(routerTerminal), 30e18);
-            vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(200)));
 
             vm.prank(payer);
             uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);

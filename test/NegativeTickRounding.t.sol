@@ -11,11 +11,13 @@ contract TickRoundingHarness {
     /// @notice Old (buggy) logic: Solidity truncation toward zero.
     /// For negative non-exact deltas this rounds toward zero instead of toward negative infinity.
     function oldTick(int56 tickDelta) external pure returns (int24 tick) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         tick = int24(tickDelta / PERIOD);
     }
 
     /// @notice New (fixed) logic: explicit floor-division for negative ticks (Uniswap convention).
     function newTick(int56 tickDelta) external pure returns (int24 tick) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         tick = int24(tickDelta / PERIOD);
         // Round towards negative infinity for negative ticks (Uniswap convention).
         if (tickDelta < 0 && (tickDelta % PERIOD != 0)) tick--;

@@ -19,6 +19,59 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
+contract PreferredTokenBypassDestinationTerminal {
+    function pay(
+        uint256,
+        address,
+        uint256,
+        address,
+        uint256,
+        string calldata,
+        bytes calldata
+    )
+        external
+        payable
+        returns (uint256)
+    {
+        return 500;
+    }
+}
+
+contract PreferredTokenBypassCashOutTerminal {
+    uint256 public immutable RECLAIM_AMOUNT;
+
+    constructor(uint256 reclaimAmount) payable {
+        RECLAIM_AMOUNT = reclaimAmount;
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function accountingContextsOf(uint256) external pure returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({
+            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
+        });
+    }
+
+    function cashOutTokensOf(
+        address,
+        uint256,
+        uint256,
+        address,
+        uint256,
+        address payable beneficiary,
+        bytes calldata
+    )
+        external
+        returns (uint256)
+    {
+        beneficiary.transfer(RECLAIM_AMOUNT);
+        return RECLAIM_AMOUNT;
+    }
+}
+
 /// @title M26_CreditCashoutPreferredTokenBypass
 /// @notice Before the fix, when sourceProjectIdOverride != 0 and preferredToken matched the
 ///         current token, the _cashOutLoop would short-circuit on the first iteration — returning
@@ -31,8 +84,8 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
 
     address payer = makeAddr("payer");
     address controller = makeAddr("controller");
-    address mockDestTerminal = makeAddr("destTerminal");
-    address mockCashOutTerminal = makeAddr("cashOutTerminal");
+    PreferredTokenBypassDestinationTerminal destTerminal;
+    PreferredTokenBypassCashOutTerminal cashOutTerminal;
 
     uint256 destProjectId = 1;
     uint256 sourceProjectId = 2;
@@ -44,8 +97,8 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
         vm.etch(controller, hex"00");
-        vm.etch(mockDestTerminal, hex"00");
-        vm.etch(mockCashOutTerminal, hex"00");
+        destTerminal = new PreferredTokenBypassDestinationTerminal();
+        cashOutTerminal = new PreferredTokenBypassCashOutTerminal{value: 60e18}(60e18);
 
         IPermit2 mockPermit2 = IPermit2(makeAddr("mockPermit2"));
         vm.etch(address(mockPermit2), hex"00");
@@ -102,13 +155,13 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
         vm.mockCall(
             address(mockDirectory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-            abi.encode(mockDestTerminal)
+            abi.encode(address(destTerminal))
         );
 
         // Source project's terminal list.
         {
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
@@ -116,42 +169,9 @@ contract M26_CreditCashoutPreferredTokenBypass is Test {
             );
         }
 
-        // Mock supportsInterface for IJBCashOutTerminal.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-            abi.encode(true)
-        );
-
-        // Accounting context: source project terminal accepts NATIVE_TOKEN.
-        {
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-        }
-
-        // Mock cashOutTokensOf: returns 60 ETH reclaimed.
-        vm.mockCall(
-            mockCashOutTerminal,
-            abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-            abi.encode(uint256(60e18))
-        );
-
-        // The cashout terminal sends ETH to the router.
-        vm.deal(address(routerTerminal), 60e18);
-
-        // Mock dest terminal pay.
-        vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(500)));
-
         // The key assertion: cashOutTokensOf MUST be called on the source terminal.
         // Before the fix, the preferred-token short-circuit would skip this call entirely.
-        vm.expectCall(mockCashOutTerminal, abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector));
+        vm.expectCall(address(cashOutTerminal), abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector));
 
         vm.prank(payer);
         uint256 result = routerTerminal.pay(destProjectId, JBConstants.NATIVE_TOKEN, 0, payer, 0, "", metadata);

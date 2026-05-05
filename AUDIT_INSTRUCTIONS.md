@@ -83,5 +83,5 @@ The registry chooses which router terminal instance a project uses and whether t
 ## Verification
 
 - `npm install`
-- `forge build`
-- `forge test`
+- `forge build --deny notes`
+- `forge test --deny notes`

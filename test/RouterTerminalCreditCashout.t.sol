@@ -182,11 +182,10 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             uint256 destProjectId = 1;
             uint256 sourceProjectId = 2;
             uint256 creditAmount = 100e18;
-            address mockDestTerminal = makeAddr("destTerminal");
-            address mockCashOutTerminal = makeAddr("cashOutTerminal");
             vm.etch(controller, hex"00");
-            vm.etch(mockDestTerminal, hex"00");
-            vm.etch(mockCashOutTerminal, hex"00");
+            CreditCashoutHarnessDestinationTerminal destTerminal = new CreditCashoutHarnessDestinationTerminal(500);
+            CreditCashoutHarnessTerminal cashOutTerminal =
+                new CreditCashoutHarnessTerminal{value: 60e18}(60e18, JBConstants.NATIVE_TOKEN);
 
             // Build metadata with cashOutSource. Note: getId("cashOutSource") inside the router
             // uses address(this) = address(routerTerminal), so we use the two-arg form here.
@@ -227,52 +226,19 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-                abi.encode(mockDestTerminal)
+                abi.encode(address(destTerminal))
             );
 
             // Source project's terminal list (for _findCashOutPath).
             {
                 IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-                sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+                sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
                 vm.mockCall(
                     address(mockDirectory),
                     abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
                     abi.encode(sourceTerminals)
                 );
             }
-
-            // Mock supportsInterface for IJBCashOutTerminal.
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-                abi.encode(true)
-            );
-
-            // Accounting context: source project terminal accepts NATIVE_TOKEN.
-            {
-                JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-                contexts[0] = JBAccountingContext({
-                    token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-                });
-                vm.mockCall(
-                    mockCashOutTerminal,
-                    abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                    abi.encode(contexts)
-                );
-            }
-
-            // Mock cashOutTokensOf: returns 60 ETH reclaimed.
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-                abi.encode(uint256(60e18))
-            );
-
-            // Fund the router with ETH to cover the cashout reclaim (NATIVE_TOKEN).
-            vm.deal(address(routerTerminal), 60e18);
-
-            // Mock dest terminal pay.
-            vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(500)));
 
             // token param is arbitrary for credit cashouts — the _acceptFundsFor short-circuits before using it.
             vm.prank(payer);
@@ -413,11 +379,10 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             uint256 destProjectId = 1;
             uint256 sourceProjectId = 2;
             uint256 creditAmount = 100e18;
-            address mockDestTerminal = makeAddr("destTerminal");
-            address mockCashOutTerminal = makeAddr("cashOutTerminal");
             vm.etch(controller, hex"00");
-            vm.etch(mockDestTerminal, hex"00");
-            vm.etch(mockCashOutTerminal, hex"00");
+            CreditCashoutHarnessDestinationTerminal destTerminal = new CreditCashoutHarnessDestinationTerminal(500);
+            CreditCashoutHarnessTerminal cashOutTerminal =
+                new CreditCashoutHarnessTerminal{value: 60e18}(60e18, JBConstants.NATIVE_TOKEN);
 
             CreditCashoutSpoofingIntermediary intermediary = new CreditCashoutSpoofingIntermediary(victim);
 
@@ -451,41 +416,16 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
-                abi.encode(mockDestTerminal)
+                abi.encode(address(destTerminal))
             );
 
             IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
-            sourceTerminals[0] = IJBTerminal(mockCashOutTerminal);
+            sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
             vm.mockCall(
                 address(mockDirectory),
                 abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
                 abi.encode(sourceTerminals)
             );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IERC165.supportsInterface, (type(IJBCashOutTerminal).interfaceId)),
-                abi.encode(true)
-            );
-
-            JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
-            contexts[0] = JBAccountingContext({
-                token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
-            });
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeCall(IJBTerminal.accountingContextsOf, (sourceProjectId)),
-                abi.encode(contexts)
-            );
-
-            vm.mockCall(
-                mockCashOutTerminal,
-                abi.encodeWithSelector(IJBCashOutTerminal.cashOutTokensOf.selector),
-                abi.encode(uint256(60e18))
-            );
-
-            vm.deal(address(routerTerminal), 60e18);
-            vm.mockCall(mockDestTerminal, abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(500)));
 
             intermediary.payThroughRouter(routerTerminal, destProjectId, metadata);
         }

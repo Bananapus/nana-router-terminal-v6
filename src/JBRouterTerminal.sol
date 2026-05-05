@@ -75,6 +75,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_AmountOverflow(uint256 amount);
     error JBRouterTerminal_CallerNotPool(address caller);
     error JBRouterTerminal_CallerNotPoolManager(address caller);
+    error JBRouterTerminal_CashOutDidNotDeliver(address sourceToken, address tokenToReclaim, uint256 cashOutCount);
     error JBRouterTerminal_CashOutLoopLimit();
     error JBRouterTerminal_InsufficientTwapHistory();
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
@@ -449,7 +450,10 @@ contract JBRouterTerminal is
             amountOut = uint256(uint128(delta0));
         }
 
-        if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
+        // Enforce the caller's V4 minimum against the realized delta before settling/taking pool balances.
+        if (amountOut < minAmountOut) {
+            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
+        }
 
         // Settle input (pay what we owe to the PoolManager).
         Currency inputCurrency = zeroForOne ? key.currency0 : key.currency1;
@@ -805,15 +809,13 @@ contract JBRouterTerminal is
                 continue;
             }
 
-            // Decode only the fields needed to determine the user-visible sell-side output implied by the hook.
-            (uint256 minimumSwapAmountOut,,,,,, uint256 rawSwapQuote) =
+            // Decode only the buyback field used for route scoring. `minimumSwapAmountOut` is executable because the
+            // hook will enforce it; the later raw quote word is diagnostic and can overstate what execution can prove.
+            (uint256 minimumSwapAmountOut,,,,,,) =
                 abi.decode(specification.metadata, (uint256, uint256, uint256, int24, uint128, PoolId, uint256));
 
-            // Prefer the raw quote when present, otherwise fall back to the hook's minimum swap commitment.
-            uint256 quotedAmount = rawSwapQuote != 0 ? rawSwapQuote : minimumSwapAmountOut;
-
-            // Keep whichever understood hook quote implies the strongest previewed cash-out output.
-            if (quotedAmount > effectiveAmount) effectiveAmount = quotedAmount;
+            // Keep whichever understood executable hook commitment implies the strongest cash-out output.
+            if (minimumSwapAmountOut > effectiveAmount) effectiveAmount = minimumSwapAmountOut;
 
             unchecked {
                 ++i;
@@ -1197,6 +1199,7 @@ contract JBRouterTerminal is
                 sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
             });
 
+            uint256 cashOutCount = amount;
             uint256 balanceBefore = _balanceOf({token: tokenToReclaim, account: address(this)});
 
             // Cash out the source project's tokens.
@@ -1216,8 +1219,20 @@ contract JBRouterTerminal is
                 metadata: ""
             });
 
+            // Measure the reclaimed-token balance delta so fee-on-transfer behavior cannot fake delivery.
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
-            if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
+
+            // A non-zero cashout that delivers no reclaim tokens means this hop cannot safely continue.
+            if (cashOutCount != 0 && amount == 0) {
+                revert JBRouterTerminal_CashOutDidNotDeliver({
+                    sourceToken: token, tokenToReclaim: tokenToReclaim, cashOutCount: cashOutCount
+                });
+            }
+
+            // Enforce the caller's first-hop reclaim floor against the actual balance delta received.
+            if (amount < minTokensReclaimed) {
+                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
+            }
 
             // Clear the reclaim minimum after the first hop.
             // Multi-hop routes can change token units between hops, so there is no sound generic way to rescale a
@@ -1374,7 +1389,9 @@ contract JBRouterTerminal is
 
         // Enforce slippage protection via realized output vs minimum acceptable output.
         // This is strictly more correct than sqrtPriceLimitX96 (which conflates marginal and average price).
-        if (amountOut < minAmountOut) revert JBRouterTerminal_SlippageExceeded(amountOut, minAmountOut);
+        if (amountOut < minAmountOut) {
+            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
+        }
     }
 
     /// @notice Execute a swap through a V4 pool via PoolManager.unlock().
@@ -2333,9 +2350,12 @@ contract JBRouterTerminal is
                 // An OOB access in the try-success block panics and is NOT caught by catch{}.
                 if (tickCumulatives.length >= 2) {
                     // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
-                    // forge-lint: disable-next-line(unsafe-typecast)
                     int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+                    // The TWAP window is a small protocol constant that fits in int32 and int56.
+                    // forge-lint: disable-next-line(unsafe-typecast)
                     int56 period = int56(int32(_TWAP_WINDOW));
+                    // The cumulative tick values come from Uniswap observations, whose average tick is int24-bounded.
+                    // forge-lint: disable-next-line(unsafe-typecast)
                     tick = int24(tickDelta / period);
                     // Round towards negative infinity for negative ticks (Uniswap convention).
                     if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
@@ -2566,7 +2586,9 @@ contract JBRouterTerminal is
             });
 
             // Enforce the caller's minimum reclaim amount only on the first hop.
-            if (amount < minTokensReclaimed) revert JBRouterTerminal_SlippageExceeded(amount, minTokensReclaimed);
+            if (amount < minTokensReclaimed) {
+                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
+            }
 
             // Clear the reclaim minimum after the first hop because later hops may operate in different token units.
             minTokensReclaimed = 0;
@@ -2622,6 +2644,8 @@ contract JBRouterTerminal is
             metadata: ""
         });
 
+        // Deployment config makes this router a feeless cash-out beneficiary, so previews use the terminal's raw
+        // reclaim amount and avoid carrying fee-discovery bytecode in the router.
         reclaimAmount = _effectivePreviewCashOutAmount(reclaimAmount, hookSpecifications);
     }
 
