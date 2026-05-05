@@ -62,7 +62,7 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param terminal The terminal to allow.
     function allowTerminal(IJBTerminal terminal) external;
 
-    /// @notice Disallow a terminal from being used by projects.
+    /// @notice Disallow a terminal from use by projects.
     /// @param terminal The terminal to disallow.
     function disallowTerminal(IJBTerminal terminal) external;
 
