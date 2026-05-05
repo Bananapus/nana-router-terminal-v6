@@ -91,8 +91,8 @@ npm install @bananapus/router-terminal-v6
 
 ```bash
 npm install
-forge build
-forge test
+forge build --deny notes
+forge test --deny notes
 ```
 
 Useful scripts:
