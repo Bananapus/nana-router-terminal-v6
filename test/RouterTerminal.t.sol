@@ -489,7 +489,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
         returns (PoolInfo memory pool)
     {
         pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
-        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
+        if (pool.isV4 || address(pool.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
     }
@@ -2151,6 +2151,36 @@ contract RouterTerminalTest is Test {
         assertTrue(result.isV4);
         assertEq(result.v4Key.fee, 500);
         assertEq(result.v4Key.tickSpacing, int24(10));
+    }
+
+    function test_discoverPool_publicRevertsWhenOnlyV4Exists() public {
+        address tokenA = makeAddr("tokenA");
+        address tokenB = makeAddr("tokenB");
+
+        // No V3 pools at any tier.
+        vm.mockCall(
+            address(mockFactory), abi.encodeWithSelector(IUniswapV3Factory.getPool.selector), abi.encode(address(0))
+        );
+
+        // V4 pool exists.
+        (address sorted0, address sorted1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        PoolKey memory v4Key = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: 500,
+            tickSpacing: int24(10),
+            hooks: IHooks(address(0))
+        });
+        PoolId v4Id = v4Key.toId();
+
+        _mockV4PoolNotExists(sorted0, sorted1, 3000, int24(60));
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 200e18);
+        _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
+        _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
+
+        // The public V3-only getter should revert even though V4 liquidity exists.
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoPoolFound.selector, tokenA, tokenB));
+        routerTerminal.discoverPool(tokenA, tokenB);
     }
 
     function test_discoverPool_noPoolManager() public {
