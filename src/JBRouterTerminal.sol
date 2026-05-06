@@ -571,10 +571,10 @@ contract JBRouterTerminal is
         returns (IUniswapV3Pool pool)
     {
         PoolInfo memory info = _discoverPool(normalizedTokenIn, normalizedTokenOut);
-        if (!info.isV4 && address(info.v3Pool) == address(0)) {
+        if (info.isV4 || address(info.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
-        if (!info.isV4) pool = info.v3Pool;
+        pool = info.v3Pool;
     }
 
     /// @notice Preview a payment by simulating the router's routing logic in view context.
