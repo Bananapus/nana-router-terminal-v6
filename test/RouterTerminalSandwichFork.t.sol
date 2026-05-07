@@ -572,14 +572,14 @@ contract RouterTerminalSandwichForkTest is Test {
     }
 
     //*********************************************************************//
-    // --- Test 4: V4 spot price manipulation (M-3 risk documentation) --- //
+    // --- Test 4: V4 spot price manipulation (risk documentation) --- //
     //*********************************************************************//
 
     /// @notice Create a fresh V4 pool, manipulate spot price, route victim through it.
-    ///         Documents that V4 spot path exposes up to sigmoid-slippage% per trade (known M-3 risk).
+    ///         Documents that V4 spot path exposes up to sigmoid-slippage% per trade (known risk).
     function test_fork_v4SpotPrice_manipulation() public {
         console.log("");
-        console.log("====== V4 SPOT PRICE MANIPULATION (M-3 RISK) ======");
+        console.log("====== V4 SPOT PRICE MANIPULATION (RISK) ======");
         console.log("Creating fresh WETH/USDC V4 pool to demonstrate spot manipulation.");
         console.log("");
 
@@ -595,7 +595,7 @@ contract RouterTerminalSandwichForkTest is Test {
         }
 
         console.log("");
-        console.log("RISK (M-3): V4 spot price IS manipulable within the same block.");
+        console.log("RISK (): V4 spot price IS manipulable within the same block.");
         console.log("Mitigations: (1) sigmoid 2%% floor, (2) user quote override, (3) V3 pool preferred if deeper.");
         console.log("Recommendation: front-ends MUST supply quoteForSwap metadata for V4 swaps.");
     }

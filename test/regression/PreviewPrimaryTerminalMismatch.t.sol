@@ -19,7 +19,7 @@ import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {JBPayRouteResolver} from "../../src/JBPayRouteResolver.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract AuditMismatchToken {
+contract RegressionMismatchToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -47,7 +47,7 @@ contract AuditMismatchToken {
     }
 }
 
-contract AuditPreviewTerminal {
+contract RegressionPreviewTerminal {
     address public immutable ACCEPTED_TOKEN;
     uint256 public immutable PREVIEW_COUNT;
     uint256 public totalReceived;
@@ -70,7 +70,7 @@ contract AuditPreviewTerminal {
         returns (uint256)
     {
         // forge-lint: disable-next-line(erc20-unchecked-transfer)
-        AuditMismatchToken(token).transferFrom(msg.sender, address(this), amount);
+        RegressionMismatchToken(token).transferFrom(msg.sender, address(this), amount);
         totalReceived += amount;
         return PREVIEW_COUNT;
     }
@@ -124,10 +124,10 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
     IUniswapV3Factory internal factory;
     IPoolManager internal poolManager;
 
-    AuditMismatchToken internal token;
-    AuditMismatchToken internal inputToken;
-    AuditPreviewTerminal internal fakePreviewTerminal;
-    AuditPreviewTerminal internal primaryTerminal;
+    RegressionMismatchToken internal token;
+    RegressionMismatchToken internal inputToken;
+    RegressionPreviewTerminal internal fakePreviewTerminal;
+    RegressionPreviewTerminal internal primaryTerminal;
 
     address internal payer = makeAddr("payer");
     address internal beneficiary = makeAddr("beneficiary");
@@ -160,10 +160,10 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
         });
         resolver = new JBPayRouteResolver(directory, weth);
 
-        token = new AuditMismatchToken();
-        inputToken = new AuditMismatchToken();
-        fakePreviewTerminal = new AuditPreviewTerminal(address(token), 1000e18);
-        primaryTerminal = new AuditPreviewTerminal(address(token), 1e18);
+        token = new RegressionMismatchToken();
+        inputToken = new RegressionMismatchToken();
+        fakePreviewTerminal = new RegressionPreviewTerminal(address(token), 1000e18);
+        primaryTerminal = new RegressionPreviewTerminal(address(token), 1e18);
 
         token.mint(payer, 100e18);
         vm.prank(payer);

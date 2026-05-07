@@ -166,7 +166,7 @@ contract RouterTerminalFOTForkTest is Test {
     // FOT: Direct forward (no swap) — router pays project that accepts FOT
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice After M-39, the router no longer enforces ERC-20 receipt checks on the pay path
+    /// @notice After the router no longer enforces ERC-20 receipt checks on the pay path
     ///         (pay hooks may legitimately consume tokens). FOT direct forward now succeeds
     ///         silently — the terminal receives fewer tokens than `amount`.
     ///
@@ -180,7 +180,7 @@ contract RouterTerminalFOTForkTest is Test {
         vm.startPrank(payer);
         fotToken.approve(address(routerTerminal), amount);
 
-        // M-39 FIX: pay path no longer enforces receipt check, so this succeeds.
+        // FIX: pay path no longer enforces receipt check, so this succeeds.
         routerTerminal.pay({
             projectId: fotProjectId,
             token: address(fotToken),
@@ -201,7 +201,18 @@ contract RouterTerminalFOTForkTest is Test {
         vm.startPrank(payer);
         fotToken.approve(address(routerTerminal), amount);
 
-        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector);
+        uint256 expectedAmount = amount - (amount * fotToken.feePercent()) / 10_000;
+        uint256 actualAmount = expectedAmount - (expectedAmount * fotToken.feePercent()) / 10_000;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector,
+                address(jbMultiTerminal),
+                address(fotToken),
+                expectedAmount,
+                actualAmount
+            )
+        );
         routerTerminal.addToBalanceOf({
             projectId: fotProjectId,
             token: address(fotToken),

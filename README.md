@@ -78,8 +78,8 @@ That separation is why a successful route can still end in downstream terminal b
 1. `test/RouterTerminal.t.sol`
 2. `test/RouterTerminalPreviewFork.t.sol`
 3. `test/RouterTerminalCashOutFork.t.sol`
-4. `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
-5. `test/codex/CashOutCircularPrimaryTerminal.t.sol`
+4. `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
+5. `test/regression/CashOutCircularPrimaryTerminal.t.sol`
 
 ## Install
 
@@ -114,7 +114,7 @@ src/
   libraries/
   structs/
 test/
-  unit, fork, registry, audit, invariant, and regression coverage
+  unit, fork, registry, review, invariant, and regression coverage
 script/
   Deploy.s.sol
   helpers/

@@ -26,7 +26,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract AuditMockERC20 {
+contract RegressionMockERC20 {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -58,7 +58,7 @@ contract AuditMockERC20 {
     }
 }
 
-contract AuditMockPreviewDestTerminal {
+contract RegressionMockPreviewDestTerminal {
     address public immutable ACCEPTED_TOKEN;
     uint256 public immutable PAY_RESULT;
     uint256 public totalReceived;
@@ -129,14 +129,14 @@ contract AuditMockPreviewDestTerminal {
     receive() external payable {}
 }
 
-contract AuditMockCashOutTerminal {
-    AuditMockERC20 public immutable TOKEN;
+contract RegressionMockCashOutTerminal {
+    RegressionMockERC20 public immutable TOKEN;
     address public immutable RECLAIM_TOKEN;
     uint256 public immutable PREVIEW_RECLAIM_AMOUNT;
     uint256 public immutable EXECUTION_TRANSFER_AMOUNT;
 
     constructor(
-        AuditMockERC20 token,
+        RegressionMockERC20 token,
         address reclaimToken,
         uint256 previewReclaimAmount,
         uint256 executionTransferAmount
@@ -231,12 +231,12 @@ contract DeployBuybackHookZeroTest is Test {
     JBRouterTerminal internal configuredRouter;
     JBRouterTerminal internal zeroHookRouter;
 
-    AuditMockERC20 internal jbToken;
-    AuditMockERC20 internal reclaimToken;
-    AuditMockPreviewDestTerminal internal nativeTerminal;
-    AuditMockPreviewDestTerminal internal tokenBTerminal;
-    AuditMockCashOutTerminal internal nativeCashOut;
-    AuditMockCashOutTerminal internal tokenBCashOut;
+    RegressionMockERC20 internal jbToken;
+    RegressionMockERC20 internal reclaimToken;
+    RegressionMockPreviewDestTerminal internal nativeTerminal;
+    RegressionMockPreviewDestTerminal internal tokenBTerminal;
+    RegressionMockCashOutTerminal internal nativeCashOut;
+    RegressionMockCashOutTerminal internal tokenBCashOut;
 
     address internal buybackHook = makeAddr("buybackHook");
     address internal payer = makeAddr("payer");
@@ -282,13 +282,13 @@ contract DeployBuybackHookZeroTest is Test {
             trustedForwarder: address(0)
         });
 
-        jbToken = new AuditMockERC20();
-        reclaimToken = new AuditMockERC20();
-        nativeTerminal = new AuditMockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 100);
-        tokenBTerminal = new AuditMockPreviewDestTerminal(address(reclaimToken), 150);
+        jbToken = new RegressionMockERC20();
+        reclaimToken = new RegressionMockERC20();
+        nativeTerminal = new RegressionMockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 100);
+        tokenBTerminal = new RegressionMockPreviewDestTerminal(address(reclaimToken), 150);
         vm.deal(address(this), 80);
-        nativeCashOut = new AuditMockCashOutTerminal{value: 80}(jbToken, JBConstants.NATIVE_TOKEN, 40, 40);
-        tokenBCashOut = new AuditMockCashOutTerminal(jbToken, address(reclaimToken), 50, 50);
+        nativeCashOut = new RegressionMockCashOutTerminal{value: 80}(jbToken, JBConstants.NATIVE_TOKEN, 40, 40);
+        tokenBCashOut = new RegressionMockCashOutTerminal(jbToken, address(reclaimToken), 50, 50);
 
         reclaimToken.mint(address(tokenBCashOut), 50);
         jbToken.mint(payer, AMOUNT * 2);

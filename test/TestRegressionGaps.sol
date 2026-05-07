@@ -102,7 +102,7 @@ contract MockFoTERC20 {
 // Harness: exposes internal functions of JBRouterTerminal for testing.
 // ──────────────────────────────────────────────────────────────────────────────
 
-contract AuditHarness is JBRouterTerminal {
+contract RegressionHarness is JBRouterTerminal {
     constructor(
         IJBDirectory d,
         IJBPermissions p,
@@ -139,10 +139,10 @@ contract AuditHarness is JBRouterTerminal {
 // Test Contract
 // ══════════════════════════════════════════════════════════════════════════════
 
-contract TestAuditGaps is Test {
+contract TestRegressionGaps is Test {
     using PoolIdLibrary for PoolKey;
 
-    AuditHarness router;
+    RegressionHarness router;
 
     IJBDirectory dir;
     IJBPermissions perms;
@@ -173,7 +173,7 @@ contract TestAuditGaps is Test {
         vm.etch(address(pm), hex"00");
         owner = makeAddr("owner");
 
-        router = new AuditHarness(dir, perms, toks, permit2, weth, factory, pm, address(0), address(0), address(0));
+        router = new RegressionHarness(dir, perms, toks, permit2, weth, factory, pm, address(0), address(0), address(0));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -469,7 +469,9 @@ contract TestAuditGaps is Test {
 
         // No allowance => falls to Permit2 path => overflow.
         vm.prank(payer);
-        vm.expectRevert(JBRouterTerminalRegistry.JBRouterTerminalRegistry_AmountOverflow.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_AmountOverflow.selector, overflow)
+        );
         reg.pay(1, address(tok), overflow, payer, 0, "", "");
     }
 
@@ -478,7 +480,8 @@ contract TestAuditGaps is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When oldest observation is 0 seconds ago, the swap path reverts. The TWAP error is caught by the
-    /// route resolver's try/catch fallback (F3), causing the pay to revert with a no-route failure downstream.
+    /// route resolver's try/catch fallback in the route fallback, causing the pay to revert with a no-route failure
+    /// downstream.
     function test_shortTwap_revertsNoObservationHistory() public {
         MockERC20Std tok = new MockERC20Std();
         address tokenIn = address(tok);
@@ -517,7 +520,7 @@ contract TestAuditGaps is Test {
         vm.prank(payer);
         tok.approve(address(router), 100);
 
-        // The NoObservationHistory error is caught by the route resolver's try/catch (F3),
+        // The NoObservationHistory error is caught by the route resolver's try/catch in the route fallback,
         // so the specific error doesn't propagate — the pay still reverts because no valid route is found.
         vm.prank(payer);
         vm.expectRevert();
@@ -573,8 +576,8 @@ contract TestAuditGaps is Test {
         assertEq(result, 77);
     }
 
-    /// @notice [L-17] After MIN_TWAP_WINDOW enforcement, a 1-second observation window causes the swap to fail.
-    /// The InsufficientTwapHistory error is caught by the route resolver's try/catch fallback (F3),
+    /// @notice [] After MIN_TWAP_WINDOW enforcement, a 1-second observation window causes the swap to fail.
+    /// The InsufficientTwapHistory error is caught by the route resolver's try/catch fallback in the route fallback,
     /// so the pay reverts with a downstream no-route failure rather than the specific TWAP error.
     function test_shortTwap_clampsTo1Second_nowRevertsAfterMinWindow() public {
         MockERC20Std tok = new MockERC20Std();
@@ -613,15 +616,15 @@ contract TestAuditGaps is Test {
         vm.prank(payer);
         tok.approve(address(router), 100);
 
-        // 1s < MIN_TWAP_WINDOW (120s) => the TWAP check fails during route preview, caught by try/catch (F3).
-        // The pay still reverts because no valid route is found after the fallback failure.
+        // 1s < MIN_TWAP_WINDOW (120s) => the TWAP check fails during route preview, caught by try/catch in the route
+        // fallback. The pay still reverts because no valid route is found after the fallback failure.
         vm.prank(payer);
         vm.expectRevert();
         router.pay(1, tokenIn, 100, payer, 0, "", "");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 4 (L-17): MIN_TWAP_WINDOW Enforcement
+    // GAP 4 (): MIN_TWAP_WINDOW Enforcement
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice MIN_TWAP_WINDOW constant is 120 seconds (2 minutes).
@@ -630,7 +633,7 @@ contract TestAuditGaps is Test {
     }
 
     /// @notice Observation window of 119s (just below MIN_TWAP_WINDOW) causes the swap to fail.
-    /// The InsufficientTwapHistory error is caught by the route resolver's try/catch fallback (F3),
+    /// The InsufficientTwapHistory error is caught by the route resolver's try/catch fallback in the route fallback,
     /// so the pay reverts with a downstream no-route failure rather than the specific TWAP error.
     function test_shortTwap_revertsAt119Seconds() public {
         vm.warp(1000);
@@ -670,8 +673,8 @@ contract TestAuditGaps is Test {
         vm.prank(payer);
         tok.approve(address(router), 100);
 
-        // 119s < MIN_TWAP_WINDOW (120s) => the TWAP check fails during route preview, caught by try/catch (F3).
-        // The pay still reverts because no valid route is found after the fallback failure.
+        // 119s < MIN_TWAP_WINDOW (120s) => the TWAP check fails during route preview, caught by try/catch in the route
+        // fallback. The pay still reverts because no valid route is found after the fallback failure.
         vm.prank(payer);
         vm.expectRevert();
         router.pay(1, tokenIn, 100, payer, 0, "", "");
@@ -762,7 +765,7 @@ contract TestAuditGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 5 (H-1): ERC-20 Partial Fill Leftover — Absolute Balance Check
+    // GAP 5 (): ERC-20 Partial Fill Leftover — Absolute Balance Check
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When the router already holds the input token (e.g., ERC-20 partial fill),
@@ -835,7 +838,7 @@ contract TestAuditGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 6 (M-7): Registry receive() Accepts Native Token Refunds
+    // GAP 6 (): Registry receive() Accepts Native Token Refunds
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Registry reverts on bare native token transfers (no receive() function).

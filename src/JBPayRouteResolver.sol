@@ -56,7 +56,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param terminals The terminal list already fetched for the destination project.
     /// @return tokens The unique candidate tokens that can be paid into the project.
     /// @return count The number of populated entries in `tokens`.
-    // slither-disable-next-line calls-loop
     function _candidatePayRouteTokens(
         IJBDirectory directory,
         uint256 projectId,
@@ -145,7 +144,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param tokenIn The input token to find a route from.
     /// @return tokenOut The best accepted token found.
     /// @return destTerminal The terminal that accepts `tokenOut`.
-    // slither-disable-next-line calls-loop
     function _discoverAcceptedToken(
         IJBPayRoutePreviewer router,
         uint256 projectId,
@@ -364,8 +362,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         pure
         returns (bool exists, bytes memory data)
     {
-        // slither-disable-next-line unused-return
-        // slither-disable-next-line unused-return
         return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key, address(router)), metadata: metadata});
     }
 
@@ -602,7 +598,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         if (sourceProjectId == 0) return (resolvedTerminal, tokenIn, amount);
 
         // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
-        // slither-disable-next-line unused-return
         return router.previewCashOutLoopOf({
             destProjectId: destProjectId,
             token: tokenIn,
@@ -828,7 +823,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal candidateTerminal)
     {
         // Resolve the primary terminal for the candidate token so fallback discovery agrees with preview/execution.
-        // slither-disable-next-line calls-loop
         candidateTerminal = directory.primaryTerminalOf({projectId: projectId, token: candidateToken});
 
         // Drop candidates whose primary terminal disappeared or would route straight back into the router.
@@ -845,7 +839,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     //*********************************************************************//
 
     /// @inheritdoc IJBPayRouteResolver
-    // slither-disable-next-line calls-loop
     function previewBestPayRoute(
         IJBPayRoutePreviewer router,
         uint256 projectId,

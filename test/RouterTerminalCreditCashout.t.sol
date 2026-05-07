@@ -371,7 +371,7 @@ contract CreditCashoutSpoofingIntermediary is IJBPayerTracker {
             assertEq(decodedAmount, creditAmount, "decoded amount should match");
         }
 
-        /// @notice After H-24 fix: credit cashouts through a payer tracker debit the intermediary (msg.sender),
+        /// @notice After fix: credit cashouts through a payer tracker debit the intermediary (msg.sender),
         /// not the spoofed originalPayer. This prevents credit theft.
         function test_creditCashout_debitsIntermediaryNotSpoofedPayer() public {
             address victim = makeAddr("victim");

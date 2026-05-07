@@ -31,6 +31,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
+import {JBPayRouteResolver} from "../src/JBPayRouteResolver.sol";
 import {IJBPayRoutePreviewer} from "../src/interfaces/IJBPayRoutePreviewer.sol";
 import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
@@ -668,7 +669,7 @@ contract RouterTerminalTest is Test {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(JBPayRouteResolver.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
         routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
     }
@@ -790,7 +791,7 @@ contract RouterTerminalTest is Test {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(JBPayRouteResolver.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
         routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
     }

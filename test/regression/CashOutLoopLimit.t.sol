@@ -214,7 +214,7 @@ contract CashOutLoopLimitTest is Test {
         tokenA.approve(address(routerTerminal), amount);
 
         // Expect the specific CashOutLoopLimit revert.
-        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CashOutLoopLimit.selector));
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CashOutLoopLimit.selector, 20));
 
         vm.prank(payer);
         routerTerminal.pay(DEST_PROJECT_ID, address(tokenA), amount, payer, 0, "", "");

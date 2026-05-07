@@ -72,11 +72,11 @@ contract PreferredTokenBypassCashOutTerminal {
     }
 }
 
-/// @title M26_CreditCashoutPreferredTokenBypass
+/// @title CreditCashoutPreferredTokenBypassRegression
 /// @notice Before the fix, when sourceProjectIdOverride != 0 and preferredToken matched the
 ///         current token, the _cashOutLoop would short-circuit on the first iteration — returning
 ///         without cashing out. This test verifies the fix: the forced first cashout must happen.
-contract M26_CreditCashoutPreferredTokenBypass is Test {
+contract CreditCashoutPreferredTokenBypassRegression is Test {
     JBRouterTerminal routerTerminal;
 
     IJBDirectory mockDirectory;

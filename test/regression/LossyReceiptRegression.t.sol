@@ -20,23 +20,35 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-contract CodexNemesisERC20 is ERC20 {
-    constructor() ERC20("Codex Nemesis Token", "CNT") {}
+/// @notice A fee-on-transfer ERC-20 that burns 1% of every transfer (simulating a lossy token).
+contract FeeOnTransferToken is ERC20 {
+    constructor() ERC20("Fee On Transfer", "FOT") {}
 
     function mint(address account, uint256 amount) external {
         _mint(account, amount);
     }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        uint256 fee = amount / 100; // 1% fee
+        _burn(msg.sender, fee);
+        return super.transfer(to, amount - fee);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        uint256 fee = amount / 100; // 1% fee
+        _burn(from, fee);
+        _spendAllowance(from, msg.sender, amount);
+        _transfer(from, to, amount - fee);
+        return true;
+    }
 }
 
-contract HookForwardingTerminal is IJBTerminal {
+/// @notice A minimal terminal that pulls ERC-20 via transferFrom in both pay() and addToBalanceOf().
+contract PullingTerminal is IJBTerminal {
     IERC20 public immutable TOKEN;
-    address public immutable HOOK;
-    uint256 public immutable HOOK_AMOUNT;
 
-    constructor(IERC20 token_, address hook_, uint256 hookAmount_) {
+    constructor(IERC20 token_) {
         TOKEN = token_;
-        HOOK = hook_;
-        HOOK_AMOUNT = hookAmount_;
     }
 
     function accountingContextForTokenOf(uint256, address token_) external pure returns (JBAccountingContext memory) {
@@ -52,6 +64,13 @@ contract HookForwardingTerminal is IJBTerminal {
         return 0;
     }
 
+    function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external {}
+
+    function addToBalanceOf(uint256, address, uint256 amount, bool, string calldata, bytes calldata) external payable {
+        // Pull tokens from the router.
+        require(TOKEN.transferFrom(msg.sender, address(this), amount));
+    }
+
     function previewPayFor(
         uint256,
         address,
@@ -60,24 +79,19 @@ contract HookForwardingTerminal is IJBTerminal {
         bytes calldata
     )
         external
-        view
+        pure
         returns (
             JBRuleset memory ruleset,
             uint256 beneficiaryTokenCount,
-            uint256 terminalTokenAmount,
-            JBPayHookSpecification[] memory specs
+            uint256 reservedTokenCount,
+            JBPayHookSpecification[] memory hookSpecifications
         )
     {
-        specs = new JBPayHookSpecification[](1);
-        specs[0].amount = HOOK_AMOUNT;
         beneficiaryTokenCount = 1;
-        terminalTokenAmount = HOOK_AMOUNT;
+        reservedTokenCount = 0;
+        hookSpecifications = new JBPayHookSpecification[](0);
         ruleset.id = 1;
     }
-
-    function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external {}
-
-    function addToBalanceOf(uint256, address, uint256, bool, string calldata, bytes calldata) external payable {}
 
     function migrateBalanceOf(uint256, address, IJBTerminal) external pure returns (uint256) {
         return 0;
@@ -96,8 +110,8 @@ contract HookForwardingTerminal is IJBTerminal {
         payable
         returns (uint256)
     {
+        // Pull tokens from the router.
         require(TOKEN.transferFrom(msg.sender, address(this), amount));
-        require(TOKEN.transfer(HOOK, HOOK_AMOUNT));
         return 1;
     }
 
@@ -106,19 +120,19 @@ contract HookForwardingTerminal is IJBTerminal {
     }
 }
 
-contract CodexNemesisPayHookReceiptDoSTest is Test {
-    /// @notice After M-39 fix: pay() no longer enforces _enforceStandardTerminalReceipt, so a terminal
-    ///         that forwards tokens to a pay hook should succeed rather than revert.
-    function test_routerAllowsErc20TerminalThatForwardsToPayHook() external {
-        uint256 projectId = 1;
-        address payer = address(0xA11CE);
-        address beneficiary = address(0xB0B);
-        address hook = address(0xCAFE);
-        uint256 amount = 100 ether;
-        uint256 hookAmount = 40 ether;
+/// @notice regression fix: `addToBalanceOf` still enforces receipt check for lossy ERC-20s.
+contract LossyReceiptRegressionTest is Test {
+    uint256 constant PROJECT_ID = 1;
+    uint256 constant AMOUNT = 100 ether;
 
-        CodexNemesisERC20 token = new CodexNemesisERC20();
-        HookForwardingTerminal terminal = new HookForwardingTerminal(token, hook, hookAmount);
+    FeeOnTransferToken token;
+    PullingTerminal terminal;
+    JBRouterTerminal router;
+    address payer = address(0xA11CE);
+
+    function setUp() public {
+        token = new FeeOnTransferToken();
+        terminal = new PullingTerminal(IERC20(address(token)));
 
         address directory = address(0xD1);
         address tokens = address(0x70);
@@ -128,15 +142,15 @@ contract CodexNemesisPayHookReceiptDoSTest is Test {
         IJBTerminal[] memory terminals = new IJBTerminal[](1);
         terminals[0] = IJBTerminal(address(terminal));
 
-        vm.mockCall(directory, abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals));
+        vm.mockCall(directory, abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
         vm.mockCall(
             directory,
-            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, address(token))),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(token))),
             abi.encode(address(terminal))
         );
         vm.mockCall(tokens, abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(token)))), abi.encode(uint256(0)));
 
-        JBRouterTerminal router = new JBRouterTerminal({
+        router = new JBRouterTerminal({
             directory: IJBDirectory(directory),
             tokens: IJBTokens(tokens),
             permit2: IPermit2(address(0x22)),
@@ -148,22 +162,53 @@ contract CodexNemesisPayHookReceiptDoSTest is Test {
             trustedForwarder: address(0)
         });
 
-        token.mint(payer, amount);
+        token.mint(payer, AMOUNT * 10);
+    }
 
+    /// @notice addToBalanceOf must still revert for fee-on-transfer tokens (receipt enforcement kept).
+    function test_addToBalanceOf_revertsForLossyERC20() external {
         vm.startPrank(payer);
-        token.approve(address(router), amount);
-        // M-39 fix: pay() no longer reverts when hooks consume tokens — should succeed.
-        uint256 beneficiaryTokenCount = router.pay({
-            projectId: projectId,
+        token.approve(address(router), AMOUNT);
+
+        uint256 expectedAmount = AMOUNT - (AMOUNT / 100);
+        uint256 actualAmount = expectedAmount - (expectedAmount / 100);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector,
+                address(terminal),
+                address(token),
+                expectedAmount,
+                actualAmount
+            )
+        );
+        router.addToBalanceOf({
+            projectId: PROJECT_ID,
             token: address(token),
-            amount: amount,
-            beneficiary: beneficiary,
+            amount: AMOUNT,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+        vm.stopPrank();
+    }
+
+    /// @notice pay() must NOT revert for lossy tokens after fix (receipt enforcement removed from pay).
+    function test_pay_doesNotRevertForLossyERC20() external {
+        vm.startPrank(payer);
+        token.approve(address(router), AMOUNT);
+
+        // Should succeed — pay() no longer enforces the receipt check.
+        uint256 beneficiaryTokenCount = router.pay({
+            projectId: PROJECT_ID,
+            token: address(token),
+            amount: AMOUNT,
+            beneficiary: payer,
             minReturnedTokens: 0,
             memo: "",
             metadata: ""
         });
         vm.stopPrank();
 
-        assertEq(beneficiaryTokenCount, 1, "beneficiary should receive 1 token from mock terminal");
+        assertEq(beneficiaryTokenCount, 1, "mock terminal returns 1 token");
     }
 }
