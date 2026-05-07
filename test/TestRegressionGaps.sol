@@ -469,7 +469,9 @@ contract TestRegressionGaps is Test {
 
         // No allowance => falls to Permit2 path => overflow.
         vm.prank(payer);
-        vm.expectRevert(JBRouterTerminalRegistry.JBRouterTerminalRegistry_AmountOverflow.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_AmountOverflow.selector, overflow)
+        );
         reg.pay(1, address(tok), overflow, payer, 0, "", "");
     }
 
