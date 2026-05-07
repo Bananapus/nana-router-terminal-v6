@@ -642,7 +642,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address(destTerminal) == address(0)
                     || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
             ) {
-                revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+                revert JBRouterTerminal_NoRouteFound({projectId: projectId, tokenIn: tokenIn});
             }
             return (tokenOut, destTerminal);
         }
@@ -677,7 +677,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             address(destTerminal) == address(0)
                 || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
         ) {
-            revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+            revert JBRouterTerminal_NoRouteFound({projectId: projectId, tokenIn: tokenIn});
         }
     }
 
@@ -878,7 +878,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address(destTerminal) == address(0)
                     || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
             ) {
-                revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+                revert JBRouterTerminal_NoRouteFound({projectId: projectId, tokenIn: tokenIn});
             }
 
             // Score the explicitly requested route directly instead of scanning every accepted token.
