@@ -280,7 +280,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         ) {
             // Reject one-hop forwarding cycles that bounce this project back into the registry.
             if (address(downstreamTerminal) == address(this)) {
-                revert JBRouterTerminalRegistry_CircularForward(terminal);
+                revert JBRouterTerminalRegistry_CircularForward({terminal: terminal});
             }
         } catch {
             // Non-forwarding terminals are valid choices; failed interface probes should not block them.
@@ -377,7 +377,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         isTerminalAllowed[terminal] = true;
 
         // Emit the allowlist update for off-chain consumers and activity logs.
-        emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
+        emit JBRouterTerminalRegistry_AllowTerminal({terminal: terminal, caller: _msgSender()});
     }
 
     /// @notice Remove a terminal from the allowlist so no new projects can select it.
@@ -387,14 +387,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     function disallowTerminal(IJBTerminal terminal) external onlyOwner {
         // Prevent disallowing the current default terminal to avoid leaving the registry in a broken state.
         if (terminal == defaultTerminal) {
-            revert JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(terminal);
+            revert JBRouterTerminalRegistry_CannotDisallowDefaultTerminal({terminal: terminal});
         }
 
         // Remove the terminal from the allowlist so future projects cannot select it.
         isTerminalAllowed[terminal] = false;
 
         // Emit the allowlist update for off-chain consumers and activity logs.
-        emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
+        emit JBRouterTerminalRegistry_DisallowTerminal({terminal: terminal, caller: _msgSender()});
     }
 
     /// @notice Permanently lock a project's router terminal choice so it can never be changed again.
@@ -421,7 +421,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Verify the resolved terminal matches what the caller expects to lock.
         if (terminal != expectedTerminal) {
-            revert JBRouterTerminalRegistry_TerminalMismatch(terminal, expectedTerminal);
+            revert JBRouterTerminalRegistry_TerminalMismatch({
+                currentTerminal: terminal, expectedTerminal: expectedTerminal
+            });
         }
 
         // Reject a terminal that would make this irreversible lock forward back into the registry.
@@ -429,7 +431,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         hasLockedTerminal[projectId] = true;
 
-        emit JBRouterTerminalRegistry_LockTerminal(projectId, _msgSender());
+        emit JBRouterTerminalRegistry_LockTerminal({projectId: projectId, caller: _msgSender()});
     }
 
     /// @notice Always returns 0 because the registry holds no project balances to migrate.
@@ -528,7 +530,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Allow the default terminal.
         isTerminalAllowed[terminal] = true;
 
-        emit JBRouterTerminalRegistry_SetDefaultTerminal(terminal, _msgSender());
+        emit JBRouterTerminalRegistry_SetDefaultTerminal({terminal: terminal, caller: _msgSender()});
     }
 
     /// @notice Choose which router terminal a project's payments are forwarded through.
@@ -553,7 +555,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         _terminalOf[projectId] = terminal;
 
-        emit JBRouterTerminalRegistry_SetTerminal(projectId, terminal, _msgSender());
+        emit JBRouterTerminalRegistry_SetTerminal({projectId: projectId, terminal: terminal, caller: _msgSender()});
     }
 
     //*********************************************************************//
@@ -584,7 +586,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
             // Make sure the permit allowance is enough for this payment.
             if (amount > allowance.amount) {
-                revert JBRouterTerminalRegistry_PermitAllowanceNotEnough(amount, allowance.amount);
+                revert JBRouterTerminalRegistry_PermitAllowanceNotEnough({
+                    amount: amount, allowanceAmount: allowance.amount
+                });
             }
 
             // Keep a reference to the permit rules.
@@ -599,7 +603,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 // Emit a failure event so callers can surface the permit2 error reason.
-                emit Permit2AllowanceFailed(token, _msgSender(), reason);
+                emit Permit2AllowanceFailed({token: token, owner: _msgSender(), reason: reason});
             }
         }
 

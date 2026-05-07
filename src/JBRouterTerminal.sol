@@ -571,7 +571,7 @@ contract JBRouterTerminal is
         PoolInfo memory info =
             _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
         if (!info.isV4 && address(info.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
         if (!info.isV4) pool = info.v3Pool;
     }
@@ -1085,7 +1085,7 @@ contract JBRouterTerminal is
 
             try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
-                emit Permit2AllowanceFailed(token, sender, reason);
+                emit Permit2AllowanceFailed({token: token, owner: sender, reason: reason});
             }
         }
 
@@ -2129,7 +2129,7 @@ contract JBRouterTerminal is
         }
 
         // Revert when no terminal exposed any reclaimable token that can advance the route.
-        revert JBRouterTerminal_NoCashOutPath(sourceProjectId, destProjectId);
+        revert JBRouterTerminal_NoCashOutPath({sourceProjectId: sourceProjectId, destProjectId: destProjectId});
     }
 
     /// @notice Record a reclaim token as a direct, recursive, or base fallback during cashout-path discovery.
@@ -2479,7 +2479,7 @@ contract JBRouterTerminal is
         // Discover the best pool across V3 and V4 fee tiers.
         pool = _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
         if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
+            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
 
         // Check for a user-provided quote.
