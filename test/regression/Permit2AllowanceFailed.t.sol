@@ -11,9 +11,6 @@ import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 // Terminal interface that the registry forwards payments to.
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 
-// The permit terminal interface that defines the event we are testing.
-import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
-
 // Metadata resolver used to build permit2 metadata.
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 
@@ -29,6 +26,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 // Contract under test.
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IJBForwardingTerminal} from "../../src/interfaces/IJBForwardingTerminal.sol";
+import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalRegistry.sol";
 
 contract MockPermitToken {
     mapping(address => uint256) public balanceOf;
@@ -168,7 +166,7 @@ contract Permit2AllowanceFailedTest is Test {
         // Expect the Permit2AllowanceFailed event to be emitted.
         // The event is: Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)
         vm.expectEmit(true, true, false, false, address(registry));
-        emit IJBPermitTerminal.Permit2AllowanceFailed(address(token), payer, revertReason);
+        emit IJBRouterTerminalRegistry.Permit2AllowanceFailed(address(token), payer, revertReason);
 
         // Call pay as the payer. The permit2 will fail, event emits, and fallback transfer completes.
         vm.prank(payer);

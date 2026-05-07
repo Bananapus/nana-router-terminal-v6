@@ -36,6 +36,12 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_SetTerminal(uint256 indexed projectId, IJBTerminal terminal, address caller);
 
+    /// @notice A Permit2 allowance approval failed.
+    /// @param token The token the approval was attempted for.
+    /// @param owner The owner of the tokens.
+    /// @param reason The failure reason.
+    event Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason);
+
     /// @notice The default terminal used when a project has not set a specific terminal.
     /// @return terminal The default terminal.
     function defaultTerminal() external view returns (IJBTerminal terminal);

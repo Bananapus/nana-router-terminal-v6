@@ -9,7 +9,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - projects that want broad input-token UX while preserving canonical terminal settlement
 - frontends and aggregators previewing payment routes
 - operators choosing and locking a router per project
-- reviewers reviewing route discovery, refund behavior, and downstream terminal interactions
+- auditors reviewing route discovery, refund behavior, and downstream terminal interactions
 
 ## Key Surfaces
 

@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
-import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -600,7 +599,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 // Emit a failure event so callers can surface the permit2 error reason.
-                emit IJBPermitTerminal.Permit2AllowanceFailed(token, _msgSender(), reason);
+                emit Permit2AllowanceFailed(token, _msgSender(), reason);
             }
         }
 

@@ -14,12 +14,17 @@ import {mulDiv} from "@prb/math/src/Common.sol";
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
-import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
 
 /// @notice Evaluates every token a destination project accepts and returns the route that yields the most project
 /// tokens for the beneficiary, deployed as a helper to keep `JBRouterTerminal` within runtime size limits.
 contract JBPayRouteResolver is IJBPayRouteResolver {
+    //*********************************************************************//
+    // --------------------------- custom errors ------------------------- //
+    //*********************************************************************//
+
+    error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
+
     //*********************************************************************//
     // --------------- public immutable stored properties --------------- //
     //*********************************************************************//
@@ -637,7 +642,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address(destTerminal) == address(0)
                     || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
             ) {
-                revert IJBRouterTerminal.JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+                revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
             }
             return (tokenOut, destTerminal);
         }
@@ -672,7 +677,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             address(destTerminal) == address(0)
                 || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
         ) {
-            revert IJBRouterTerminal.JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+            revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
         }
     }
 
@@ -873,7 +878,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address(destTerminal) == address(0)
                     || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
             ) {
-                revert IJBRouterTerminal.JBRouterTerminal_NoRouteFound(projectId, tokenIn);
+                revert JBRouterTerminal_NoRouteFound(projectId, tokenIn);
             }
 
             // Score the explicitly requested route directly instead of scanning every accepted token.
