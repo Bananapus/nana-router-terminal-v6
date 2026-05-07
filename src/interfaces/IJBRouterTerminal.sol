@@ -8,6 +8,8 @@ import {PoolInfo} from "../structs/PoolInfo.sol";
 
 /// @notice A terminal that routes payments by discovering what token a project accepts and converting automatically.
 interface IJBRouterTerminal is IJBTerminal {
+    error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
+
     /// @notice Discover the best pool across both V3 and V4 for a token pair.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).

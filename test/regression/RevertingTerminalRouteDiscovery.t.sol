@@ -422,7 +422,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
 
     // ─────────────────────────────────────────────────────────────────────────
     // Test 5: previewBestPayRoute with only reverting terminals returns
-    //          zero/empty values (fallback is wrapped in try/catch per F3).
+    //          zero/empty values (fallback is wrapped in try/catch per the route fallback).
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_previewBestPayRoute_allTerminalsRevert_noRoute() public {
@@ -462,7 +462,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        // With the try/catch fallback (F3), the function no longer reverts — it returns zero/empty values.
+        // With the try/catch fallback in the route fallback, the function no longer reverts — it returns zero/empty
+        // values.
         (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
             projectId: PROJECT_ID,

@@ -668,7 +668,7 @@ contract RouterTerminalTest is Test {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
         routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
     }
@@ -790,7 +790,7 @@ contract RouterTerminalTest is Test {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
+            abi.encodeWithSelector(IJBRouterTerminal.JBRouterTerminal_NoRouteFound.selector, projectId, tokenIn)
         );
         routerTerminal.exposedResolveTokenOut(projectId, tokenIn, "");
     }

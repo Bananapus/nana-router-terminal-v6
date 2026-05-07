@@ -37,7 +37,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
-    error JBRouterTerminalRegistry_AmountOverflow();
+    error JBRouterTerminalRegistry_AmountOverflow(uint256 amount);
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
     error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
@@ -46,7 +46,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
     error JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal);
     error JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId);
-    error JBRouterTerminalRegistry_ZeroAddress();
+    error JBRouterTerminalRegistry_ZeroAddress(address terminal);
 
     //*********************************************************************//
     // -------------------- public immutable properties ------------------ //
@@ -214,7 +214,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
 
         // Forward the preview request unchanged to whichever terminal was resolved above.
-        // slither-disable-next-line unused-return
         return terminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
@@ -323,7 +322,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param shouldReturnHeldFees Whether held fees should be returned based on the amount added.
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).
-    // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -379,7 +377,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Mark the terminal as selectable for future project-level configuration.
         isTerminalAllowed[terminal] = true;
 
-        // Emit the allowlist update for off-chain consumers and audit trails.
+        // Emit the allowlist update for off-chain consumers and activity logs.
         emit JBRouterTerminalRegistry_AllowTerminal(terminal, _msgSender());
     }
 
@@ -396,7 +394,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Remove the terminal from the allowlist so future projects cannot select it.
         isTerminalAllowed[terminal] = false;
 
-        // Emit the allowlist update for off-chain consumers and audit trails.
+        // Emit the allowlist update for off-chain consumers and activity logs.
         emit JBRouterTerminalRegistry_DisallowTerminal(terminal, _msgSender());
     }
 
@@ -467,7 +465,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param memo A memo to pass along to the emitted event.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).
     /// @return result The number of project tokens minted for the beneficiary.
-    // slither-disable-next-line reentrancy-benign,reentrancy-eth
     function pay(
         uint256 projectId,
         address token,
@@ -524,7 +521,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev Only the registry owner can call this. Automatically allowlists the new default.
     /// @param terminal The terminal to set as the default.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
-        if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress();
+        if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress(address(terminal));
         if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
 
         defaultTerminal = terminal;
@@ -570,7 +567,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param amount The amount of tokens to accept.
     /// @param metadata The metadata in which `permit2` context is provided.
     /// @return amount The amount of tokens accepted.
-    // slither-disable-next-line reentrancy-events
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // If native tokens are being paid in, return the `msg.value`.
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;
@@ -654,7 +650,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         }
 
         // Otherwise, attempt to use the `permit2` method.
-        if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow();
+        if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow(amount);
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
     }

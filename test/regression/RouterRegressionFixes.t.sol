@@ -62,12 +62,12 @@ contract MockPlainTerminal {
 }
 
 /// @title Shared circular terminal check via JBForwardingCheck library
-contract Pass13L19Test is Test {
+contract CircularTerminalRegressionTest is Test {
     address constant ROUTER = address(0x1234);
     uint256 constant PROJECT_ID = 1;
 
     /// @notice Direct cycle: terminal == router.
-    function test_L19_directCycleDetected() public view {
+    function test_circularTerminal_directCycleDetected() public view {
         assertTrue(
             JBForwardingCheck.isCircularTerminal(ROUTER, PROJECT_ID, IJBTerminal(ROUTER)),
             "direct cycle should be detected"
@@ -75,7 +75,7 @@ contract Pass13L19Test is Test {
     }
 
     /// @notice 2-hop cycle: A -> B -> router.
-    function test_L19_twoHopCycleDetected() public {
+    function test_circularTerminal_twoHopCycleDetected() public {
         MockForwarder b = new MockForwarder(IJBTerminal(ROUTER));
         MockForwarder a = new MockForwarder(IJBTerminal(address(b)));
 
@@ -86,7 +86,7 @@ contract Pass13L19Test is Test {
     }
 
     /// @notice Non-forwarding terminal: no cycle.
-    function test_L19_nonForwardingTerminalNotCircular() public {
+    function test_circularTerminal_nonForwardingTerminalNotCircular() public {
         MockPlainTerminal plain = new MockPlainTerminal();
 
         assertFalse(
@@ -96,7 +96,7 @@ contract Pass13L19Test is Test {
     }
 
     /// @notice Forwarding chain that ends at a non-router destination: no cycle.
-    function test_L19_forwardChainToNonRouterNotCircular() public {
+    function test_circularTerminal_forwardChainToNonRouterNotCircular() public {
         MockPlainTerminal dest = new MockPlainTerminal();
         MockForwarder a = new MockForwarder(IJBTerminal(address(dest)));
 
@@ -107,7 +107,7 @@ contract Pass13L19Test is Test {
     }
 
     /// @notice 5-hop deep chain without hitting router — treated as circular for safety.
-    function test_L19_deepChainTreatedAsCircular() public {
+    function test_circularTerminal_deepChainTreatedAsCircular() public {
         // Create a 6-deep chain: f1 -> f2 -> f3 -> f4 -> f5 -> f6 (never hits router)
         MockPlainTerminal end = new MockPlainTerminal();
         MockForwarder f6 = new MockForwarder(IJBTerminal(address(end)));
@@ -126,13 +126,13 @@ contract Pass13L19Test is Test {
 
 /// @title Cash-out minimum must not revert on buyback sell-side
 /// @notice Validates that the router passes minTokensReclaimed=0 to the terminal and enforces the minimum itself.
-contract Pass13M47Test is Test {
+contract CashOutMinimumRegressionTest is Test {
     /// @notice The router's balance-delta check enforces the user's minimum even when the terminal returns 0.
     /// @dev This is a documentation test — the actual fix is verified by the existing integration tests.
     /// The key insight: when a buyback hook's sell-side executes during cashout, the terminal reports
     /// reclaimAmount=0 because the hook delivers tokens via callback. Passing minTokensReclaimed > 0
     /// to the terminal would revert even though the user receives their tokens.
-    function test_M47_fix_documented() public pure {
+    function test_cashOutMinimumEnforcement_documented() public pure {
         // The fix sets minTokensReclaimed=0 in the terminal call (JBRouterTerminal.sol:1224)
         // and relies on the balance-delta check at line 1229-1230 to enforce the user's minimum.
         // This test exists to document the fix rationale.

@@ -76,15 +76,16 @@ contract JBRouterTerminal is
     error JBRouterTerminal_CallerNotPool(address caller);
     error JBRouterTerminal_CallerNotPoolManager(address caller);
     error JBRouterTerminal_CashOutDidNotDeliver(address sourceToken, address tokenToReclaim, uint256 cashOutCount);
-    error JBRouterTerminal_CashOutLoopLimit();
-    error JBRouterTerminal_InsufficientTwapHistory();
+    error JBRouterTerminal_CashOutLoopLimit(uint256 maxIterations);
+    error JBRouterTerminal_InsufficientTwapHistory(address pool, uint256 twapWindow, uint256 minTwapWindow);
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
-    error JBRouterTerminal_NoLiquidity();
+    error JBRouterTerminal_NoLiquidity(address pool, PoolId poolId);
     error JBRouterTerminal_NoMsgValueAllowed(uint256 value);
-    error JBRouterTerminal_NoObservationHistory();
+    error JBRouterTerminal_NoObservationHistory(address pool);
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
-    error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
-    error JBRouterTerminal_NonStandardTerminalToken();
+    error JBRouterTerminal_NonStandardTerminalToken(
+        address terminal, address token, uint256 expectedAmount, uint256 actualAmount
+    );
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
 
@@ -177,7 +178,6 @@ contract JBRouterTerminal is
     /// @param poolManager The Uniswap V4 PoolManager (address(0) if V4 not available).
     /// @param univ4Hook The canonical Uniswap V4 router hook used by supported hooked pools.
     /// @param trustedForwarder The trusted forwarder for the contract.
-    // slither-disable-next-line missing-zero-check
     constructor(
         IJBDirectory directory,
         IJBTokens tokens,
@@ -197,9 +197,7 @@ contract JBRouterTerminal is
         POOL_MANAGER = poolManager;
         PERMIT2 = permit2;
         WRAPPED_NATIVE_TOKEN = weth;
-        // slither-disable-next-line missing-zero-check
         BUYBACK_HOOK = buybackHook;
-        // slither-disable-next-line missing-zero-check
         UNIV4_HOOK = univ4Hook;
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
 
@@ -570,7 +568,8 @@ contract JBRouterTerminal is
         override
         returns (IUniswapV3Pool pool)
     {
-        PoolInfo memory info = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        PoolInfo memory info =
+            _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
         if (!info.isV4 && address(info.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
@@ -685,7 +684,6 @@ contract JBRouterTerminal is
         view
         returns (JBRuleset memory, uint256, uint256, JBPayHookSpecification[] memory)
     {
-        // slither-disable-next-line unused-return
         return destTerminal.previewPayFor({
             projectId: projectId, token: token, amount: amount, beneficiary: beneficiary, metadata: metadata
         });
@@ -856,7 +854,6 @@ contract JBRouterTerminal is
         )
     {
         // Delegate the heavy preview-selection logic to the helper contract so the router stays within runtime size.
-        // slither-disable-next-line unused-return
         return _PAY_ROUTE_RESOLVER.previewBestPayRoute({
             router: IJBPayRoutePreviewer(address(this)),
             projectId: projectId,
@@ -959,8 +956,11 @@ contract JBRouterTerminal is
         if (isForwarding) return;
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
-        if (IERC20(token).balanceOf(address(terminal)) - receiptBaseline != expectedAmount) {
-            revert JBRouterTerminal_NonStandardTerminalToken();
+        uint256 actualAmount = IERC20(token).balanceOf(address(terminal)) - receiptBaseline;
+        if (actualAmount != expectedAmount) {
+            revert JBRouterTerminal_NonStandardTerminalToken({
+                terminal: address(terminal), token: token, expectedAmount: expectedAmount, actualAmount: actualAmount
+            });
         }
     }
 
@@ -985,7 +985,6 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        // slither-disable-next-line calls-loop
         terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
 
         // Drop terminals that would route straight back into the router (circular).
@@ -999,7 +998,6 @@ contract JBRouterTerminal is
         }
 
         // Check if the terminal is a forwarding layer that routes back into this router.
-        // slither-disable-next-line calls-loop
         (bool ok, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
         if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
@@ -1024,7 +1022,6 @@ contract JBRouterTerminal is
 
         // Otherwise infer the source project from the current token unless it is the native-token sentinel.
         if (sourceProjectId == 0 && token != JBConstants.NATIVE_TOKEN) {
-            // slither-disable-next-line calls-loop
             sourceProjectId = _projectIdOf(token);
         }
     }
@@ -1086,7 +1083,6 @@ contract JBRouterTerminal is
                 sigDeadline: allowance.sigDeadline
             });
 
-            // slither-disable-next-line reentrancy-events
             try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 emit Permit2AllowanceFailed(token, sender, reason);
@@ -1208,7 +1204,6 @@ contract JBRouterTerminal is
             // Pass minTokensReclaimed=0 to the terminal because the buyback hook's sell-side delivers tokens via
             // callback (reclaimAmount=0 from the terminal's perspective), which would fail the terminal's own min
             // check. The router enforces the user's minimum via the balance-delta check below instead.
-            // slither-disable-next-line unused-return,calls-loop
             cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
@@ -1249,7 +1244,7 @@ contract JBRouterTerminal is
         }
 
         // If we reach here, the loop exceeded the maximum iteration count.
-        revert JBRouterTerminal_CashOutLoopLimit();
+        revert JBRouterTerminal_CashOutLoopLimit({maxIterations: _MAX_CASHOUT_ITERATIONS});
     }
 
     /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for native/wrapped-native, or swap via Uniswap.
@@ -1686,14 +1681,12 @@ contract JBRouterTerminal is
                 _unwrapNativeToken(amount);
             }
             // Native settlement uses `msg.value` because PoolManager expects ETH to accompany the settle call.
-            // slither-disable-next-line unused-return
             POOL_MANAGER.settle{value: amount}();
         } else {
             // ERC20 settlement requires PoolManager to observe the token first (`sync`), then receive the transfer,
             // then finalize the accounting with `settle`.
             POOL_MANAGER.sync(currency);
             IERC20(_unwrapCurrency(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
-            // slither-disable-next-line unused-return
             POOL_MANAGER.settle();
         }
     }
@@ -1770,14 +1763,12 @@ contract JBRouterTerminal is
 
     /// @notice Wrap native tokens into their ERC-20 wrapped representation.
     /// @param amount The amount of native tokens to wrap.
-    // slither-disable-next-line calls-loop
     function _wrapNativeToken(uint256 amount) internal {
         WRAPPED_NATIVE_TOKEN.deposit{value: amount}();
     }
 
     /// @notice Unwrap wrapped native tokens into native tokens.
     /// @param amount The amount of wrapped native tokens to unwrap.
-    // slither-disable-next-line calls-loop
     function _unwrapNativeToken(uint256 amount) internal {
         WRAPPED_NATIVE_TOKEN.withdraw(amount);
     }
@@ -1791,7 +1782,6 @@ contract JBRouterTerminal is
     /// @param tokenB The other token in the pair.
     /// @param fee The fee tier to query.
     /// @return The pool address, or address(0) if none exists.
-    // slither-disable-next-line calls-loop
     function _getPool(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
         return FACTORY.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
     }
@@ -1809,7 +1799,6 @@ contract JBRouterTerminal is
     /// @return tick The current tick.
     /// @return protocolFee The protocol fee.
     /// @return lpFee The LP fee.
-    // slither-disable-next-line unused-return
     function _getSlot0(PoolId id)
         internal
         view
@@ -1822,7 +1811,6 @@ contract JBRouterTerminal is
     /// @param projectId The ID of the project to look up.
     /// @param token The token to look up.
     /// @return The primary terminal, or IJBTerminal(address(0)) if none.
-    // slither-disable-next-line calls-loop
     function _primaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal) {
         return DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
     }
@@ -1830,7 +1818,6 @@ contract JBRouterTerminal is
     /// @notice Look up the project ID for a token.
     /// @param token The token address to query.
     /// @return The project ID, or 0 if the token is not a JB project token.
-    // slither-disable-next-line calls-loop
     function _projectIdOf(address token) internal view returns (uint256) {
         return TOKENS.projectIdOf(IJBToken(token));
     }
@@ -1840,7 +1827,6 @@ contract JBRouterTerminal is
     /// @param shouldIgnoreFailure Whether a reverting directory call should degrade into an empty list.
     /// @return terminals The project's terminal list, or an empty list if `shouldIgnoreFailure` is true and the call
     /// failed.
-    // slither-disable-next-line calls-loop
     function _terminalsOf(
         uint256 projectId,
         bool shouldIgnoreFailure
@@ -1867,9 +1853,8 @@ contract JBRouterTerminal is
     /// @param tokenA One token in the pair.
     /// @param tokenB The other token in the pair.
     /// @return bestLiquidity The highest liquidity found, or 0 if no pool exists.
-    // slither-disable-next-line calls-loop
     function _bestPoolLiquidity(address tokenA, address tokenB) internal view returns (uint128 bestLiquidity) {
-        PoolInfo memory pool = _discoverPool(tokenA, tokenB);
+        PoolInfo memory pool = _discoverPool({normalizedTokenIn: tokenA, normalizedTokenOut: tokenB});
         if (pool.isV4) return _getLiquidity(pool.v4Key.toId());
         if (address(pool.v3Pool) != address(0)) return pool.v3Pool.liquidity();
     }
@@ -1941,7 +1926,6 @@ contract JBRouterTerminal is
 
         // Search V3.
         for (uint256 i; i < 4;) {
-            // slither-disable-next-line calls-loop
             address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _feeTier(i)});
 
             if (poolAddr == address(0)) {
@@ -1951,7 +1935,6 @@ contract JBRouterTerminal is
                 continue;
             }
 
-            // slither-disable-next-line calls-loop
             uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
 
             if (poolLiquidity > bestLiquidity) {
@@ -1965,7 +1948,12 @@ contract JBRouterTerminal is
         }
 
         // Search V4.
-        bestPool = _discoverV4Pool(normalizedTokenIn, normalizedTokenOut, bestLiquidity, bestPool);
+        bestPool = _discoverV4Pool({
+            normalizedTokenIn: normalizedTokenIn,
+            normalizedTokenOut: normalizedTokenOut,
+            currentBestLiquidity: bestLiquidity,
+            bestPool: bestPool
+        });
     }
 
     /// @notice Search supported V4 pools and update the best pool candidate if a deeper V4 pool exists.
@@ -2027,9 +2015,7 @@ contract JBRouterTerminal is
                 PoolId id = key.toId();
 
                 // Probe slot0 first so uninitialized pools can be skipped without treating them as valid candidates.
-                // slither-disable-next-line unused-return,calls-loop
                 (uint160 sqrtPriceX96,,,) = _getSlot0(id);
-                // slither-disable-next-line incorrect-equality
                 if (sqrtPriceX96 == 0) {
                     unchecked {
                         ++j;
@@ -2038,7 +2024,6 @@ contract JBRouterTerminal is
                 }
 
                 // Read the current in-range liquidity for the initialized pool.
-                // slither-disable-next-line calls-loop
                 uint128 poolLiquidity = _getLiquidity(id);
                 if (poolLiquidity > currentBestLiquidity) {
                     // Promote this V4 pool when it beats every candidate seen so far.
@@ -2079,12 +2064,10 @@ contract JBRouterTerminal is
 
         // Read the source project's terminals in strict mode because cashout-path discovery should revert on
         // directory failure instead of silently changing recursion behavior.
-        // slither-disable-next-line calls-loop
         IJBTerminal[] memory terminals = _terminalsOf({projectId: sourceProjectId, shouldIgnoreFailure: false});
 
         for (uint256 i; i < terminals.length;) {
             // Check if this terminal supports the IJBCashOutTerminal interface.
-            // slither-disable-next-line calls-loop
             try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                 bool supported
             ) {
@@ -2102,7 +2085,6 @@ contract JBRouterTerminal is
             }
 
             IJBCashOutTerminal terminal = IJBCashOutTerminal(address(terminals[i]));
-            // slither-disable-next-line calls-loop
             JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(sourceProjectId);
 
             for (uint256 j; j < contexts.length;) {
@@ -2172,7 +2154,6 @@ contract JBRouterTerminal is
         // project token so recursive and base fallbacks stay disjoint.
         bool isJbProjectToken;
         if (contextToken != JBConstants.NATIVE_TOKEN) {
-            // slither-disable-next-line calls-loop
             isJbProjectToken = _projectIdOf(contextToken) != 0;
         }
 
@@ -2259,7 +2240,7 @@ contract JBRouterTerminal is
         uint32 oldestObservation = OracleLibrary.getOldestObservationSecondsAgo(address(pool));
 
         // Abort when the pool has no oracle history at all, since no TWAP can be formed.
-        if (oldestObservation == 0) revert JBRouterTerminal_NoObservationHistory();
+        if (oldestObservation == 0) revert JBRouterTerminal_NoObservationHistory({pool: address(pool)});
 
         // Start from the default TWAP window.
         uint256 twapWindow = DEFAULT_TWAP_WINDOW;
@@ -2268,7 +2249,11 @@ contract JBRouterTerminal is
         if (oldestObservation < twapWindow) twapWindow = oldestObservation;
 
         // Enforce a minimum TWAP window to prevent manipulation of short-history pools.
-        if (twapWindow < MIN_TWAP_WINDOW) revert JBRouterTerminal_InsufficientTwapHistory();
+        if (twapWindow < MIN_TWAP_WINDOW) {
+            revert JBRouterTerminal_InsufficientTwapHistory({
+                pool: address(pool), twapWindow: twapWindow, minTwapWindow: MIN_TWAP_WINDOW
+            });
+        }
 
         // Query the V3 oracle for the arithmetic-mean tick and in-range liquidity over the chosen TWAP window.
         (
@@ -2278,7 +2263,9 @@ contract JBRouterTerminal is
         ) = OracleLibrary.consult({pool: address(pool), secondsAgo: uint32(twapWindow)});
 
         // Abort when the chosen TWAP window has no in-range liquidity.
-        if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
+        if (liquidity == 0) {
+            revert JBRouterTerminal_NoLiquidity({pool: address(pool), poolId: PoolId.wrap(bytes32(0))});
+        }
 
         // Convert the TWAP tick and liquidity into a minimum amount out using the router's dynamic slippage model.
         minAmountOut = _quoteWithSlippage({
@@ -2354,7 +2341,6 @@ contract JBRouterTerminal is
             secondsAgos[1] = 0; // End of the window (current block).
 
             // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
-            // slither-disable-next-line unused-return
             try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
                 int56[] memory tickCumulatives, uint160[] memory
             ) {
@@ -2378,13 +2364,12 @@ contract JBRouterTerminal is
 
         // If no TWAP was available (no hook, or hook doesn't implement observe), use the instantaneous spot tick.
         if (!usedTwap) {
-            // slither-disable-next-line unused-return
             (, tick,,) = _getSlot0(id);
         }
 
         uint128 liquidity = _getLiquidity(id);
 
-        if (liquidity == 0) revert JBRouterTerminal_NoLiquidity();
+        if (liquidity == 0) revert JBRouterTerminal_NoLiquidity({pool: address(0), poolId: id});
 
         // V4 uses address(0) for native tokens; map the wrapped native token so OracleLibrary token sorting matches the
         // pool.
@@ -2446,7 +2431,6 @@ contract JBRouterTerminal is
     /// @param token The token to read the balance of.
     /// @param account The account to read the balance of.
     /// @return balance The account's balance in `token`.
-    // slither-disable-next-line calls-loop
     function _balanceOf(address token, address account) internal view returns (uint256) {
         // Read raw ETH balance for the native-token sentinel and ERC20 balance otherwise.
         return token == JBConstants.NATIVE_TOKEN ? account.balance : IERC20(_normalize(token)).balanceOf(account);
@@ -2493,7 +2477,7 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut, PoolInfo memory pool)
     {
         // Discover the best pool across V3 and V4 fee tiers.
-        pool = _discoverPool(normalizedTokenIn, normalizedTokenOut);
+        pool = _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
         if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound(normalizedTokenIn, normalizedTokenOut);
         }
@@ -2617,7 +2601,7 @@ contract JBRouterTerminal is
         }
 
         // If no terminal was reached within the iteration cap, treat the route as non-converging.
-        revert JBRouterTerminal_CashOutLoopLimit();
+        revert JBRouterTerminal_CashOutLoopLimit({maxIterations: _MAX_CASHOUT_ITERATIONS});
     }
 
     /// @notice Preview a single cashout hop in the recursive cashout path.
@@ -2646,7 +2630,6 @@ contract JBRouterTerminal is
 
         // Ask that terminal how much of the reclaim token this cashout count would return.
         JBCashOutHookSpecification[] memory hookSpecifications;
-        // slither-disable-next-line unused-return,calls-loop
         (, reclaimAmount,, hookSpecifications) = cashOutTerminal.previewCashOutFrom({
             holder: address(this),
             projectId: sourceProjectId,
@@ -2658,7 +2641,8 @@ contract JBRouterTerminal is
 
         // Deployment config makes this router a feeless cash-out beneficiary, so previews use the terminal's raw
         // reclaim amount and avoid carrying fee-discovery bytecode in the router.
-        reclaimAmount = _effectivePreviewCashOutAmount(reclaimAmount, hookSpecifications);
+        reclaimAmount =
+            _effectivePreviewCashOutAmount({reclaimAmount: reclaimAmount, hookSpecifications: hookSpecifications});
     }
 
     /// @notice Get a minimum-amount-out quote at the given tick, applying dynamic slippage.
@@ -2716,7 +2700,6 @@ contract JBRouterTerminal is
     /// @return exists Whether the metadata entry was present.
     /// @return data The raw metadata payload for `id`.
     function _getDataFor(bytes calldata metadata, bytes4 id) internal pure returns (bool exists, bytes memory data) {
-        // slither-disable-next-line unused-return
         return JBMetadataResolver.getDataFor({id: id, metadata: metadata});
     }
 

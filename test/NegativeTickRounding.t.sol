@@ -24,7 +24,7 @@ contract TickRoundingHarness {
     }
 }
 
-/// @notice Regression tests proving the negative-tick rounding fix from audit finding Pass-12.
+/// @notice Regression tests proving the negative-tick rounding fix from regression Pass-12.
 /// @dev Uniswap's arithmetic-mean tick must be floor-divided (rounded toward negative infinity).
 ///      Solidity integer division truncates toward zero, which is incorrect for negative non-exact values.
 ///      Example: -12001 / 120 in Solidity = -100 (truncation), but Uniswap expects -101 (floor).

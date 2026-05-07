@@ -100,7 +100,7 @@ contract AttackerSpoofingPayer is IJBPayerTracker {
         }
     }
 
-    /// @notice H-24: Verify that spoofing originalPayer() cannot steal another user's credits.
+    /// @notice Verify that spoofing originalPayer() cannot steal another user's credits.
     contract CreditCashoutSpoofedPayerTest is Test {
         JBRouterTerminal routerTerminal;
 

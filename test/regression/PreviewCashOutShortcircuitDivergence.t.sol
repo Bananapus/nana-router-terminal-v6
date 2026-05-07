@@ -21,13 +21,13 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
-/// @title M30_PreviewCashOutShortcircuitDivergence
+/// @title PreviewCashOutShortcircuitDivergenceRegression
 /// @notice Before the fix, `_previewCashOutLoop` could short-circuit on the preferred-token check even when
 ///         `sourceProjectIdOverride != 0`, skipping the forced first cashout hop. The execution path
 ///         (`_cashOutLoop`) correctly gates that short-circuit behind `sourceProjectIdOverride == 0`.
 ///         This test verifies that the preview now mirrors execution: the forced hop is taken before any
 ///         preferred-token early return.
-contract M30_PreviewCashOutShortcircuitDivergence is Test {
+contract PreviewCashOutShortcircuitDivergenceRegression is Test {
     JBRouterTerminal internal router;
 
     IJBDirectory internal mockDirectory;

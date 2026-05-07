@@ -15,7 +15,7 @@
 | Registry behavior and terminal selection | [`src/JBRouterTerminalRegistry.sol`](./src/JBRouterTerminalRegistry.sol) |
 | Shared libraries, interfaces, and metadata structs | [`src/libraries/`](./src/libraries/), [`src/interfaces/`](./src/interfaces/), [`src/structs/`](./src/structs/) |
 | Preview, cash-out, and buyback composition | [`test/RouterTerminalPreviewFork.t.sol`](./test/RouterTerminalPreviewFork.t.sol), [`test/RouterTerminalCashOutFork.t.sol`](./test/RouterTerminalCashOutFork.t.sol), [`test/RouterTerminalBuybackHookFork.t.sol`](./test/RouterTerminalBuybackHookFork.t.sol), [`test/RouterTerminalFeeCashOutFork.t.sol`](./test/RouterTerminalFeeCashOutFork.t.sol) |
-| Registry, multihop, and adversarial coverage | [`test/RouterTerminalRegistry.t.sol`](./test/RouterTerminalRegistry.t.sol), [`test/RouterTerminalMultihopFork.t.sol`](./test/RouterTerminalMultihopFork.t.sol), [`test/RouterTerminalReentrancy.t.sol`](./test/RouterTerminalReentrancy.t.sol), [`test/RouterTerminalSandwichFork.t.sol`](./test/RouterTerminalSandwichFork.t.sol), [`test/TestAuditGaps.sol`](./test/TestAuditGaps.sol) |
+| Registry, multihop, and adversarial coverage | [`test/RouterTerminalRegistry.t.sol`](./test/RouterTerminalRegistry.t.sol), [`test/RouterTerminalMultihopFork.t.sol`](./test/RouterTerminalMultihopFork.t.sol), [`test/RouterTerminalReentrancy.t.sol`](./test/RouterTerminalReentrancy.t.sol), [`test/RouterTerminalSandwichFork.t.sol`](./test/RouterTerminalSandwichFork.t.sol), [`test/TestRegressionGaps.sol`](./test/TestRegressionGaps.sol) |
 
 ## Repo Map
 

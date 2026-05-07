@@ -1,8 +1,8 @@
-# Audit Instructions
+# Review Guide
 
-This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
+This repo accepts one token and routes value into whatever token a destination project actually accepts. Review it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
 
-## Audit Objective
+## Review Objective
 
 Find issues that:
 

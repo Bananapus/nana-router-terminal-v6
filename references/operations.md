@@ -28,5 +28,5 @@
 - [`test/RouterTerminalRegistry.t.sol`](../test/RouterTerminalRegistry.t.sol) for registry rules.
 - [`test/RouterTerminalERC2771.t.sol`](../test/RouterTerminalERC2771.t.sol) for trusted-forwarder behavior.
 - [`test/RouterTerminalSandwichFork.t.sol`](../test/RouterTerminalSandwichFork.t.sol) and [`test/RouterTerminalFeeCashOutFork.t.sol`](../test/RouterTerminalFeeCashOutFork.t.sol) for adversarial routing conditions.
-- [`test/audit/LeftoverRefund.t.sol`](../test/audit/LeftoverRefund.t.sol), [`test/audit/PreviewPrimaryTerminalMismatch.t.sol`](../test/audit/PreviewPrimaryTerminalMismatch.t.sol), and [`test/codex/CashOutCircularPrimaryTerminal.t.sol`](../test/codex/CashOutCircularPrimaryTerminal.t.sol) for the route-selection and refund traps most likely to regress.
-- [`test/TestAuditGaps.sol`](../test/TestAuditGaps.sol) for pinned edge cases.
+- [`test/regression/LeftoverRefund.t.sol`](../test/regression/LeftoverRefund.t.sol), [`test/regression/PreviewPrimaryTerminalMismatch.t.sol`](../test/regression/PreviewPrimaryTerminalMismatch.t.sol), and [`test/regression/CashOutCircularPrimaryTerminal.t.sol`](../test/regression/CashOutCircularPrimaryTerminal.t.sol) for the route-selection and refund traps most likely to regress.
+- [`test/TestRegressionGaps.sol`](../test/TestRegressionGaps.sol) for pinned edge cases.

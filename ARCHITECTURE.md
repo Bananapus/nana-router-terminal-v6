@@ -80,7 +80,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - bounded recursive cash-out behavior:
   `test/regression/CashOutLoopLimit.t.sol`
 - preview versus execution terminal alignment:
-  `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
+  `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 - router-wide route and refund invariants:
   `test/invariant/RouterTerminalInvariant.t.sol`
 
@@ -90,5 +90,5 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - `src/JBRouterTerminalRegistry.sol`
 - `src/JBPayRouteResolver.sol`
 - `test/regression/CashOutLoopLimit.t.sol`
-- `test/audit/PreviewPrimaryTerminalMismatch.t.sol`
+- `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 - `test/invariant/RouterTerminalInvariant.t.sol`
