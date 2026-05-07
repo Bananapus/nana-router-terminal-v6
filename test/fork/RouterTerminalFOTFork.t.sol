@@ -201,7 +201,18 @@ contract RouterTerminalFOTForkTest is Test {
         vm.startPrank(payer);
         fotToken.approve(address(routerTerminal), amount);
 
-        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector);
+        uint256 expectedAmount = amount - (amount * fotToken.feePercent()) / 10_000;
+        uint256 actualAmount = expectedAmount - (expectedAmount * fotToken.feePercent()) / 10_000;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector,
+                address(jbMultiTerminal),
+                address(fotToken),
+                expectedAmount,
+                actualAmount
+            )
+        );
         routerTerminal.addToBalanceOf({
             projectId: fotProjectId,
             token: address(fotToken),
