@@ -170,7 +170,17 @@ contract LossyReceiptRegressionTest is Test {
         vm.startPrank(payer);
         token.approve(address(router), AMOUNT);
 
-        vm.expectRevert(JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector);
+        uint256 expectedAmount = AMOUNT - (AMOUNT / 100);
+        uint256 actualAmount = expectedAmount - (expectedAmount / 100);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_NonStandardTerminalToken.selector,
+                address(terminal),
+                address(token),
+                expectedAmount,
+                actualAmount
+            )
+        );
         router.addToBalanceOf({
             projectId: PROJECT_ID,
             token: address(token),
