@@ -39,6 +39,9 @@ contract RouterTerminalRegistryTest is Test {
 
     function setUp() public {
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, trustedForwarder);
+        // Mock `PROJECTS.count()` for tests that don't override it. `setDefaultTerminal` reads
+        // the current count to record the threshold + snapshot. Default to 0 (fresh chain).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -385,5 +388,264 @@ contract RouterTerminalRegistryTest is Test {
             memo: "",
             metadata: ""
         });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // setDefaultTerminal — threshold protection for existing projects
+    //
+    // The threshold + snapshot history ensure the registry owner cannot
+    // silently reroute payments for already-deployed projects via a default
+    // change. Each setDefaultTerminal call:
+    //   - records the *outgoing* default into _defaultTerminalHistory keyed
+    //     by the current PROJECTS.count() as the segment's maxProjectId, and
+    //   - updates defaultTerminal + defaultTerminalProjectIdThreshold for
+    //     the next cohort of projects (ID > the snapshot count).
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// @dev Mock PROJECTS.count() to control which cohort a project ID falls into.
+    function _mockProjectsCount(uint256 count) internal {
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(count));
+    }
+
+    function test_setDefaultTerminal_firstCallNoHistory() public {
+        // count == 0 at deploy; the first setDefaultTerminal has no outgoing default to snapshot.
+        _mockProjectsCount({count: 0});
+
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        assertEq(registry.defaultTerminalProjectIdThreshold(), 0);
+        assertEq(registry.defaultTerminalHistoryLength(), 0);
+        // Every projectId > 0 (i.e. every real project) resolves to terminalA.
+        assertEq(address(registry.defaultTerminalFor({projectId: 1})), address(terminalA));
+        assertEq(address(registry.defaultTerminalFor({projectId: 1000})), address(terminalA));
+    }
+
+    function test_setDefaultTerminal_existingProjectsKeepOldDefault() public {
+        // T1 set when count = 0, so all current projects (1..) resolve to T1.
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // 5 projects exist. Owner pushes a new default; should NOT reroute the first 5.
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Threshold = 5, history has one entry {maxProjectId: 5, terminal: terminalA}.
+        assertEq(registry.defaultTerminalProjectIdThreshold(), 5);
+        assertEq(registry.defaultTerminalHistoryLength(), 1);
+
+        // Existing projects (ID <= 5) keep terminalA on fall-through.
+        for (uint256 i = 1; i <= 5; ++i) {
+            assertEq(address(registry.defaultTerminalFor({projectId: i})), address(terminalA), "legacy cohort");
+        }
+
+        // New projects (ID > 5) get terminalB.
+        assertEq(address(registry.defaultTerminalFor({projectId: 6})), address(terminalB));
+        assertEq(address(registry.defaultTerminalFor({projectId: 100})), address(terminalB));
+    }
+
+    function test_setDefaultTerminal_multiCohortHistory() public {
+        // Three cohorts: T1 for projects 1..5, T2 for 6..10, T3 for 11+.
+        IJBTerminal terminalC = IJBTerminal(makeAddr("terminalC"));
+
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        _mockProjectsCount({count: 10});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalC);
+
+        // Threshold reflects the most recent setDefaultTerminal call.
+        assertEq(registry.defaultTerminalProjectIdThreshold(), 10);
+        // History has 2 entries (no snapshot for first-ever default).
+        assertEq(registry.defaultTerminalHistoryLength(), 2);
+
+        // History[0] covers projects 1..5 with terminalA.
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 5);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 0}).terminal), address(terminalA));
+        // History[1] covers projects 6..10 with terminalB.
+        assertEq(registry.defaultTerminalHistoryAt({index: 1}).maxProjectId, 10);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 1}).terminal), address(terminalB));
+
+        // Each cohort resolves to its correct historical default.
+        assertEq(address(registry.defaultTerminalFor({projectId: 3})), address(terminalA), "cohort 1");
+        assertEq(address(registry.defaultTerminalFor({projectId: 5})), address(terminalA), "cohort 1 boundary");
+        assertEq(address(registry.defaultTerminalFor({projectId: 6})), address(terminalB), "cohort 2 start");
+        assertEq(address(registry.defaultTerminalFor({projectId: 10})), address(terminalB), "cohort 2 boundary");
+        assertEq(address(registry.defaultTerminalFor({projectId: 11})), address(terminalC), "cohort 3 start");
+        assertEq(address(registry.defaultTerminalFor({projectId: 999})), address(terminalC), "cohort 3 far");
+    }
+
+    function test_terminalOf_legacyProjectKeepsCohortDefault() public {
+        // terminalOf is the public consumer-facing accessor — it must also honor
+        // the threshold (mirrors the same fall-through code path internally).
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Legacy project with no explicit terminal resolves via terminalOf to terminalA.
+        assertEq(address(registry.terminalOf({projectId: 3})), address(terminalA));
+        // New project resolves to terminalB.
+        assertEq(address(registry.terminalOf({projectId: 7})), address(terminalB));
+    }
+
+    function test_terminalOf_legacyProjectExplicitOverridesCohort() public {
+        // Explicit setTerminalFor wins over the threshold-resolved default.
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Project 3 (legacy cohort) explicitly opts into terminalB.
+        vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (3)), abi.encode(projectOwner));
+        vm.mockCall(
+            address(permissions),
+            abi.encodeWithSignature(
+                "hasPermission(address,address,uint256,uint256,bool,bool)",
+                projectOwner,
+                projectOwner,
+                uint256(3),
+                JBPermissionIds.SET_ROUTER_TERMINAL,
+                true,
+                true
+            ),
+            abi.encode(true)
+        );
+        vm.prank(projectOwner);
+        registry.setTerminalFor({projectId: 3, terminal: terminalB});
+
+        // Project 3 now resolves to terminalB despite being in the legacy cohort.
+        assertEq(address(registry.terminalOf({projectId: 3})), address(terminalB));
+    }
+
+    function test_lockTerminalFor_snapshotsCohortDefault() public {
+        // The lock-snapshot path must capture the cohort-correct default, not the
+        // registry-wide current default. Project 3 (legacy) locked AFTER a default
+        // change should freeze terminalA, not terminalB.
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Lock project 3 (legacy cohort). Caller is project owner.
+        vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (3)), abi.encode(projectOwner));
+        vm.mockCall(
+            address(permissions),
+            abi.encodeWithSignature(
+                "hasPermission(address,address,uint256,uint256,bool,bool)",
+                projectOwner,
+                projectOwner,
+                uint256(3),
+                JBPermissionIds.SET_ROUTER_TERMINAL,
+                true,
+                true
+            ),
+            abi.encode(true)
+        );
+
+        vm.prank(projectOwner);
+        registry.lockTerminalFor({projectId: 3, expectedTerminal: terminalA});
+
+        assertTrue(registry.hasLockedTerminal(3));
+        // After lock, project 3 still resolves to its cohort's terminal (terminalA),
+        // never to the registry-wide current default (terminalB).
+        assertEq(address(registry.terminalOf({projectId: 3})), address(terminalA));
+    }
+
+    function test_lockTerminalFor_revertsOnExpectedTerminalMismatch() public {
+        // lockTerminalFor takes an `expectedTerminal` arg that must match the
+        // resolved default. Locking a legacy project while expecting the NEW
+        // default should revert — this is a guard against operator confusion.
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (3)), abi.encode(projectOwner));
+        vm.mockCall(
+            address(permissions),
+            abi.encodeWithSignature(
+                "hasPermission(address,address,uint256,uint256,bool,bool)",
+                projectOwner,
+                projectOwner,
+                uint256(3),
+                JBPermissionIds.SET_ROUTER_TERMINAL,
+                true,
+                true
+            ),
+            abi.encode(true)
+        );
+
+        // Caller expects terminalB (current default) but cohort default is terminalA.
+        vm.prank(projectOwner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalMismatch.selector, terminalA, terminalB
+            )
+        );
+        registry.lockTerminalFor({projectId: 3, expectedTerminal: terminalB});
+    }
+
+    function test_disallowTerminal_currentDefaultRevertsAfterUpdate() public {
+        // Regression: disallowTerminal must always check against the registry-wide
+        // current `defaultTerminal`, not historical ones — operator can disallow an
+        // old default once it has been replaced.
+        _mockProjectsCount({count: 0});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        _mockProjectsCount({count: 5});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Disallowing the CURRENT default (terminalB) reverts.
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_CannotDisallowDefaultTerminal.selector, terminalB
+            )
+        );
+        registry.disallowTerminal(terminalB);
+
+        // Disallowing the previous default (terminalA) is allowed even though it's
+        // still the cohort default for projects 1..5 in the history. (Those legacy
+        // projects retain their fallback through the history snapshot; the allowlist
+        // governs whether NEW projects can opt into the terminal via setTerminalFor.)
+        vm.prank(owner);
+        registry.disallowTerminal(terminalA);
+        assertFalse(registry.isTerminalAllowed(terminalA));
+
+        // Legacy cohort still resolves to terminalA via the history.
+        assertEq(address(registry.defaultTerminalFor({projectId: 3})), address(terminalA));
+    }
+
+    function test_defaultTerminalFor_returnsZeroWhenNoDefaultEverSet() public view {
+        // Edge: registry deployed, no setDefaultTerminal ever called → fall-through
+        // resolves to zero. Production deploy script calls setDefaultTerminal at
+        // construction time, so this case should not occur on-chain, but the
+        // helper still needs to return a defined value.
+        assertEq(address(registry.defaultTerminalFor({projectId: 0})), address(0));
+        assertEq(address(registry.defaultTerminalFor({projectId: 1})), address(0));
+        assertEq(address(registry.defaultTerminalFor({projectId: 1_000_000})), address(0));
     }
 }
