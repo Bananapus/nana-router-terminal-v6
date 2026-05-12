@@ -89,16 +89,15 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
 
+    /// @notice Append-only history of previous defaults captured at each `setDefaultTerminal` call. Each `segment[i]`
+    /// applies to projectIds in `[<previous threshold> + 1, segment[i].maxProjectId]`. Resolution walks the array
+    /// forward and returns the first segment whose `maxProjectId` covers the queried `projectId`. New defaults push
+    /// the current default onto this history before updating `defaultTerminal`.
+    DefaultTerminalSegment[] internal _defaultTerminalHistory;
+
     /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
     /// @custom:param projectId The ID of the project to look up the explicit terminal for.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
-
-    /// @notice Append-only history of previous defaults captured at each `setDefaultTerminal` call.
-    /// Each segment[i] applies to projectIds in `[<previous threshold> + 1, segment[i].maxProjectId]`.
-    /// Resolution walks the array forward and returns the first segment whose `maxProjectId` covers
-    /// the queried `projectId`. New defaults push the current default onto this history before
-    /// updating `defaultTerminal`.
-    DefaultTerminalSegment[] internal _defaultTerminalHistory;
 
     //*********************************************************************//
     // -------------------- transient stored properties ------------------ //
