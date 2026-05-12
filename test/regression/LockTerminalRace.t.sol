@@ -31,6 +31,8 @@ contract LockTerminalRaceTest is Test {
     function setUp() public {
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, trustedForwarder);
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         // Allow both terminals.
         vm.startPrank(owner);
         registry.setDefaultTerminal(terminalA);

@@ -630,6 +630,8 @@ contract RouterTerminalTest is Test {
         JBRouterTerminalRegistry registry =
             new JBRouterTerminalRegistry(mockPermissions, mockProjects, mockPermit2, terminalOwner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(mockProjects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(terminalOwner);
         registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
 
@@ -654,6 +656,8 @@ contract RouterTerminalTest is Test {
         JBRouterTerminalRegistry registry =
             new JBRouterTerminalRegistry(mockPermissions, mockProjects, mockPermit2, terminalOwner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(mockProjects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(terminalOwner);
         registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
 

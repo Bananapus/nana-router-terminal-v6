@@ -455,6 +455,8 @@ contract TestRegressionGaps is Test {
     function test_permit2Truncation_registryRevertsOnOverflow() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         MockERC20Std tok = new MockERC20Std();
         address payer = makeAddr("payer");
         uint256 overflow = uint256(type(uint160).max) + 1;
@@ -845,6 +847,8 @@ contract TestRegressionGaps is Test {
     function test_registryReceive_revertsOnBareTransfer() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.deal(address(this), 1 ether);
         (bool success,) = address(reg).call{value: 1 ether}("");
         assertFalse(success, "Registry should reject bare native token transfers");
@@ -857,6 +861,8 @@ contract TestRegressionGaps is Test {
     function test_registryReceive_directDepositStillStuck() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         // Simulate ETH arriving directly (not from partial-fill — that path now goes to the original payer).
         vm.deal(address(reg), 1 ether);
         assertEq(address(reg).balance, 1 ether);

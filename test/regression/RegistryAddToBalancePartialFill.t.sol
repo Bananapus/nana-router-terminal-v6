@@ -354,6 +354,8 @@ contract RegistryAddToBalancePartialFillTest is Test {
         );
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(owner);
         registry.setDefaultTerminal(IJBTerminal(address(router)));
     }

@@ -47,7 +47,16 @@ contract RegistryDefaultRetargetsExistingProjectsTest is Test {
         );
     }
 
-    function test_existingProjectsFollowNewDefaultUntilExplicitlyLocked() public {
+    /// @notice Regression: existing projects MUST keep their cohort's default after a
+    /// `setDefaultTerminal` change, even if they never explicitly locked. The previous
+    /// (vulnerable) behavior — where unlocked projects silently followed the new default —
+    /// was the exact admin-key reroute vector this regression is named for. The threshold +
+    /// snapshot history in `JBRouterTerminalRegistry` removes that vector.
+    function test_existingProjectsKeepOldDefaultAcrossDefaultChange() public {
+        // First default applies to both projects (they exist within the initial cohort).
+        // PROJECTS.count() is mocked to 0 at this point — both project IDs fall into the
+        // initial cohort because projectId > defaultTerminalProjectIdThreshold (0).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(owner);
         registry.setDefaultTerminal(terminalA);
 
@@ -57,16 +66,29 @@ contract RegistryDefaultRetargetsExistingProjectsTest is Test {
         vm.prank(projectOwner);
         registry.lockTerminalFor(PROJECT_ID_ONE, terminalA);
 
+        // Owner sets a new default after both projects exist. count() = 2 captures both
+        // existing projects in the legacy cohort's history segment.
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(2)));
         vm.prank(owner);
         registry.setDefaultTerminal(terminalB);
 
+        // Locked project keeps the old default (already-snapshotted into _terminalOf).
         assertEq(
-            address(registry.terminalOf(PROJECT_ID_ONE)), address(terminalA), "locked project snapshots the old default"
+            address(registry.terminalOf(PROJECT_ID_ONE)), address(terminalA), "locked project keeps the old default"
         );
+        // Unlocked legacy project ALSO keeps the old default — resolved via history, not
+        // by silent fall-through to the registry's new defaultTerminal. This is the fix.
         assertEq(
             address(registry.terminalOf(PROJECT_ID_TWO)),
+            address(terminalA),
+            "unlocked legacy project keeps the cohort default (no silent retarget)"
+        );
+
+        // Any project created AFTER the second setDefaultTerminal call gets terminalB.
+        assertEq(
+            address(registry.terminalOf({projectId: 3})),
             address(terminalB),
-            "unlocked project silently follows the new default"
+            "new project (ID > threshold) follows the new default"
         );
     }
 }
