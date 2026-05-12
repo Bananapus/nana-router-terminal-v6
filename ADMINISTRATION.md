@@ -6,7 +6,7 @@
 | --- | --- |
 | Scope | Global router terminal allowlisting and project-local terminal selection |
 | Control posture | Mixed registry-owner and project-local delegated control |
-| Highest-risk actions | Changing the default terminal, locking a project to the wrong terminal, and relying on misconfigured credit-cashout routing |
+| Highest-risk actions | Setting the initial default terminal at deploy time, locking a project to the wrong terminal, and relying on misconfigured credit-cashout routing. Subsequent default-terminal changes only affect projects created after the change — existing projects keep resolving against their cohort's historical default. |
 | Recovery posture | Unlocked projects can move; locked projects and immutable router wiring limit recovery |
 
 ## Purpose
@@ -33,7 +33,7 @@
 
 | Contract | Function | Who Can Call | Effect |
 | --- | --- | --- | --- |
-| `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and fallback |
+| `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and the default fallback for NEW projects only. `setDefaultTerminal` snapshots the outgoing default into `_defaultTerminalHistory` so projects with ID <= `defaultTerminalProjectIdThreshold` continue to resolve against the default that was current when their cohort was active. |
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
 
@@ -46,7 +46,9 @@
 ## Operational Notes
 
 - keep the terminal allowlist small and explicit
-- change the default terminal carefully because unconfigured projects inherit it
+- the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that exists when no later override is set; pick it carefully because it propagates to all early projects
+- subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
+- still review fall-through resolution before changing the default — `defaultTerminalFor(projectId)` returns the resolved default for any project, and `defaultTerminalHistoryAt(index)` exposes each captured snapshot
 - encourage projects to lock only after validating the resolved terminal and routing behavior
 - review credit-cashout routing permissions before relying on that path
 - distinguish configuration risk from quote-quality risk
@@ -68,6 +70,7 @@
 ## Admin Boundaries
 
 - the registry owner cannot unlock or override a locked project terminal
+- the registry owner cannot reroute an existing project's fall-through default; `setDefaultTerminal` only addresses projects created after the call (see `defaultTerminalProjectIdThreshold` and the `_defaultTerminalHistory` snapshot semantics)
 - project operators cannot set a terminal that the registry does not allow
 - router maintainers cannot tune routing heuristics or constructor immutables post-deploy
 - there is no pause surface in the registry or router

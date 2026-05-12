@@ -2,7 +2,25 @@
 
 ## Scope
 
-This file describes the verified change from `nana-swap-terminal-v5` to the current `nana-router-terminal-v6` repo.
+This file describes the verified change from `nana-swap-terminal-v5` to the current `nana-router-terminal-v6` repo. In-v6 behavior changes that have semantic implications for integrators are also captured here.
+
+## In-v6 changes
+
+### Threshold-protected `setDefaultTerminal`
+
+The registry owner's `setDefaultTerminal(IJBTerminal)` call now applies only to projects created AFTER the call. Existing projects without an explicit `setTerminalFor` override keep resolving to the default that was current when their project-ID cohort was active. The outgoing default is snapshotted into an append-only `_defaultTerminalHistory` array on every `setDefaultTerminal` call.
+
+- New view: `defaultTerminalFor(uint256 projectId)` returns the default applicable to a specific project (walks history if the project is in a legacy cohort).
+- New view: `defaultTerminalProjectIdThreshold()` returns `PROJECTS.count()` at the time of the most recent `setDefaultTerminal`.
+- New views: `defaultTerminalHistoryAt(uint256 index)` and `defaultTerminalHistoryLength()` expose the snapshot history.
+- New struct: `DefaultTerminalSegment { uint256 maxProjectId; IJBTerminal terminal; }` in `src/structs/`.
+- `lockTerminalFor` now snapshots the *cohort-correct* default into `_terminalOf` (via `_defaultTerminalFor(projectId)`) when locking a project that has no explicit terminal — not the current registry-wide default.
+
+Indexer impact: read `defaultTerminalFor(projectId)` rather than `defaultTerminal()` when computing the effective default for any specific project.
+
+Admin impact: the registry owner can no longer silently reroute payments for already-deployed projects by changing the default. See `ADMINISTRATION.md` for the updated boundary description.
+
+
 
 ## Current v6 surface
 
