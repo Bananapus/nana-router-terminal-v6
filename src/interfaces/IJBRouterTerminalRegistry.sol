@@ -7,6 +7,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "./IJBPayerTracker.sol";
+
 import {DefaultTerminalSegment} from "../structs/DefaultTerminalSegment.sol";
 
 /// @notice A registry that maps projects to their preferred router terminal.
@@ -44,18 +45,13 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     event Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason);
 
     /// @notice The default terminal used when a project has not set a specific terminal.
-    /// @dev Only applies to projects with ID > `defaultTerminalProjectIdThreshold`. Older
-    /// projects resolve via `defaultTerminalFor(projectId)`.
+    /// @dev Only applies to projects with ID > `defaultTerminalProjectIdThreshold`. Older projects resolve via
+    /// `defaultTerminalFor(projectId)`.
     /// @return terminal The default terminal.
     function defaultTerminal() external view returns (IJBTerminal terminal);
 
-    /// @notice The `PROJECTS.count()` snapshot at the moment of the most recent `setDefaultTerminal`.
-    /// Projects with ID <= this threshold do NOT fall through to `defaultTerminal`; they fall
-    /// through to the historical entry that covers their ID range.
-    function defaultTerminalProjectIdThreshold() external view returns (uint256);
-
-    /// @notice The default terminal applicable to a specific project on fall-through, accounting
-    /// for the threshold and the snapshot history. Returns zero if no default ever applied.
+    /// @notice The default terminal applicable to a specific project on fall-through, accounting for the threshold
+    /// and the snapshot history. Returns zero if no default ever applied to the project's ID range.
     /// @param projectId The ID of the project to resolve the default for.
     /// @return terminal The default terminal applicable to this project (zero if none).
     function defaultTerminalFor(uint256 projectId) external view returns (IJBTerminal terminal);
@@ -66,7 +62,14 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     function defaultTerminalHistoryAt(uint256 index) external view returns (DefaultTerminalSegment memory segment);
 
     /// @notice The total number of historical default-terminal snapshots captured.
-    function defaultTerminalHistoryLength() external view returns (uint256);
+    /// @return length The number of entries in the default-terminal history.
+    function defaultTerminalHistoryLength() external view returns (uint256 length);
+
+    /// @notice The `PROJECTS.count()` snapshot at the moment of the most recent `setDefaultTerminal`. Projects with
+    /// ID <= this threshold do NOT fall through to `defaultTerminal`; they fall through to the historical entry that
+    /// covers their ID range.
+    /// @return threshold The project-ID threshold beyond which `defaultTerminal` applies on fall-through.
+    function defaultTerminalProjectIdThreshold() external view returns (uint256 threshold);
 
     /// @notice Whether the terminal for the given project is locked and cannot be changed.
     /// @param projectId The ID of the project.
