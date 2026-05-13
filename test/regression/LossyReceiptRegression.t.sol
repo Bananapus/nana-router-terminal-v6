@@ -154,12 +154,15 @@ contract LossyReceiptRegressionTest is Test {
             directory: IJBDirectory(directory),
             tokens: IJBTokens(tokens),
             permit2: IPermit2(address(0x22)),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
             weth: IWETH9(address(0x33)),
             factory: IUniswapV3Factory(address(0x44)),
             poolManager: IPoolManager(address(0)),
-            buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            univ4Hook: address(0)
         });
 
         token.mint(payer, AMOUNT * 10);

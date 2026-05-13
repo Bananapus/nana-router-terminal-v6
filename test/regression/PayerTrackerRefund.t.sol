@@ -25,16 +25,12 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
-        IWETH9 weth,
-        IUniswapV3Factory factory,
-        IPoolManager poolManager,
         address buybackHook,
-        address univ4Hook,
-        address trustedForwarder
+        address trustedForwarder,
+        address deployer
     )
-        JBRouterTerminal(
-            directory, tokens, permit2, weth, factory, poolManager, buybackHook, univ4Hook, trustedForwarder
-        )
+        // forge-lint: disable-next-line — Solidity disallows named-args in parent ctor invocations.
+        JBRouterTerminal(directory, tokens, permit2, buybackHook, trustedForwarder, deployer)
     {}
 
     /// @notice Public wrapper so tests can call `_resolveOriginalPayer` directly.
@@ -103,19 +99,17 @@ contract PayerTrackerRefundTest is Test {
 
     function setUp() public {
         // Deploy the harness with zero/mock addresses – we never exercise anything
-        // beyond `_resolveRefundTo`, so these values are irrelevant.
+        // beyond `_resolveRefundTo`, so these values are irrelevant. The chain-specific
+        // constants are never read in these tests, so leave them unset.
         harness = new PayerTrackerRefundHarness(
             IJBDirectory(address(0)),
             IJBPermissions(address(0)),
             IJBTokens(address(0)),
             IPermit2(address(0)),
             address(this), // owner
-            IWETH9(address(0)),
-            IUniswapV3Factory(address(0)),
-            IPoolManager(address(0)),
             address(0), // buybackHook
-            address(0), // univ4Hook
-            address(0) // trustedForwarder
+            address(0), // trustedForwarder
+            address(this) // deployer
         );
 
         tracker = new MockPayerTracker();

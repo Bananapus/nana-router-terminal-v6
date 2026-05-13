@@ -138,7 +138,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         vm.etch(address(directory), hex"00");
         vm.etch(address(router), hex"00");
 
-        resolver = new JBPayRouteResolver({directory: directory, weth: weth});
+        resolver = new JBPayRouteResolver({directory: directory});
 
         // Create distinct token addresses for testing.
         tokenA = makeAddr("tokenA");

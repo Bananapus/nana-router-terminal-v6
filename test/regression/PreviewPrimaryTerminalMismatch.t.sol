@@ -151,14 +151,14 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: permit2,
-            weth: weth,
-            factory: factory,
-            poolManager: poolManager,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
         });
-        resolver = new JBPayRouteResolver(directory, weth);
+        router.setChainSpecificConstants({
+            weth: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
+        });
+        resolver = new JBPayRouteResolver({directory: directory});
 
         token = new RegressionMismatchToken();
         inputToken = new RegressionMismatchToken();

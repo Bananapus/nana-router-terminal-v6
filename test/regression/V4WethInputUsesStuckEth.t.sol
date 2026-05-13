@@ -275,12 +275,15 @@ contract V4WethInputUsesStuckEthTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: IPermit2(address(0)),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
             weth: weth,
             factory: IUniswapV3Factory(address(new NoV3Factory())),
             poolManager: IPoolManager(address(poolManager)),
-            buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            univ4Hook: address(0)
         });
 
         vm.mockCall(

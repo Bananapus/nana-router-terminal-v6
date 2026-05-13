@@ -184,12 +184,12 @@ contract RouterTerminalBuybackHookForkTest is Test {
             directory: jbDirectory,
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
-            weth: WETH,
-            factory: V3_FACTORY,
-            poolManager: V4_POOL_MANAGER,
             buybackHook: address(buybackHook),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            weth: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
         });
 
         liqHelper = new BuybackForkLiquidityHelper(V4_POOL_MANAGER);

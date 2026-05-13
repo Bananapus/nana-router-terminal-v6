@@ -82,12 +82,15 @@ contract V4HookedPoolIgnoredTest is Test {
             directory: IJBDirectory(address(0)),
             tokens: IJBTokens(address(0)),
             permit2: IPermit2(address(0)),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
             weth: IWETH9(address(0xBEEF)),
             factory: IUniswapV3Factory(address(new NoV3Factory())),
             poolManager: IPoolManager(address(poolManager)),
-            buybackHook: address(0),
-            univ4Hook: hook,
-            trustedForwarder: address(0)
+            univ4Hook: hook
         });
     }
 

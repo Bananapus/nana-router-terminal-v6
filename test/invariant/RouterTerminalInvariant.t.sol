@@ -506,18 +506,21 @@ contract RouterTerminalInvariant is Test {
         mockPoolManager = makeAddr("mockPoolManager");
         vm.etch(mockPoolManager, hex"00");
 
-        // Deploy the router terminal.
-        router = new JBRouterTerminal(
-            IJBDirectory(mockDirectory),
-            IJBTokens(mockTokens),
-            IPermit2(mockPermit2),
-            IWETH9(address(weth)),
-            IUniswapV3Factory(mockFactory),
-            IPoolManager(mockPoolManager),
-            address(0),
-            address(0),
-            address(0) // no trusted forwarder
-        );
+        // Deploy the router terminal (chain-same ctor; chain-specific constants wired below).
+        router = new JBRouterTerminal({
+            directory: IJBDirectory(mockDirectory),
+            tokens: IJBTokens(mockTokens),
+            permit2: IPermit2(mockPermit2),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            weth: IWETH9(address(weth)),
+            factory: IUniswapV3Factory(mockFactory),
+            poolManager: IPoolManager(mockPoolManager),
+            univ4Hook: address(0)
+        });
 
         // ── Mock: directory.primaryTerminalOf returns our destTerminal for each token ──
         // Native token (ETH).

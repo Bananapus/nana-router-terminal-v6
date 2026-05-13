@@ -78,12 +78,12 @@ contract RouterTerminalPreviewForkTest is Test {
             directory: jbDirectory,
             tokens: IJBTokens(address(jbTokens)),
             permit2: PERMIT2,
-            weth: WETH,
-            factory: V3_FACTORY,
-            poolManager: V4_POOL_MANAGER,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            weth: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
         });
 
         feeProjectId = _launchProject(JBConstants.NATIVE_TOKEN, 18, 0);

@@ -6,6 +6,20 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### Chain-same CREATE2 address for `JBRouterTerminal`
+
+`JBRouterTerminal` now deploys to the same address on every chain via CREATE2. The four chain-specific
+immutables (`WRAPPED_NATIVE_TOKEN`, `FACTORY`, `POOL_MANAGER`, `UNIV4_HOOK`) moved from `immutable` to public
+storage and are wired in after deployment via a new one-shot `setChainSpecificConstants(weth, factory, poolManager, univ4Hook)` setter, gated by a `_DEPLOYER` internal immutable (same pattern as `JBBuybackHook` and `JBUniswapV4LPSplitHookDeployer`).
+
+- Constructor signature changed: `(IJBDirectory directory, IJBTokens tokens, IPermit2 permit2, address buybackHook, address trustedForwarder, address deployer)` — was 9 args, now 6. The four chain-different dependencies are no longer ctor inputs.
+- New external function: `setChainSpecificConstants(IWETH9 weth, IUniswapV3Factory factory, IPoolManager poolManager, address univ4Hook)`. Reverts with `JBRouterTerminal_Unauthorized(caller)` if msg.sender != `_DEPLOYER`; reverts with `JBRouterTerminal_AlreadyConfigured()` if `WRAPPED_NATIVE_TOKEN` has already been set.
+- `JBPayRouteResolver` also lost its `WRAPPED_NATIVE_TOKEN` immutable — it now reads the value from the calling router via `IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN()` on demand. The resolver is deployed in the router's constructor (chain-same input: just `directory`); its address remains chain-same too because the router's address is chain-same and the resolver is deployed at the router's nonce 1.
+- `BUYBACK_HOOK` stays as `public immutable` because `JBBuybackHook` is itself chain-same as of `@bananapus/buyback-hook-v6@0.0.44`.
+- Size: `JBRouterTerminal` 23,706 → 23,494 B (-212 B; headroom 870 → 1,082 against the EIP-170 24,576 B limit). The resolver lost ~10 B as well.
+
+Integrator impact: deployers must call `setChainSpecificConstants` once after construction (the script in `script/Deploy.s.sol` does this in the same transaction as the deploy). Tests and the local deploy script have been updated accordingly.
+
 ### Removed: credit cash-out input path
 
 The router no longer accepts unclaimed Juicebox credits as a payment input. The `cashOutSource` metadata key, the `sourceProjectIdOverride` parameter on `previewCashOutLoopOf`, the `IJBController.transferCreditsFrom` pull in `_acceptFundsFor`, and the `_cashOutSourceFrom` helper have all been removed. Credit holders should call `JBTokens.claimFor` to materialize their credits as an ERC-20 first, then route through the router as a normal ERC-20 payment.

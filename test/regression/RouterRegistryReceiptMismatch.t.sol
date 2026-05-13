@@ -166,12 +166,12 @@ contract RouterRegistryReceiptMismatchTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: permit2,
-            weth: weth,
-            factory: factory,
-            poolManager: poolManager,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            weth: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
         });
 
         registry = new JBRouterTerminalRegistry({

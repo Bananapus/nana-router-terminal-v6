@@ -172,19 +172,24 @@ contract DeployScript is Script, Sphinx {
             trustedForwarder: trustedForwarder
         });
 
-        // Deploy the router terminal using the resolved network-specific Uniswap and buyback-hook addresses.
+        // Deploy the router terminal with chain-same CREATE2 inputs; chain-specific constants
+        // (WETH + Uniswap V3 factory + V4 PoolManager + V4 hook) are wired afterwards via the
+        // DEPLOYER-gated one-shot setChainSpecificConstants setter on the terminal.
         require(address(buyback.hook) != address(0), "RouterTerminal: missing buyback hook");
         require(address(univ4Router.hook) != address(0), "RouterTerminal: missing v4 hook");
         JBRouterTerminal terminal = new JBRouterTerminal{salt: ROUTER_TERMINAL}({
             directory: core.directory,
             tokens: core.tokens,
             permit2: IPermit2(permit2),
+            buybackHook: address(buyback.hook),
+            trustedForwarder: trustedForwarder,
+            deployer: safeAddress()
+        });
+        terminal.setChainSpecificConstants({
             weth: IWETH9(weth),
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),
-            buybackHook: address(buyback.hook),
-            univ4Hook: address(univ4Router.hook),
-            trustedForwarder: trustedForwarder
+            univ4Hook: address(univ4Router.hook)
         });
 
         // Set the terminal as the default for the registry.

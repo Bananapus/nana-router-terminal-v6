@@ -108,14 +108,12 @@ contract RegressionHarness is JBRouterTerminal {
         IJBPermissions p,
         IJBTokens t,
         IPermit2 pm,
-        IWETH9 w,
-        IUniswapV3Factory f,
-        IPoolManager pm4,
         address bh,
-        address uh,
-        address tf
+        address tf,
+        address dep
     )
-        JBRouterTerminal(d, t, pm, w, f, pm4, bh, uh, tf)
+        // Solidity disallows named-args in parent ctor invocations; positional required.
+        JBRouterTerminal(d, t, pm, bh, tf, dep)
     {}
 
     function exposedAcceptFundsFor(
@@ -173,7 +171,10 @@ contract TestRegressionGaps is Test {
         vm.etch(address(pm), hex"00");
         owner = makeAddr("owner");
 
-        router = new RegressionHarness(dir, perms, toks, permit2, weth, factory, pm, address(0), address(0), address(0));
+        router = new RegressionHarness({
+            d: dir, p: perms, t: toks, pm: permit2, bh: address(0), tf: address(0), dep: address(this)
+        });
+        router.setChainSpecificConstants({weth: weth, factory: factory, poolManager: pm, univ4Hook: address(0)});
     }
 
     // ═══════════════════════════════════════════════════════════════════════

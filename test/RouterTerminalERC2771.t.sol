@@ -134,17 +134,17 @@ contract RouterTerminalERC2771Test is Test {
         terminalOwner = makeAddr("terminalOwner");
 
         // Deploy with a REAL trusted forwarder (not address(0)).
-        routerTerminal = new JBRouterTerminal(
-            mockDirectory,
-            mockTokens,
-            mockPermit2,
-            IWETH9(address(weth)),
-            mockFactory,
-            mockPoolManager,
-            address(0),
-            address(0),
-            address(forwarder)
-        );
+        routerTerminal = new JBRouterTerminal({
+            directory: mockDirectory,
+            tokens: mockTokens,
+            permit2: mockPermit2,
+            buybackHook: address(0),
+            trustedForwarder: address(forwarder),
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            weth: IWETH9(address(weth)), factory: mockFactory, poolManager: mockPoolManager, univ4Hook: address(0)
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════

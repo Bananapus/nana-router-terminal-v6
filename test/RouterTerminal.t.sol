@@ -455,16 +455,12 @@ contract RouterTerminalHarness is JBRouterTerminal {
         IJBTokens tokens,
         IPermit2 permit2,
         address owner,
-        IWETH9 weth,
-        IUniswapV3Factory factory,
-        IPoolManager poolManager,
         address buybackHook,
-        address univ4Hook,
-        address trustedForwarder
+        address trustedForwarder,
+        address deployer
     )
-        JBRouterTerminal(
-            directory, tokens, permit2, weth, factory, poolManager, buybackHook, univ4Hook, trustedForwarder
-        )
+        // forge-lint: disable-next-line — Solidity disallows named-args in parent ctor invocations.
+        JBRouterTerminal(directory, tokens, permit2, buybackHook, trustedForwarder, deployer)
     {}
 
     function exposedResolveTokenOut(
@@ -541,13 +537,13 @@ contract RouterTerminalTest is Test {
             mockTokens,
             mockPermit2,
             terminalOwner,
-            mockWeth,
-            mockFactory,
-            mockPoolManager,
             buybackHook,
             address(0),
-            address(0)
+            address(this)
         );
+        routerTerminal.setChainSpecificConstants({
+            weth: mockWeth, factory: mockFactory, poolManager: mockPoolManager, univ4Hook: address(0)
+        });
     }
 
     //*********************************************************************//
@@ -2166,13 +2162,13 @@ contract RouterTerminalTest is Test {
             mockTokens,
             mockPermit2,
             terminalOwner,
-            mockWeth,
-            mockFactory,
-            IPoolManager(address(0)),
             buybackHook,
             address(0),
-            address(0)
+            address(this)
         );
+        noV4Router.setChainSpecificConstants({
+            weth: mockWeth, factory: mockFactory, poolManager: IPoolManager(address(0)), univ4Hook: address(0)
+        });
 
         address tokenA = makeAddr("tokenA");
         address tokenB = makeAddr("tokenB");
@@ -2539,13 +2535,16 @@ contract SettleV4DeficitTest is Test {
             mockTokens,
             mockPermit2,
             makeAddr("owner"),
-            IWETH9(address(weth)),
-            mockFactory,
-            IPoolManager(address(poolManager)),
             address(0),
             address(0),
-            address(0)
+            address(this)
         );
+        routerTerminal.setChainSpecificConstants({
+            weth: IWETH9(address(weth)),
+            factory: mockFactory,
+            poolManager: IPoolManager(address(poolManager)),
+            univ4Hook: address(0)
+        });
     }
 
     /// @notice Settlement with partial ETH + partial WETH should only withdraw the deficit.

@@ -32,18 +32,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @notice The directory storing project terminal relationships, cached from the router at construction time.
     IJBDirectory public immutable DIRECTORY;
 
-    /// @notice The ERC-20 wrapper for the chain's native token, cached from the router at construction time.
-    IWETH9 public immutable WRAPPED_NATIVE_TOKEN;
-
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
     /// @param directory The directory storing project terminal relationships.
-    /// @param weth The ERC-20 wrapper for the chain's native token, used for router token normalization.
-    constructor(IJBDirectory directory, IWETH9 weth) {
+    /// @dev The wrapped-native-token address is intentionally NOT cached here. It is read from the calling router via
+    /// `IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN()` on demand, which keeps this resolver's constructor inputs
+    /// chain-same (no chain-specific WETH baked in) so its CREATE address (router + nonce 1) stays unified.
+    constructor(IJBDirectory directory) {
         DIRECTORY = directory;
-        WRAPPED_NATIVE_TOKEN = weth;
     }
 
     //*********************************************************************//
@@ -157,7 +155,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         IJBDirectory directory = DIRECTORY;
 
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
-        address normalizedTokenIn = _normalizedTokenOf(tokenIn);
+        address normalizedTokenIn = _normalizedTokenOf({router: router, token: tokenIn});
 
         // Read the destination project's currently known terminals directly from the directory.
         IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
@@ -187,7 +185,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address candidateToken = contexts[j].token;
 
                 // Normalize the candidate so native-vs-wrapped comparisons behave the same as the router.
-                address normalizedCandidate = _normalizedTokenOf(candidateToken);
+                address normalizedCandidate = _normalizedTokenOf({router: router, token: candidateToken});
 
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
                 if (normalizedCandidate == normalizedTokenIn) {
@@ -366,15 +364,25 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Check whether two tokens share the same routing representation for the router.
+    /// @param router The router whose wrapped-native-token configuration drives normalization.
     /// @param tokenA The first token to compare.
     /// @param tokenB The second token to compare.
     /// @return hasSameAsset A flag indicating whether the router would treat both tokens as the same asset.
-    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
+    function _hasSameRoutingAsset(
+        IJBPayRoutePreviewer router,
+        address tokenA,
+        address tokenB
+    )
+        internal
+        view
+        returns (bool hasSameAsset)
+    {
         // Treat exact-token matches as the same routing asset without extra normalization work.
         if (tokenA == tokenB) return true;
 
         // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
-        return _normalizedTokenOf(tokenA) == _normalizedTokenOf(tokenB);
+        return
+            _normalizedTokenOf({router: router, token: tokenA}) == _normalizedTokenOf({router: router, token: tokenB});
     }
 
     /// @notice Whether previewing through a terminal would cycle back into the router.
@@ -397,10 +405,18 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
+    /// @param router The router whose wrapped-native-token configuration drives normalization.
     /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
-    function _normalizedTokenOf(address token) internal view returns (address normalizedToken) {
-        return token == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : token;
+    function _normalizedTokenOf(
+        IJBPayRoutePreviewer router,
+        address token
+    )
+        internal
+        view
+        returns (address normalizedToken)
+    {
+        return token == JBConstants.NATIVE_TOKEN ? address(router.WRAPPED_NATIVE_TOKEN()) : token;
     }
 
     /// @notice Preview the amount that would be routed into a specific destination token.
@@ -436,7 +452,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
 
         // Return early when the routed token already matches the desired destination token.
-        if (_hasSameRoutingAsset({tokenA: routedTokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({router: router, tokenA: routedTokenIn, tokenB: tokenOut})) {
             return (tokenOut, routedAmountIn);
         }
 
@@ -559,7 +575,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             _resolveTokenOut({router: router, projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
 
         // Return the current amount unchanged when no swap is needed after token resolution.
-        if (_hasSameRoutingAsset({tokenA: tokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({router: router, tokenA: tokenIn, tokenB: tokenOut})) {
             return (destTerminal, tokenOut, amount);
         }
 
@@ -653,8 +669,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Then try the native-token and wrapped-native-token equivalent form before falling back to pool discovery.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WRAPPED_NATIVE_TOKEN)) {
-            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : JBConstants.NATIVE_TOKEN;
+        address wrappedNative = address(router.WRAPPED_NATIVE_TOKEN());
+        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == wrappedNative) {
+            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? wrappedNative : JBConstants.NATIVE_TOKEN;
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) != address(0)
