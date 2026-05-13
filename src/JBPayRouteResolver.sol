@@ -590,19 +590,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
     {
-        // Resolve whether this preview should first treat the input token as a JB project-token cashout source.
-        (uint256 sourceProjectIdOverride, uint256 sourceProjectId) =
-            _sourceProjectIdOf({router: router, tokenIn: tokenIn, metadata: metadata});
-
-        // When there is no project-token source, the current input already is the routed input.
-        if (sourceProjectId == 0) return (resolvedTerminal, tokenIn, amount);
+        // When the input is not a JB project token, the current input already is the routed input.
+        if (_sourceProjectIdOf({router: router, tokenIn: tokenIn}) == 0) return (resolvedTerminal, tokenIn, amount);
 
         // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
         return router.previewCashOutLoopOf({
             destProjectId: destProjectId,
             token: tokenIn,
             amount: amount,
-            sourceProjectIdOverride: sourceProjectIdOverride,
             metadata: metadata,
             preferredToken: preferredToken
         });
@@ -743,34 +738,19 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         reservedTokenCount = tokenCount - beneficiaryTokenCount;
     }
 
-    /// @notice Resolve whether the current route input should first be treated as a project-token cashout source.
+    /// @notice Resolve which JB project a routed token should cash out from, if any.
     /// @param router The router terminal whose project-token lookup should be used.
     /// @param tokenIn The current route input token.
-    /// @param metadata Metadata that may include an explicit cashout-source override.
-    /// @return sourceProjectIdOverride The source project ID encoded in metadata, or 0 if none was provided.
-    /// @return sourceProjectId The effective source project ID inferred from `metadata` and `tokenIn`.
+    /// @return sourceProjectId The source project ID, or 0 when `tokenIn` is not a JB project token.
     function _sourceProjectIdOf(
         IJBPayRoutePreviewer router,
-        address tokenIn,
-        bytes calldata metadata
+        address tokenIn
     )
         internal
         view
-        returns (uint256 sourceProjectIdOverride, uint256 sourceProjectId)
+        returns (uint256 sourceProjectId)
     {
-        // Read the router-scoped cashout-source metadata so preview matches the router's own metadata namespace.
-        (bool exists, bytes memory creditData) = _getDataFor({router: router, metadata: metadata, key: "cashOutSource"});
-
-        // Decode the explicit source-project override when the caller supplied one.
-        if (exists) (sourceProjectIdOverride,) = abi.decode(creditData, (uint256, uint256));
-
-        // Start from the explicit override.
-        sourceProjectId = sourceProjectIdOverride;
-
-        // Fall back to inferring the project ID from the input token whenever the token is not the native sentinel.
-        if (sourceProjectId == 0 && tokenIn != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = router.TOKENS().projectIdOf(IJBToken(tokenIn));
-        }
+        if (tokenIn != JBConstants.NATIVE_TOKEN) sourceProjectId = router.TOKENS().projectIdOf(IJBToken(tokenIn));
     }
 
     /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.

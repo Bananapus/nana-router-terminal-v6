@@ -2358,39 +2358,6 @@ contract RouterTerminalTest is Test {
     }
 
     //*********************************************************************//
-    // ---------- Bug fix regression tests: ETH + credit revert ---------- //
-    //*********************************************************************//
-
-    /// @notice Sending msg.value alongside cashOutSource credit metadata should revert (fix #2).
-    function test_pay_revertsWhenETHSentWithCreditMetadata() public {
-        uint256 projectId = 1;
-        address payer = makeAddr("payer");
-
-        // Build metadata with cashOutSource — must use router address for getId.
-        bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(2), uint256(1e18)));
-
-        vm.deal(payer, 1 ether);
-        vm.prank(payer);
-        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
-        routerTerminal.pay{value: 1 ether}(projectId, JBConstants.NATIVE_TOKEN, 1 ether, payer, 0, "", metadata);
-    }
-
-    /// @notice addToBalanceOf should also revert when ETH sent with credit metadata.
-    function test_addToBalanceOf_revertsWhenETHSentWithCreditMetadata() public {
-        address payer = makeAddr("payer");
-
-        // Build metadata with cashOutSource — must use router address for getId.
-        bytes4 metadataId = JBMetadataResolver.getId("cashOutSource", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(2), uint256(1e18)));
-
-        vm.deal(payer, 1 ether);
-        vm.prank(payer);
-        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_NoMsgValueAllowed.selector, 1 ether));
-        routerTerminal.addToBalanceOf{value: 1 ether}(1, JBConstants.NATIVE_TOKEN, 1 ether, false, "", metadata);
-    }
-
-    //*********************************************************************//
     // ----------- Bug fix regression tests: V4 sign convention ---------- //
     //*********************************************************************//
 

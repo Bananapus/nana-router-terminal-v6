@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
-import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -150,9 +149,6 @@ contract JBRouterTerminal is
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
 
-    /// @notice Pre-computed metadata ID for "cashOutSource".
-    bytes4 internal immutable _CASH_OUT_SOURCE_ID;
-
     /// @notice Pre-computed metadata ID for "permit2".
     bytes4 internal immutable _PERMIT2_ID;
 
@@ -202,7 +198,6 @@ contract JBRouterTerminal is
         _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
 
         // Pre-compute metadata IDs to avoid hashing string literals on every call.
-        _CASH_OUT_SOURCE_ID = JBMetadataResolver.getId("cashOutSource");
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
         _CASH_OUT_MIN_RECLAIMED_ID = JBMetadataResolver.getId("cashOutMinReclaimed");
         _QUOTE_FOR_SWAP_ID = JBMetadataResolver.getId("quoteForSwap");
@@ -603,18 +598,16 @@ contract JBRouterTerminal is
             JBPayHookSpecification[] memory hookSpecifications
         )
     {
-        // Simulate how the router would normalize the incoming funds before routing.
-        amount = _previewAcceptFundsFor({amount: amount, metadata: metadata});
-        (,,, ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) = _previewBestPayRoute({
-            projectId: projectId, tokenIn: token, amount: amount, beneficiary: beneficiary, metadata: metadata
-        });
+        (,,, ruleset, beneficiaryTokenCount, reservedTokenCount, hookSpecifications) =
+            _previewBestPayRoute({
+                projectId: projectId, tokenIn: token, amount: amount, beneficiary: beneficiary, metadata: metadata
+            });
     }
 
     /// @notice Preview the recursive cashout loop the router would use for a project-token input.
     /// @param destProjectId The destination project the router is trying to pay.
     /// @param token The current token to route.
     /// @param amount The amount of `token` to preview.
-    /// @param sourceProjectIdOverride The one-shot source project override encoded in metadata, if any.
     /// @param metadata Metadata forwarded into preview helpers.
     /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
     /// @return destTerminal The terminal reached by the cashout loop, or address(0) if routing should continue.
@@ -624,7 +617,6 @@ contract JBRouterTerminal is
         uint256 destProjectId,
         address token,
         uint256 amount,
-        uint256 sourceProjectIdOverride,
         bytes calldata metadata,
         address preferredToken
     )
@@ -636,7 +628,6 @@ contract JBRouterTerminal is
             destProjectId: destProjectId,
             token: token,
             amount: amount,
-            sourceProjectIdOverride: sourceProjectIdOverride,
             metadata: metadata,
             preferredToken: preferredToken
         });
@@ -716,7 +707,7 @@ contract JBRouterTerminal is
 
     /// @notice Resolve the original payer when called through an intermediary.
     /// @dev Registry-style forwarders record the original payer in transient storage via `IJBPayerTracker`. When
-    /// present, that address is used for refunds and credit cashouts instead of the intermediary.
+    /// present, that address is used for refunds instead of the intermediary.
     /// @param fallback_ The default address to use when no original payer is available.
     /// @return The original payer, or `fallback_` if none is available.
     function _resolveOriginalPayer(address fallback_) internal view returns (address) {
@@ -1006,56 +997,20 @@ contract JBRouterTerminal is
     }
 
     /// @notice Resolve which source project a routed token should cash out from.
-    /// @param sourceProjectIdOverride A one-shot source-project override decoded from routing metadata.
     /// @param token The current route token that may be a JB project token.
     /// @return sourceProjectId The project to cash out from, or 0 if the token is not a JB project token.
-    function _sourceProjectIdOf(
-        uint256 sourceProjectIdOverride,
-        address token
-    )
-        internal
-        view
-        returns (uint256 sourceProjectId)
-    {
-        // Prefer the explicit one-shot override when metadata supplied one.
-        sourceProjectId = sourceProjectIdOverride;
-
-        // Otherwise infer the source project from the current token unless it is the native-token sentinel.
-        if (sourceProjectId == 0 && token != JBConstants.NATIVE_TOKEN) {
-            sourceProjectId = _projectIdOf(token);
-        }
+    function _sourceProjectIdOf(address token) internal view returns (uint256 sourceProjectId) {
+        if (token != JBConstants.NATIVE_TOKEN) sourceProjectId = _projectIdOf(token);
     }
 
     /// @notice Accept a token paid in by the caller.
     /// @param token The address of the token to accept.
     /// @param amount The amount of tokens to accept.
-    /// @param metadata The metadata in which `permit2` and credit context is provided.
+    /// @param metadata The metadata in which `permit2` context is provided.
     /// @return The amount of tokens accepted.
     function _acceptFundsFor(address token, uint256 amount, bytes calldata metadata) internal returns (uint256) {
         // Cache _msgSender() once to avoid repeated ERC-2771 context resolution.
         address sender = _msgSender();
-
-        // Check for credit cash-out metadata.
-        (bool creditExists, bytes memory creditData) = _getDataFor({metadata: metadata, id: _CASH_OUT_SOURCE_ID});
-
-        if (creditExists) {
-            // Credit cashouts don't use msg.value — revert if ETH was sent to prevent it being trapped.
-            if (msg.value != 0) revert JBRouterTerminal_NoMsgValueAllowed(msg.value);
-
-            (uint256 sourceProjectId, uint256 creditAmount) = abi.decode(creditData, (uint256, uint256));
-
-            // Use the direct sender as the credit holder. Do NOT resolve via _resolveOriginalPayer here,
-            // because a malicious contract could spoof originalPayer() to steal another user's credits.
-            address holder = sender;
-
-            // Pull credits through the project's controller, which enforces holder permissions for credit transfers.
-            IJBController controller = IJBController(address(DIRECTORY.controllerOf(sourceProjectId)));
-            controller.transferCreditsFrom({
-                holder: holder, projectId: sourceProjectId, recipient: address(this), creditCount: creditAmount
-            });
-
-            return creditAmount;
-        }
 
         // If native tokens are being paid in, return the `msg.value`.
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;
@@ -1142,8 +1097,6 @@ contract JBRouterTerminal is
     /// @param destProjectId The ID of the destination project.
     /// @param token The current token to process.
     /// @param amount The amount of the current token.
-    /// @param sourceProjectIdOverride When non-zero, use this as the source project ID instead of looking up via
-    /// `TOKENS.projectIdOf()`. Reset to 0 after first use.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain cashOutMinReclaimed).
     /// @return destTerminal The terminal that accepts the final token (address(0) if no direct acceptance found).
     /// @return finalToken The token after all cashouts.
@@ -1152,7 +1105,6 @@ contract JBRouterTerminal is
         uint256 destProjectId,
         address token,
         uint256 amount,
-        uint256 sourceProjectIdOverride,
         bytes calldata metadata,
         address preferredToken
     )
@@ -1168,24 +1120,18 @@ contract JBRouterTerminal is
         // Walk the cashout path hop by hop until we reach a directly acceptable destination asset or exhaust the
         // bounded iteration limit.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // Skip the destination check on the first iteration if we have a credit override — the forced
-            // cashout must happen before any early return.
-            if (sourceProjectIdOverride == 0) {
-                address routeToken;
-                (destTerminal, routeToken) =
-                    _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
-                if (address(destTerminal) != address(0)) {
-                    if (preferredToken != address(0)) {
-                        (routeToken, amount) =
-                            _alignTokenToPreferredToken({token: token, amount: amount, preferredToken: preferredToken});
-                    }
-                    return (destTerminal, routeToken, amount);
+            address routeToken;
+            (destTerminal, routeToken) =
+                _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
+            if (address(destTerminal) != address(0)) {
+                if (preferredToken != address(0)) {
+                    (routeToken, amount) =
+                        _alignTokenToPreferredToken({token: token, amount: amount, preferredToken: preferredToken});
                 }
+                return (destTerminal, routeToken, amount);
             }
 
-            // Use the override if provided, otherwise look up the project ID from the token.
-            uint256 sourceProjectId =
-                _sourceProjectIdOf({sourceProjectIdOverride: sourceProjectIdOverride, token: token});
+            uint256 sourceProjectId = _sourceProjectIdOf(token);
 
             // If it's not a JB project token, return as-is (caller handles the swap).
             if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
@@ -1236,7 +1182,6 @@ contract JBRouterTerminal is
 
             // Update for next iteration.
             token = tokenToReclaim;
-            sourceProjectIdOverride = 0;
 
             unchecked {
                 ++i;
@@ -1595,7 +1540,7 @@ contract JBRouterTerminal is
     /// @param destProjectId The destination project to reach.
     /// @param tokenIn The current route input token.
     /// @param amount The current route input amount.
-    /// @param metadata Metadata that may include a cashout-source override.
+    /// @param metadata Metadata that may include a cashOutMinReclaimed floor.
     /// @param preferredToken The preferred token to target during any cashout loop.
     /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion should continue.
     /// @return routedTokenIn The token that remains to be routed after the cashout step.
@@ -1610,20 +1555,14 @@ contract JBRouterTerminal is
         internal
         returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
     {
-        // Read any one-shot source-project override that should force the first cashout hop.
-        (uint256 sourceProjectIdOverride,) = _cashOutSourceFrom(metadata);
-        // Start from the explicit override, then fall back to inferring the source project from the input token.
-        uint256 sourceProjectId = _sourceProjectIdOf({sourceProjectIdOverride: sourceProjectIdOverride, token: tokenIn});
-
-        // Leave the route unchanged when the input is not a JB project token and no override was provided.
-        if (sourceProjectId == 0) return (resolvedTerminal, tokenIn, amount);
+        // Leave the route unchanged when the input is not a JB project token.
+        if (_sourceProjectIdOf(tokenIn) == 0) return (resolvedTerminal, tokenIn, amount);
 
         // Cash out through the discovered source project before the caller continues with direct routing or swaps.
         return _cashOutLoop({
             destProjectId: destProjectId,
             token: tokenIn,
             amount: amount,
-            sourceProjectIdOverride: sourceProjectIdOverride,
             metadata: metadata,
             preferredToken: preferredToken
         });
@@ -1857,22 +1796,6 @@ contract JBRouterTerminal is
         PoolInfo memory pool = _discoverPool({normalizedTokenIn: tokenA, normalizedTokenOut: tokenB});
         if (pool.isV4) return _getLiquidity(pool.v4Key.toId());
         if (address(pool.v3Pool) != address(0)) return pool.v3Pool.liquidity();
-    }
-
-    /// @notice Parse the optional `cashOutSource` metadata.
-    /// @param metadata The metadata to inspect for credit cashout overrides.
-    /// @return sourceProjectId The source project override, or 0 if none is specified.
-    /// @return amount The credit amount, or 0 if none is specified.
-    function _cashOutSourceFrom(bytes calldata metadata)
-        internal
-        view
-        returns (uint256 sourceProjectId, uint256 amount)
-    {
-        // Read the optional cash-out source payload from the metadata blob.
-        (bool exists, bytes memory creditData) = _getDataFor({metadata: metadata, id: _CASH_OUT_SOURCE_ID});
-
-        // Decode the source project and credit amount if the payload is present.
-        if (exists) (sourceProjectId, amount) = abi.decode(creditData, (uint256, uint256));
     }
 
     /// @notice Return the ERC-2771 context suffix length used by the inherited forwarder-aware context.
@@ -2510,28 +2433,10 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice A view-only mirror of `_acceptFundsFor` used for previews.
-    /// @dev Preview semantics use the caller-supplied `amount` as the intended input amount.
-    /// @param amount The caller-supplied payment amount.
-    /// @param metadata The metadata to inspect for credit cashout overrides.
-    /// @return The effective amount that routing should use.
-    function _previewAcceptFundsFor(uint256 amount, bytes calldata metadata) internal view returns (uint256) {
-        // Credit cashouts use the credit amount encoded in metadata rather than the raw token amount.
-        (uint256 sourceProjectId, uint256 creditAmount) = _cashOutSourceFrom(metadata);
-
-        // Mirror execution semantics exactly: the presence of a source override means the decoded
-        // credit amount, even `0`, is the effective routed amount.
-        if (sourceProjectId != 0) return creditAmount;
-
-        // Otherwise, use the caller-specified amount unchanged.
-        return amount;
-    }
-
     /// @notice A view-only mirror of `_cashOutLoop`.
     /// @param destProjectId The ID of the destination project.
     /// @param token The current token to process.
     /// @param amount The amount of the current token.
-    /// @param sourceProjectIdOverride An optional source project override from metadata.
     /// @param metadata Bytes in `JBMetadataResolver`'s format.
     /// @return destTerminal The terminal that accepts the final token, if found.
     /// @return finalToken The token after all cash-out steps.
@@ -2540,7 +2445,6 @@ contract JBRouterTerminal is
         uint256 destProjectId,
         address token,
         uint256 amount,
-        uint256 sourceProjectIdOverride,
         bytes calldata metadata,
         address preferredToken
     )
@@ -2555,17 +2459,12 @@ contract JBRouterTerminal is
 
         // Walk the same cash-out path execution would take, bounded to prevent circular routes.
         for (uint256 i; i < _MAX_CASHOUT_ITERATIONS;) {
-            // Skip destination checks when the forced first cashout hasn't happened yet (mirrors _cashOutLoop).
-            if (sourceProjectIdOverride == 0) {
-                address routeToken;
-                (destTerminal, routeToken) =
-                    _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
-                if (address(destTerminal) != address(0)) return (destTerminal, routeToken, amount);
-            }
+            address routeToken;
+            (destTerminal, routeToken) =
+                _findRouteTerminal({destProjectId: destProjectId, token: token, preferredToken: preferredToken});
+            if (address(destTerminal) != address(0)) return (destTerminal, routeToken, amount);
 
-            // Use the override once when present; otherwise infer the source project from the current JB token.
-            uint256 sourceProjectId =
-                _sourceProjectIdOf({sourceProjectIdOverride: sourceProjectIdOverride, token: token});
+            uint256 sourceProjectId = _sourceProjectIdOf(token);
 
             // If this is no longer a JB project token, stop cashing out and let the caller continue routing from it.
             if (sourceProjectId == 0) return (IJBTerminal(address(0)), token, amount);
@@ -2591,9 +2490,6 @@ contract JBRouterTerminal is
 
             // Continue previewing from the token reclaimed in this hop.
             token = tokenToReclaim;
-
-            // Consume the one-shot override so later hops derive their project from the reclaimed token itself.
-            sourceProjectIdOverride = 0;
 
             unchecked {
                 ++i;

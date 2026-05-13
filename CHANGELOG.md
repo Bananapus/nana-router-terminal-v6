@@ -6,6 +6,17 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### Removed: credit cash-out input path
+
+The router no longer accepts unclaimed Juicebox credits as a payment input. The `cashOutSource` metadata key, the `sourceProjectIdOverride` parameter on `previewCashOutLoopOf`, the `IJBController.transferCreditsFrom` pull in `_acceptFundsFor`, and the `_cashOutSourceFrom` helper have all been removed. Credit holders should call `JBTokens.claimFor` to materialize their credits as an ERC-20 first, then route through the router as a normal ERC-20 payment.
+
+- Removed: `IJBController` import + `_CASH_OUT_SOURCE_ID` immutable.
+- Removed: 3 test files (`RouterTerminalCreditCashout.t.sol`, `regression/CreditCashoutSpoofedPayer.t.sol`, `regression/CreditCashoutPreferredTokenBypass.t.sol`, `regression/PreviewCashOutShortcircuitDivergence.t.sol`).
+- Changed: `IJBPayRoutePreviewer.previewCashOutLoopOf` signature — dropped the `uint256 sourceProjectIdOverride` parameter (now 5 args).
+- Frees ~580 B of runtime size; reduces attack surface (no msg.sender-vs-originalPayer ambiguity in the credit pull).
+
+Integrator impact: any frontend or backend that constructs the `cashOutSource` metadata key and routes JB credits via the router must switch to a two-step flow (`claimFor` → `router.pay`).
+
 ### Threshold-protected `setDefaultTerminal`
 
 The registry owner's `setDefaultTerminal(IJBTerminal)` call now applies only to projects created AFTER the call. Existing projects without an explicit `setTerminalFor` override keep resolving to the default that was current when their project-ID cohort was active. The outgoing default is snapshotted into an append-only `_defaultTerminalHistory` array on every `setDefaultTerminal` call.
