@@ -10,15 +10,19 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 `JBRouterTerminal` now deploys to the same address on every chain via CREATE2. The four chain-specific
 immutables (`WRAPPED_NATIVE_TOKEN`, `FACTORY`, `POOL_MANAGER`, `UNIV4_HOOK`) moved from `immutable` to public
-storage and are wired in after deployment via a new one-shot `setChainSpecificConstants(weth, factory, poolManager, univ4Hook)` setter, gated by a `_DEPLOYER` internal immutable (same pattern as `JBBuybackHook` and `JBUniswapV4LPSplitHookDeployer`).
+storage and are wired in after deployment via a new one-shot `setChainSpecificConstants(wrappedNativeToken, factory, poolManager, univ4Hook)` setter, gated by a `_DEPLOYER` internal immutable (same pattern as `JBBuybackHook` and `JBUniswapV4LPSplitHookDeployer`).
 
 - Constructor signature changed: `(IJBDirectory directory, IJBTokens tokens, IPermit2 permit2, address buybackHook, address trustedForwarder, address deployer)` — was 9 args, now 6. The four chain-different dependencies are no longer ctor inputs.
-- New external function: `setChainSpecificConstants(IWETH9 weth, IUniswapV3Factory factory, IPoolManager poolManager, address univ4Hook)`. Reverts with `JBRouterTerminal_Unauthorized(caller)` if msg.sender != `_DEPLOYER`; reverts with `JBRouterTerminal_AlreadyConfigured()` if `WRAPPED_NATIVE_TOKEN` has already been set.
-- `JBPayRouteResolver` also lost its `WRAPPED_NATIVE_TOKEN` immutable — it now reads the value from the calling router via `IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN()` on demand. The resolver is deployed in the router's constructor (chain-same input: just `directory`); its address remains chain-same too because the router's address is chain-same and the resolver is deployed at the router's nonce 1.
+- New external function: `setChainSpecificConstants(IWETH9 wrappedNativeToken, IUniswapV3Factory factory, IPoolManager poolManager, address univ4Hook)`. Reverts with `JBRouterTerminal_Unauthorized(caller)` if msg.sender != `_DEPLOYER`; reverts with `JBRouterTerminal_AlreadyConfigured()` if `WRAPPED_NATIVE_TOKEN` has already been set.
 - `BUYBACK_HOOK` stays as `public immutable` because `JBBuybackHook` is itself chain-same as of `@bananapus/buyback-hook-v6@0.0.44`.
-- Size: `JBRouterTerminal` 23,706 → 23,494 B (-212 B; headroom 870 → 1,082 against the EIP-170 24,576 B limit). The resolver lost ~10 B as well.
+
+`JBPayRouteResolver` also lost its `WRAPPED_NATIVE_TOKEN` immutable but does NOT call back into the router for it. Instead, the router passes its `WRAPPED_NATIVE_TOKEN` storage value as a parameter (`address wrappedNativeToken`) on every external resolver call (`previewBestPayRoute`, `previewPayRouteForCandidate`, `previewFallbackRoute`, `resolveTokenOut`), and the resolver threads it through internal helpers (`_normalizedTokenOf`, `_hasSameRoutingAsset`, `_discoverAcceptedToken`, `_resolveTokenOut`, `_previewAmountToToken`, `_previewRoute`). `_normalizedTokenOf` and `_hasSameRoutingAsset` are `pure` again. This avoids an extra external call per normalization step (which would compound inside the loops in `_discoverAcceptedToken`).
+
+The resolver is still deployed in the router's constructor (chain-same input: just `directory`); its CREATE address is `router.address + nonce 1`, which is chain-same once the router itself is chain-same.
 
 Integrator impact: deployers must call `setChainSpecificConstants` once after construction (the script in `script/Deploy.s.sol` does this in the same transaction as the deploy). Tests and the local deploy script have been updated accordingly.
+
+Size: `JBRouterTerminal` 23,706 → 23,468 B (-238 B; headroom 870 → 1,108 B against the EIP-170 24,576 B limit). `JBPayRouteResolver` 10,438 → 10,398 B (-40 B).
 
 ### Removed: credit cash-out input path
 

@@ -29,7 +29,7 @@ contract PayerTrackerRefundHarness is JBRouterTerminal {
         address trustedForwarder,
         address deployer
     )
-        // forge-lint: disable-next-line — Solidity disallows named-args in parent ctor invocations.
+        // Solidity disallows named-args in parent ctor invocations; positional required.
         JBRouterTerminal(directory, tokens, permit2, buybackHook, trustedForwarder, deployer)
     {}
 
