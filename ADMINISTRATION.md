@@ -6,7 +6,7 @@
 | --- | --- |
 | Scope | Global router terminal allowlisting and project-local terminal selection |
 | Control posture | Mixed registry-owner and project-local delegated control |
-| Highest-risk actions | Setting the initial default terminal at deploy time, locking a project to the wrong terminal, and relying on misconfigured credit-cashout routing. Subsequent default-terminal changes only affect projects created after the change — existing projects keep resolving against their cohort's historical default. |
+| Highest-risk actions | Setting the initial default terminal at deploy time, locking a project to the wrong terminal. Subsequent default-terminal changes only affect projects created after the change — existing projects keep resolving against their cohort's historical default. |
 | Recovery posture | Unlocked projects can move; locked projects and immutable router wiring limit recovery |
 
 ## Purpose
@@ -18,7 +18,6 @@
 - `JBRouterTerminalRegistry` is globally `Ownable`
 - project owners or delegates choose and can lock their router terminal
 - `JBRouterTerminal` has immutable routing dependencies and no owner-controlled strategy knobs
-- some transaction paths depend on project-local `JBPermissions`, such as `TRANSFER_CREDITS`
 
 ## Roles
 
@@ -27,7 +26,7 @@
 | Registry owner | `Ownable(owner)` | Global | Controls allowlist and default terminal |
 | Project owner | `JBProjects.ownerOf(projectId)` | Per project | May delegate `SET_ROUTER_TERMINAL` |
 | Terminal delegate | `JBPermissions` grant | Per project | Usually `SET_ROUTER_TERMINAL` |
-| Payer | Per transaction | Per payment | May need `TRANSFER_CREDITS` for credit-cashout routing |
+| Payer | Per transaction | Per payment | No special permissions needed for standard ERC-20 routing |
 
 ## Privileged Surfaces
 
@@ -50,7 +49,6 @@
 - subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
 - still review fall-through resolution before changing the default — `defaultTerminalFor(projectId)` returns the resolved default for any project, and `defaultTerminalHistoryAt(index)` exposes each captured snapshot
 - encourage projects to lock only after validating the resolved terminal and routing behavior
-- review credit-cashout routing permissions before relying on that path
 - distinguish configuration risk from quote-quality risk
 
 ## Machine Notes

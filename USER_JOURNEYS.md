@@ -2,7 +2,7 @@
 
 ## Repo Purpose
 
-This repo is the project-facing payment router for "user has X, project wants Y." It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token and credit-based sources. It does not replace the downstream terminal that finally receives and accounts for value.
+This repo is the project-facing payment router for "user has X, project wants Y." It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token sources (recursive cash-out). It does not replace the downstream terminal that finally receives and accounts for value. Note: unclaimed Juicebox credits are not a supported input — credit holders must `JBTokens.claimFor` to an ERC-20 first and then route as a normal ERC-20 payment.
 
 ## Primary Actors
 
@@ -84,29 +84,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the router handles the recursive path correctly instead of assuming the input is a normal ERC-20
 
-## Journey 4: Route A Payment From Credits Or Another Cash-Out Source
-
-**Actor:** payer or integration using a non-wallet source position.
-
-**Intent:** route a payment from Juicebox credits or another known source-project position.
-
-**Preconditions**
-- the payer has Juicebox credits or a known source project position instead of an ordinary wallet token balance
-
-**Main Flow**
-1. Encode the `cashOutSource` or equivalent metadata the router expects.
-2. Let the router pull credits or source-project value through the token and terminal surfaces it integrates with.
-3. Continue through route discovery only after the source value has been converted into something the destination path can use.
-
-**Failure Modes**
-- `msg.value` is sent alongside credit-based routing and the route shape is wrong
-- source-project metadata is malformed or points at the wrong position
-- integrations assume credit cash-out behaves like direct ERC-20 routing
-
-**Postconditions**
-- the router can pull that source value, cash it out if needed, and continue routing toward the destination project
-
-## Journey 5: Preview Routes And Protect The User Against Bad Settlement
+## Journey 4: Preview Routes And Protect The User Against Bad Settlement
 
 **Actor:** frontend or aggregator.
 
@@ -127,7 +105,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the quote is useful, and execution either lands close to it or fails clearly when conditions changed too much
 
-## Journey 6: Lock Down Which Router A Project Uses
+## Journey 5: Lock Down Which Router A Project Uses
 
 **Actor:** authorized operator.
 
@@ -148,7 +126,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the registry records the chosen router terminal and locks the decision
 
-## Journey 7: Migrate Registry-Held Balance Or Router Responsibility Safely
+## Journey 6: Migrate Registry-Held Balance Or Router Responsibility Safely
 
 **Actor:** operator or migration responder.
 

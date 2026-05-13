@@ -30,7 +30,6 @@ interface IJBPayRoutePreviewer {
     /// @param destProjectId The destination project the router is trying to pay.
     /// @param token The current token to route.
     /// @param amount The amount of `token` to preview.
-    /// @param sourceProjectIdOverride The one-shot source project override encoded in metadata, if any.
     /// @param metadata Metadata forwarded into preview helpers.
     /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
     /// @return destTerminal The terminal reached by the cashout loop, or address(0) if routing should continue.
@@ -40,7 +39,6 @@ interface IJBPayRoutePreviewer {
         uint256 destProjectId,
         address token,
         uint256 amount,
-        uint256 sourceProjectIdOverride,
         bytes calldata metadata,
         address preferredToken
     )
