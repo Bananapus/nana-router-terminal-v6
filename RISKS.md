@@ -13,6 +13,16 @@ Pool discovery ranks candidates by instantaneous liquidity, so an attacker could
 **Harmonic-mean liquidity inflates V3 slippage tolerance.** *(Medium)*
 `OracleLibrary.consult` returns harmonic-mean liquidity, which can be deflated by brief low-liquidity periods. However, harmonic mean is more resistant to manipulation than spot liquidity. Mitigated by 120s TWAP minimum and 10-minute default observation window.
 
+**V4 TWAP branch uses live in-range liquidity for slippage tolerance, not time-averaged.** *(Medium)*
+In `_getV4SpotQuote`, when the V4 hook provides a TWAP tick (`usedTwap = true`), the gross quote tick is time-averaged but `_getLiquidity(id)` reads `POOL_MANAGER.getLiquidity(id)` — the CURRENT in-range liquidity. That live value feeds `_quoteWithSlippage` → `_getSlippageTolerance` → `JBSwapLib.calculateImpact`, where the sigmoid `tolerance = minSlippage + range * impact / (impact + K)` is monotonically increasing in impact. An attacker who thins in-range liquidity around quote time inflates the modeled impact and widens the tolerance up to `MAX_SLIPPAGE = 8800` (88%). Asymmetric vs the V3 path, which feeds `OracleLibrary.consult`'s `harmonicMeanLiquidity` over the same window into the same sigmoid.
+
+Why the practical impact is bounded rather than catastrophic:
+1. The TWAP tick anchors the gross quote price over the 120s window — an attacker cannot move the priced tick within a single block, only widen the tolerance band around it.
+2. Callers can pass `quoteForSwap` metadata to bypass the V4 spot-quote path entirely.
+3. Pool selection in `_pickPoolAndQuote` can choose a V3 pool over V4 if it has more liquidity (and V3 uses harmonic-mean liquidity).
+
+Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `quoteForSwap` rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
+
 **`quoteForSwap` / auto-selected tokenOut mismatch.** *(Minor)*
 When a user provides `quoteForSwap` metadata, the quote may not match the auto-selected output token. Frontends should set `quoteForSwap` per the expected output token.
 
