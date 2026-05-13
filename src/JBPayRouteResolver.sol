@@ -621,7 +621,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
     {
         // When the input is not a JB project token, the current input already is the routed input.
-        if (_sourceProjectIdOf({router: router, tokenIn: tokenIn}) == 0) return (resolvedTerminal, tokenIn, amount);
+        if (tokenIn == JBConstants.NATIVE_TOKEN || router.TOKENS().projectIdOf(IJBToken(tokenIn)) == 0) {
+            return (resolvedTerminal, tokenIn, amount);
+        }
 
         // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
         return router.previewCashOutLoopOf({
@@ -770,21 +772,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Assign the residual to reserved tokens so rounding cannot lose supply during route comparison.
         reservedTokenCount = tokenCount - beneficiaryTokenCount;
-    }
-
-    /// @notice Resolve which JB project a routed token should cash out from, if any.
-    /// @param router The router terminal whose project-token lookup should be used.
-    /// @param tokenIn The current route input token.
-    /// @return sourceProjectId The source project ID, or 0 when `tokenIn` is not a JB project token.
-    function _sourceProjectIdOf(
-        IJBPayRoutePreviewer router,
-        address tokenIn
-    )
-        internal
-        view
-        returns (uint256 sourceProjectId)
-    {
-        if (tokenIn != JBConstants.NATIVE_TOKEN) sourceProjectId = router.TOKENS().projectIdOf(IJBToken(tokenIn));
     }
 
     /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
