@@ -2075,8 +2075,11 @@ contract JBRouterTerminal is
 
                 // Priority 1: Does the destination project directly accept this token through a usable terminal?
                 IJBTerminal destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: contextToken});
-                candidates = _recordCashOutPathCandidate({
-                    candidates: candidates, contextToken: contextToken, terminal: terminal, destTerminal: destTerminal
+                _recordCashOutPathCandidate({
+                    candidates: candidates,
+                    contextToken: contextToken,
+                    terminal: terminal,
+                    destTerminal: destTerminal
                 });
 
                 unchecked {
@@ -2109,11 +2112,11 @@ contract JBRouterTerminal is
     }
 
     /// @notice Record a reclaim token as a direct, recursive, or base fallback during cashout-path discovery.
-    /// @param candidates The current fallback candidates accumulated so far.
+    /// @dev Mutates `candidates` in place (memory struct passed by reference) — no return value needed.
+    /// @param candidates The current fallback candidates accumulated so far. Updated in-place by this call.
     /// @param contextToken The token exposed by the current cashout terminal accounting context.
     /// @param terminal The cashout terminal that can reclaim `contextToken`.
     /// @param destTerminal The destination project's direct terminal for `contextToken`, if any.
-    /// @return updatedCandidates The fallback set after considering `contextToken`.
     function _recordCashOutPathCandidate(
         CashOutPathCandidates memory candidates,
         address contextToken,
@@ -2122,10 +2125,7 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (CashOutPathCandidates memory updatedCandidates)
     {
-        updatedCandidates = candidates;
-
         // Treat native ETH as a non-recursive base asset. For ERC-20s, detect whether the token is itself a JB
         // project token so recursive and base fallbacks stay disjoint.
         bool isJbProjectToken;
@@ -2134,22 +2134,22 @@ contract JBRouterTerminal is
         }
 
         // Record the first directly accepted token only when its destination terminal is actually usable.
-        if (address(destTerminal) != address(0) && address(updatedCandidates.directFallbackTerminal) == address(0)) {
-            updatedCandidates.directFallbackToken = contextToken;
-            updatedCandidates.directFallbackTerminal = terminal;
+        if (address(destTerminal) != address(0) && address(candidates.directFallbackTerminal) == address(0)) {
+            candidates.directFallbackToken = contextToken;
+            candidates.directFallbackTerminal = terminal;
         }
 
         // Record the first JB project token so the router can recurse through another cashout hop if no direct or
         // base-token exit ends up existing.
-        if (address(updatedCandidates.fallbackTerminal) == address(0) && isJbProjectToken) {
-            updatedCandidates.fallbackToken = contextToken;
-            updatedCandidates.fallbackTerminal = terminal;
+        if (address(candidates.fallbackTerminal) == address(0) && isJbProjectToken) {
+            candidates.fallbackToken = contextToken;
+            candidates.fallbackTerminal = terminal;
         }
 
         // Record the first non-JB base-token fallback so the router can at least continue via a swap route.
-        if (address(updatedCandidates.baseFallbackTerminal) == address(0) && !isJbProjectToken) {
-            updatedCandidates.baseFallbackToken = contextToken;
-            updatedCandidates.baseFallbackTerminal = terminal;
+        if (address(candidates.baseFallbackTerminal) == address(0) && !isJbProjectToken) {
+            candidates.baseFallbackToken = contextToken;
+            candidates.baseFallbackTerminal = terminal;
         }
     }
 
