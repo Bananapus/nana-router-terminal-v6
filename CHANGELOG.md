@@ -20,7 +20,13 @@ Indexer impact: read `defaultTerminalFor(projectId)` rather than `defaultTermina
 
 Admin impact: the registry owner can no longer silently reroute payments for already-deployed projects by changing the default. See `ADMINISTRATION.md` for the updated boundary description.
 
+### `0.0.41` — Document multi-hop forwarding-cycle as accepted risk
 
+`JBRouterTerminalRegistry._requireNonCircularTerminalFor` only walks one hop of `IJBForwardingTerminal.terminalOf` when admitting a new explicit or default terminal. A multi-hop `A → B → registry` chain passes admission (the registry only sees `downstream == B ≠ self`), but once locked in, a subsequent `pay`/`addToBalanceOf` recurses through the registry until OOG. The `JBPayRouteResolver` swap-routing path already uses the bounded multi-hop helper `JBForwardingCheck.isCircularTerminal`; the registry admission path does not.
+
+This is documented as accepted in `RISKS.md` (§Registry & Forwarding Risks). Impact is bounded to a self-locking DoS on the project that constructs the multi-hop chain — external actors cannot trigger it, and the project owner can rotate the registry default to recover. Per-PR retrofit cost was judged non-trivial relative to that impact. Project owners installing chained forwarding terminals should run a manual `JBForwardingCheck.isCircularTerminal({target: registry, projectId: …, terminal: candidate})` simulation before approving the candidate.
+
+No runtime code change in this release — documentation only.
 
 ## Current v6 surface
 
