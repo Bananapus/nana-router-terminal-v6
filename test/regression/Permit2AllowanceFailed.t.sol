@@ -97,6 +97,8 @@ contract Permit2AllowanceFailedTest is Test {
         // Deploy the registry with the mocked permit2.
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, registryOwner, address(0));
 
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         // Set destTerminal as the default terminal.
         vm.prank(registryOwner);
         registry.setDefaultTerminal(destTerminal);

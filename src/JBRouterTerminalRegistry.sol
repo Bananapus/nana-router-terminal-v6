@@ -23,8 +23,10 @@ import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTran
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
-import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
+import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
+
+import {DefaultTerminalSegment} from "./structs/DefaultTerminalSegment.sol";
 
 /// @notice A forwarding layer that lets each project choose which router terminal receives its payments, with an
 /// owner-managed default for projects that have not opted in. Projects can lock their choice to guarantee permanence.
@@ -61,8 +63,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
 
-    /// @notice The default terminal used for payments when a project hasn't registered a specific one.
+    /// @notice The current default terminal — applied to projects with ID strictly greater than
+    /// `defaultTerminalProjectIdThreshold`. Existing projects (ID <= threshold) without an explicit
+    /// terminal continue to resolve against the historical default that was current at the time
+    /// their project ID range was active (see `_defaultTerminalHistory`).
     IJBTerminal public override defaultTerminal;
+
+    /// @notice The `PROJECTS.count()` snapshot at the moment of the last `setDefaultTerminal` call.
+    /// Projects with `ID <= defaultTerminalProjectIdThreshold` (i.e. already existing when the most
+    /// recent default was set) DO NOT pick up `defaultTerminal` on fall-through; instead they
+    /// resolve against the historical entry in `_defaultTerminalHistory` that covers their ID.
+    /// This prevents the registry owner from silently rerouting payments for already-deployed
+    /// projects via a default change.
+    uint256 public override defaultTerminalProjectIdThreshold;
 
     /// @notice Whether the terminal for a given project has been locked against future updates.
     /// @custom:param projectId The ID of the project to check lock state for.
@@ -75,6 +88,12 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     //*********************************************************************//
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
+
+    /// @notice Append-only history of previous defaults captured at each `setDefaultTerminal` call. Each `segment[i]`
+    /// applies to projectIds in `[<previous threshold> + 1, segment[i].maxProjectId]`. Resolution walks the array
+    /// forward and returns the first segment whose `maxProjectId` covers the queried `projectId`. New defaults push
+    /// the current default onto this history before updating `defaultTerminal`.
+    DefaultTerminalSegment[] internal _defaultTerminalHistory;
 
     /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
     /// @custom:param projectId The ID of the project to look up the explicit terminal for.
@@ -129,9 +148,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext memory context)
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Get the terminal for the project (falls back to the threshold-resolved default).
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Get the accounting context for the token.
         return terminal.accountingContextForTokenOf({projectId: projectId, token: token});
@@ -146,9 +164,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext[] memory contexts)
     {
-        // Get the terminal for the project (falls back to default).
-        IJBTerminal terminal = _terminalOf[projectId];
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Get the terminal for the project (falls back to the threshold-resolved default).
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Get the accounting contexts.
         return terminal.accountingContextsOf(projectId);
@@ -176,6 +193,33 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         decimals;
         currency;
         return 0;
+    }
+
+    /// @notice The default terminal that applies to a given project on fall-through, accounting for the threshold
+    /// and the snapshot history. Returns zero if no default ever applied to the project's ID range.
+    /// @param projectId The ID of the project to resolve the default for.
+    /// @return terminal The default terminal applicable to this project (zero if none).
+    function defaultTerminalFor(uint256 projectId) external view override returns (IJBTerminal terminal) {
+        return _defaultTerminalFor(projectId);
+    }
+
+    /// @notice Read a default-terminal history entry. Exposes the internal append-only history.
+    /// @param index The history index (0 is the oldest captured snapshot).
+    /// @return segment The `maxProjectId + terminal` pair for that history slot.
+    function defaultTerminalHistoryAt(uint256 index)
+        external
+        view
+        override
+        returns (DefaultTerminalSegment memory segment)
+    {
+        return _defaultTerminalHistory[index];
+    }
+
+    /// @notice The total number of historical default-terminal snapshots captured (= number of `setDefaultTerminal`
+    /// calls after the very first one).
+    /// @return length The number of entries in the default-terminal history.
+    function defaultTerminalHistoryLength() external view override returns (uint256 length) {
+        return _defaultTerminalHistory.length;
     }
 
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
@@ -206,11 +250,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             JBPayHookSpecification[] memory hookSpecifications
         )
     {
-        // Read the terminal explicitly configured for this project, if any.
-        IJBTerminal terminal = _terminalOf[projectId];
-
-        // If the project has not pinned a terminal, use the registry-wide default terminal instead.
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Read the terminal explicitly configured for this project, falling back to the
+        // threshold-resolved default if none is pinned.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
 
         // Forward the preview request unchanged to whichever terminal was resolved above.
         return terminal.previewPayFor({
@@ -287,15 +329,36 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         }
     }
 
-    /// @notice Resolve the effective terminal for a project, falling back to the default terminal when unset.
+    /// @notice The default terminal that applies to a project on fall-through, taking the historical
+    /// setDefaultTerminal snapshots into account so existing projects are not silently rerouted by a later default
+    /// change.
+    /// @param projectId The project to resolve the default for.
+    /// @return terminal The default terminal applicable to this project (zero if none).
+    function _defaultTerminalFor(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        // New projects (created after the most recent setDefaultTerminal) get the current default.
+        if (projectId > defaultTerminalProjectIdThreshold) return defaultTerminal;
+        // Older projects walk the history: return the FIRST segment whose maxProjectId covers them.
+        uint256 len = _defaultTerminalHistory.length;
+        for (uint256 i; i < len; ++i) {
+            if (projectId <= _defaultTerminalHistory[i].maxProjectId) {
+                return _defaultTerminalHistory[i].terminal;
+            }
+        }
+        // Falls here only if projectId predates the first setDefaultTerminal call (no default ever applied).
+        return IJBTerminal(address(0));
+    }
+
+    /// @notice Resolve the effective terminal for a project. Falls back to the default that was current at the time
+    /// the project ID range was active (NOT necessarily the registry-wide `defaultTerminal`, which only applies to
+    /// projects with ID > `defaultTerminalProjectIdThreshold`).
     /// @param projectId The project to resolve the terminal for.
-    /// @return terminal The project-specific terminal, or the default terminal if no override exists.
+    /// @return terminal The project-specific terminal, or the threshold-resolved default.
     function _resolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
         // Start from the project-specific override, if one was configured.
         terminal = _terminalOf[projectId];
 
-        // Fall back to the default terminal when no project-specific terminal has been set.
-        if (terminal == IJBTerminal(address(0))) terminal = defaultTerminal;
+        // Fall back to the appropriate default for this project's ID cohort.
+        if (terminal == IJBTerminal(address(0))) terminal = _defaultTerminalFor(projectId);
     }
 
     //*********************************************************************//
@@ -411,10 +474,12 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             permissionId: JBPermissionIds.SET_ROUTER_TERMINAL
         });
 
-        // Require a non-zero terminal before locking.
+        // Require a non-zero terminal before locking. When no explicit override is set, snapshot
+        // the THRESHOLD-RESOLVED default into _terminalOf so the lock captures the default that
+        // currently applies to this specific project (NOT necessarily the registry-wide default).
         IJBTerminal terminal = _terminalOf[projectId];
         if (terminal == IJBTerminal(address(0))) {
-            terminal = defaultTerminal;
+            terminal = _defaultTerminalFor(projectId);
             if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
             _terminalOf[projectId] = terminal;
         }
@@ -518,14 +583,29 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         originalPayer = previousPayer;
     }
 
-    /// @notice Change the registry-wide default terminal that all projects without an explicit override will use.
+    /// @notice Change the registry-wide default terminal for projects created AFTER this call.
     /// @dev Only the registry owner can call this. Automatically allowlists the new default.
-    /// @param terminal The terminal to set as the default.
+    /// Existing projects (ID <= current `PROJECTS.count()` at call time) keep their historical
+    /// default — the previous `defaultTerminal` is pushed onto `_defaultTerminalHistory` so
+    /// fall-through resolution for those projects continues to return what was current when
+    /// their cohort was last addressed. This eliminates the silent-reroute attack vector
+    /// where the registry owner could redirect payments for already-deployed projects that
+    /// never set an explicit `_terminalOf` override.
+    /// @param terminal The terminal to set as the default for future projects.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
         if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress(address(terminal));
         if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
 
+        uint256 count = PROJECTS.count();
+
+        // Snapshot the OUTGOING default so existing projects (ID <= count) continue resolving to
+        // it, not to the new default. First-ever call has defaultTerminal == 0 and nothing to snapshot.
+        if (address(defaultTerminal) != address(0)) {
+            _defaultTerminalHistory.push(DefaultTerminalSegment({maxProjectId: count, terminal: defaultTerminal}));
+        }
+
         defaultTerminal = terminal;
+        defaultTerminalProjectIdThreshold = count;
 
         // Allow the default terminal.
         isTerminalAllowed[terminal] = true;

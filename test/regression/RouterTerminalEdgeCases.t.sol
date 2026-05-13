@@ -351,6 +351,9 @@ contract RouterTerminalEdgeCasesTest is Test {
             directory, tokens, permit2, weth, factory, poolManager, address(0), address(0), address(0)
         );
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
+
+        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
     }
 
     function test_registryAddToBalanceOf_withoutResolvedTerminal_reverts() public {
