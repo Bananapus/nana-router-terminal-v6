@@ -37,9 +37,11 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     //*********************************************************************//
 
     /// @param directory The directory storing project terminal relationships.
-    /// @dev The wrapped-native-token address is intentionally NOT cached here. It is read from the calling router via
-    /// `IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN()` on demand, which keeps this resolver's constructor inputs
-    /// chain-same (no chain-specific WETH baked in) so its CREATE address (router + nonce 1) stays unified.
+    /// @dev The wrapped-native-token address is intentionally NOT cached here. The router passes it in as a parameter
+    /// (`address wrappedNativeToken`) on every external resolver call and the resolver threads it through internal
+    /// helpers. This keeps the resolver's constructor inputs chain-same (no chain-specific WETH baked in) so its
+    /// CREATE address (router + nonce 1) stays unified, AND avoids paying an extra external call per normalization
+    /// step inside loops like `_discoverAcceptedToken`.
     constructor(IJBDirectory directory) {
         DIRECTORY = directory;
     }

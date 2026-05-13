@@ -144,10 +144,10 @@ contract JBRouterTerminal is
     address internal immutable _DEPLOYER;
 
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
-    /// @dev Deployed in the constructor with chain-same inputs (the resolver no longer caches `WRAPPED_NATIVE_TOKEN`
-    /// locally — it reads it from this router via `IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN()` on demand). Because
-    /// this router's address is chain-same via CREATE2 and the resolver is deployed at the router's nonce 1, the
-    /// resolver's address is chain-same too.
+    /// @dev Deployed in the constructor with chain-same inputs (just `directory` — the resolver does NOT cache
+    /// `WRAPPED_NATIVE_TOKEN` locally; the router passes it in on every external resolver call as a parameter to
+    /// avoid an extra external call on each normalization step). Because this router's address is chain-same via
+    /// CREATE2 and the resolver is deployed at the router's nonce 1, the resolver's address is chain-same too.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
 
     /// @notice Pre-computed metadata ID for "permit2".
