@@ -45,6 +45,13 @@ When payments flow through the registry, credits accrue to the registry address,
 **Forwarder claim disables receipt check.** *(Minor)*
 Forwarding terminals registered by project owners are trusted to handle receipts correctly, so receipt validation is skipped for these callers.
 
+**Multi-hop forwarding-cycle DoS in registry admission.** *(Accepted: Low)*
+`JBRouterTerminalRegistry._requireNonCircularTerminalFor` only walks one hop of `IJBForwardingTerminal.terminalOf` when admitting a new explicit/default terminal. A multi-hop chain `A → B → registry` passes the admission check (registry only sees `downstream == B ≠ self`), but once locked in, a subsequent `pay`/`addToBalanceOf` recurses `registry → A → B → registry → A → ...` until OOG. The `JBPayRouteResolver` swap-routing path already uses the bounded multi-hop helper `JBForwardingCheck.isCircularTerminal`; the registry admission path does not.
+
+*Why accepted:* The registry's allowlist already requires project-owner action to install each terminal, and the only known impact is a self-locking DoS on the project that constructs the multi-hop chain — no value can be extracted, and the project owner can rotate the default terminal at the registry level to unwedge. Credible cycles need at least two forwarding terminals controlled by the project, which is an unusual configuration. Per-PR retrofit cost is non-trivial relative to that impact, so this is documented as a known risk rather than patched.
+
+*Mitigation guidance:* Project owners installing chained forwarding terminals should run a manual `JBForwardingCheck.isCircularTerminal({target: registry, projectId: …, terminal: candidate})` simulation before approving the candidate.
+
 ## Token Compatibility Risks
 
 **Fee-on-transfer (FOT) tokens not supported for routed payments.** *(Medium)*
