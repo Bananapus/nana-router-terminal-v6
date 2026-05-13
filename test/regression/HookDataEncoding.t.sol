@@ -73,7 +73,7 @@ contract HookDataEncodingTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            weth: IWETH9(address(4)),
+            wrappedNativeToken: IWETH9(address(4)),
             factory: IUniswapV3Factory(address(5)),
             poolManager: IPoolManager(address(poolManager)),
             univ4Hook: hook

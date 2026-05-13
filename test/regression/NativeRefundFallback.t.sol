@@ -342,7 +342,7 @@ contract NativeRefundFallbackTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            weth: IWETH9(address(weth)), factory: factory, poolManager: IPoolManager(address(0)), univ4Hook: address(0)
+            wrappedNativeToken: IWETH9(address(weth)), factory: factory, poolManager: IPoolManager(address(0)), univ4Hook: address(0)
         });
     }
 

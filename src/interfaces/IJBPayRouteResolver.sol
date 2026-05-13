@@ -11,6 +11,8 @@ import {IJBPayRoutePreviewer} from "./IJBPayRoutePreviewer.sol";
 interface IJBPayRouteResolver {
     /// @notice Preview the best pay route for a router terminal.
     /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address, passed in so the resolver does not have to
+    /// call back into the router for it on every normalization step.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
     /// @param amount The amount of `tokenIn` to preview.
@@ -25,6 +27,7 @@ interface IJBPayRouteResolver {
     /// @return hookSpecifications The hook specifications returned by the chosen terminal preview.
     function previewBestPayRoute(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         uint256 amount,
@@ -45,6 +48,7 @@ interface IJBPayRouteResolver {
 
     /// @notice Preview a specific candidate pay route so callers can isolate revert-prone candidates with `try/catch`.
     /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param projectId The destination project that would receive the payment.
     /// @param tokenIn The token currently available to route.
     /// @param amount The amount of `tokenIn` to preview.
@@ -61,6 +65,7 @@ interface IJBPayRouteResolver {
     /// @return hookSpecifications The hook specifications returned by the terminal preview.
     function previewPayRouteForCandidate(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         uint256 amount,
@@ -83,6 +88,7 @@ interface IJBPayRouteResolver {
 
     /// @notice Determine what output token a project accepts for a given input token.
     /// @param router The router whose view helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param projectId The destination project to pay.
     /// @param tokenIn The input token to route.
     /// @param metadata Metadata forwarded into route-token resolution.
@@ -90,6 +96,7 @@ interface IJBPayRouteResolver {
     /// @return destTerminal The terminal that accepts `tokenOut`.
     function resolveTokenOut(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         bytes calldata metadata
@@ -102,6 +109,7 @@ interface IJBPayRouteResolver {
     /// @dev Called via `self.previewFallbackRoute(...)` so `try/catch` can absorb reverts from broken
     /// terminals or price feeds without bricking the entire best-route preview.
     /// @param routePreviewer The router terminal whose preview helpers to use for simulating the route.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param destProjectId The project to pay through the fallback route.
     /// @param tokenIn The token the payer is sending.
     /// @param amountIn The amount of `tokenIn` to route.
@@ -116,6 +124,7 @@ interface IJBPayRouteResolver {
     /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
     function previewFallbackRoute(
         IJBPayRoutePreviewer routePreviewer,
+        address wrappedNativeToken,
         uint256 destProjectId,
         address tokenIn,
         uint256 amountIn,

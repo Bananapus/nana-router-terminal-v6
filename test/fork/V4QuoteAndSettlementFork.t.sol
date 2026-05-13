@@ -249,7 +249,7 @@ contract V4QuoteAndSettlementForkTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            weth: WETH,
+            wrappedNativeToken: WETH,
             factory: IUniswapV3Factory(address(noV3Factory)),
             poolManager: V4_POOL_MANAGER,
             univ4Hook: address(0)

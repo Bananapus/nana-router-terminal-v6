@@ -155,7 +155,7 @@ contract CashOutLoopLimitTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            weth: weth,
+            wrappedNativeToken: weth,
             factory: factory,
             poolManager: IPoolManager(address(0)), // no V4
             univ4Hook: address(0)

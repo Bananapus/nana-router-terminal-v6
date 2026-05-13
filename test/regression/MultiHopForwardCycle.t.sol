@@ -159,7 +159,7 @@ contract MultiHopForwardCycleTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            weth: weth,
+            wrappedNativeToken: weth,
             factory: IUniswapV3Factory(makeAddr("factory")),
             poolManager: IPoolManager(address(0)),
             univ4Hook: address(0)

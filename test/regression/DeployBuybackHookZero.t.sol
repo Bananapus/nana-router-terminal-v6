@@ -267,7 +267,7 @@ contract DeployBuybackHookZeroTest is Test {
             deployer: address(this)
         });
         configuredRouter.setChainSpecificConstants({
-            weth: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
+            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
         });
 
         zeroHookRouter = new JBRouterTerminal({
@@ -279,7 +279,7 @@ contract DeployBuybackHookZeroTest is Test {
             deployer: address(this)
         });
         zeroHookRouter.setChainSpecificConstants({
-            weth: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
+            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
         });
 
         jbToken = new RegressionMockERC20();

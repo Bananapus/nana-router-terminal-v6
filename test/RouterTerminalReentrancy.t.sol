@@ -280,7 +280,7 @@ contract RouterTerminalReentrancyTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            weth: mockWeth, factory: mockFactory, poolManager: mockPoolManager, univ4Hook: address(0)
+            wrappedNativeToken: mockWeth, factory: mockFactory, poolManager: mockPoolManager, univ4Hook: address(0)
         });
     }
 

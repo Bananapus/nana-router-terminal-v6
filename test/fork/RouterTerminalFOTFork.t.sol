@@ -145,7 +145,7 @@ contract RouterTerminalFOTForkTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            weth: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
+            wrappedNativeToken: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
         });
 
         // Deploy mock FOT token (1% fee per transfer).

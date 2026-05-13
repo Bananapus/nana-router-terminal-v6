@@ -186,7 +186,7 @@ contract DeployScript is Script, Sphinx {
             deployer: safeAddress()
         });
         terminal.setChainSpecificConstants({
-            weth: IWETH9(weth),
+            wrappedNativeToken: IWETH9(weth),
             factory: IUniswapV3Factory(factory),
             poolManager: IPoolManager(poolManager),
             univ4Hook: address(univ4Router.hook)

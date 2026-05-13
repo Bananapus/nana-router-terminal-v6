@@ -397,12 +397,13 @@ contract JBRouterTerminal is
     /// call all four values are effectively immutable for the contract's lifetime. Mirrors the
     /// `JBOptimismSuckerDeployer.setChainSpecificConstants` pattern so the contract's CREATE2 inputs stay
     /// byte-identical across chains and its deployed address is unified.
-    /// @param weth The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum, WCELO on Celo).
+    /// @param wrappedNativeToken The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum,
+    /// WCELO on Celo).
     /// @param factory The Uniswap V3 factory for pool discovery on this chain.
     /// @param poolManager The Uniswap V4 PoolManager on this chain (may be `address(0)` if V4 is not deployed there).
     /// @param univ4Hook The canonical Uniswap V4 router hook on this chain.
     function setChainSpecificConstants(
-        IWETH9 weth,
+        IWETH9 wrappedNativeToken,
         IUniswapV3Factory factory,
         IPoolManager poolManager,
         address univ4Hook
@@ -411,7 +412,7 @@ contract JBRouterTerminal is
     {
         if (msg.sender != _DEPLOYER) revert JBRouterTerminal_Unauthorized({caller: msg.sender});
         if (address(WRAPPED_NATIVE_TOKEN) != address(0)) revert JBRouterTerminal_AlreadyConfigured();
-        WRAPPED_NATIVE_TOKEN = weth;
+        WRAPPED_NATIVE_TOKEN = wrappedNativeToken;
         FACTORY = factory;
         POOL_MANAGER = poolManager;
         UNIV4_HOOK = univ4Hook;
@@ -890,8 +891,11 @@ contract JBRouterTerminal is
         )
     {
         // Delegate the heavy preview-selection logic to the helper contract so the router stays within runtime size.
+        // Pass `wrappedNativeToken` once (single SLOAD) so the resolver does not have to call back into the router for
+        // it on every normalization step.
         return _PAY_ROUTE_RESOLVER.previewBestPayRoute({
             router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
             projectId: projectId,
             tokenIn: tokenIn,
             amount: amount,
@@ -1515,7 +1519,11 @@ contract JBRouterTerminal is
 
         // Resolve what token the destination project accepts and which terminal to use.
         (tokenOut, destTerminal) = _PAY_ROUTE_RESOLVER.resolveTokenOut({
-            router: IJBPayRoutePreviewer(address(this)), projectId: destProjectId, tokenIn: tokenIn, metadata: metadata
+            router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            projectId: destProjectId,
+            tokenIn: tokenIn,
+            metadata: metadata
         });
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.

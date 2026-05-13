@@ -123,7 +123,7 @@ contract RouterTerminalCashOutForkTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            weth: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
+            wrappedNativeToken: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
         });
 
         // Project 1 (fee project): accepts ETH.

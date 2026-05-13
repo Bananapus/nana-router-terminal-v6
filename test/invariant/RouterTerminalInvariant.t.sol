@@ -516,7 +516,7 @@ contract RouterTerminalInvariant is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            weth: IWETH9(address(weth)),
+            wrappedNativeToken: IWETH9(address(weth)),
             factory: IUniswapV3Factory(mockFactory),
             poolManager: IPoolManager(mockPoolManager),
             univ4Hook: address(0)

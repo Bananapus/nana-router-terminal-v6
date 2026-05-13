@@ -159,7 +159,7 @@ contract LossyReceiptRegressionTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            weth: IWETH9(address(0x33)),
+            wrappedNativeToken: IWETH9(address(0x33)),
             factory: IUniswapV3Factory(address(0x44)),
             poolManager: IPoolManager(address(0)),
             univ4Hook: address(0)
