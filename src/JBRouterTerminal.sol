@@ -931,18 +931,6 @@ contract JBRouterTerminal is
         });
     }
 
-    /// @notice Check whether two tokens share the same routing representation.
-    /// @param tokenA The first token to compare.
-    /// @param tokenB The second token to compare.
-    /// @return hasSameAsset A flag indicating whether the router treats both tokens as the same asset.
-    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
-        // Treat exact-token matches as the same asset without doing any normalization work.
-        if (tokenA == tokenB) return true;
-
-        // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
-        return _normalize(tokenA) == _normalize(tokenB);
-    }
-
     /// @notice Snapshot a destination terminal's pre-call token balance and check forwarding status.
     /// @dev Combines both the balance snapshot and forwarding probe into a single helper to avoid duplicate
     /// `_isForwardingTerminal` calls in the pay/addToBalance flows.
@@ -1875,7 +1863,8 @@ contract JBRouterTerminal is
         returns (IJBTerminal terminal, address resultToken)
     {
         if (preferredToken != address(0)) {
-            if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+            // Same-routing-asset check: exact match, or both normalize to the same wrapped-native form.
+            if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
                 terminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
                 if (address(terminal) != address(0)) return (terminal, preferredToken);
             }
