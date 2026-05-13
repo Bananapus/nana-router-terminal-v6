@@ -1404,7 +1404,7 @@ contract JBRouterTerminal is
         address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
-        bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
+        bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
 
         // Use extreme sqrtPriceLimitX96 to allow full swap execution. Slippage is enforced by
         // the post-swap minAmountOut check in the unlock callback.
@@ -1659,7 +1659,7 @@ contract JBRouterTerminal is
     /// @param amount The amount of `currency` to settle.
     /// @param canUseExistingNativeBalance Whether already-held raw native tokens can be used before unwrapping.
     function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
-        if (_unwrapCurrency(currency) == address(0)) {
+        if (Currency.unwrap(currency) == address(0)) {
             // Native-funded routes may spend the ETH they already hold.
             // Wrapped-native-funded routes must not consume unrelated raw native tokens already sitting on the router.
             if (canUseExistingNativeBalance) {
@@ -1678,7 +1678,7 @@ contract JBRouterTerminal is
             // ERC20 settlement requires PoolManager to observe the token first (`sync`), then receive the transfer,
             // then finalize the accounting with `settle`.
             POOL_MANAGER.sync(currency);
-            IERC20(_unwrapCurrency(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
+            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
             POOL_MANAGER.settle();
         }
     }
@@ -1691,7 +1691,7 @@ contract JBRouterTerminal is
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native token output, wrap it (downstream _handleSwap unwraps if needed).
-        if (_unwrapCurrency(currency) == address(0)) _wrapNativeToken(amount);
+        if (Currency.unwrap(currency) == address(0)) _wrapNativeToken(amount);
     }
 
     /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
@@ -2657,13 +2657,6 @@ contract JBRouterTerminal is
     /// @return currency The wrapped currency value.
     function _wrapCurrency(address token) internal pure returns (Currency currency) {
         return Currency.wrap(token);
-    }
-
-    /// @notice Unwrap a Uniswap V4 `Currency` back into an address.
-    /// @param currency The currency value to unwrap.
-    /// @return token The unwrapped token address.
-    function _unwrapCurrency(Currency currency) internal pure returns (address token) {
-        return Currency.unwrap(currency);
     }
 
     /// @notice Return the V3 fee tier at the given index.
