@@ -291,7 +291,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
             allowAddPriceFeed: false,
             ownerMustSendPayouts: false,
             holdFees: false,
-            useTotalSurplusForCashOuts: false,
+            scopeCashOutsToLocalBalances: true,
             useDataHookForPay: true,
             useDataHookForCashOut: false,
             dataHook: address(buybackHook),
