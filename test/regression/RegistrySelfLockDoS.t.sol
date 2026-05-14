@@ -65,19 +65,18 @@ contract RegistrySelfLockDoSTest is Test {
         registry.setDefaultTerminal(registry);
     }
 
-    function test_lockingForwarderThatResolvesToRegistryRevertsBeforeLock() public {
+    function test_setDefaultTerminalRejectsForwarderThatResolvesToRegistry() public {
         IJBTerminal forwarder = IJBTerminal(address(new RegistrySelfLockForwarder(registry)));
 
+        // The registry now walks the forwarding chain (forwarder -> registry) and rejects the
+        // default before it can ever be installed, so a locking attempt is never reachable.
         vm.prank(owner);
-        registry.setDefaultTerminal(forwarder);
-
-        vm.prank(projectOwner);
         vm.expectRevert(
             abi.encodeWithSelector(
                 JBRouterTerminalRegistry.JBRouterTerminalRegistry_CircularForward.selector, forwarder
             )
         );
-        registry.lockTerminalFor(PROJECT_ID, forwarder);
+        registry.setDefaultTerminal(forwarder);
 
         assertFalse(registry.hasLockedTerminal(PROJECT_ID), "bad route is not locked");
     }
