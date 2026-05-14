@@ -313,11 +313,25 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// value, the upstream payer is propagated so a forwarding chain (project payer -> registry
     /// -> router) refunds the true originator instead of the intermediary. Otherwise the direct
     /// caller is recorded — the common direct-call case.
-    function _originalPayerOrSender() internal view returns (address) {
+    /// @return originalPayerOrSender The upstream payer if the resolved sender is a forwarding
+    /// tracker that returns a non-zero address; otherwise the resolved sender itself.
+    function _originalPayerOrSender() internal view returns (address originalPayerOrSender) {
+        // Resolve through ERC-2771 so a trusted meta-tx forwarder is transparently unwrapped.
         address sender = _msgSender();
+
+        // EOAs and contracts without code can't implement IJBPayerTracker — record them directly.
         if (sender.code.length == 0) return sender;
+
+        // Probe the caller for IJBPayerTracker.originalPayer() via staticcall so a reverting or
+        // non-conformant caller does not bubble up — fall back to the resolved sender on failure.
         (bool ok, bytes memory data) = sender.staticcall(abi.encodeWithSelector(IJBPayerTracker.originalPayer.selector));
+
+        // Caller doesn't implement the interface (revert) or returned a truncated payload — treat
+        // it as a direct payment from the caller itself.
         if (!ok || data.length < 32) return sender;
+
+        // Decode the upstream payer the caller advertised. A zero value means "no upstream tracked",
+        // which only happens when the caller is itself receiving a direct call — record the caller.
         address upstream = abi.decode(data, (address));
         return upstream == address(0) ? sender : upstream;
     }
