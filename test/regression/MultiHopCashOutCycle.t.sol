@@ -279,12 +279,15 @@ contract MultiHopCashOutCycleTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: IPermit2(makeAddr("permit2")),
-            weth: IWETH9(makeAddr("weth")),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            wrappedNativeToken: IWETH9(makeAddr("weth")),
             factory: IUniswapV3Factory(address(new MockNoV3Factory())),
             poolManager: IPoolManager(address(0)),
-            buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            univ4Hook: address(0)
         });
 
         sourceToken = new MockCycleToken();

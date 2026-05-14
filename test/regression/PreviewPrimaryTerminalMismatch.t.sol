@@ -151,14 +151,14 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: permit2,
-            weth: weth,
-            factory: factory,
-            poolManager: poolManager,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
         });
-        resolver = new JBPayRouteResolver(directory, weth);
+        router.setChainSpecificConstants({
+            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
+        });
+        resolver = new JBPayRouteResolver({directory: directory});
 
         token = new RegressionMismatchToken();
         inputToken = new RegressionMismatchToken();
@@ -229,7 +229,9 @@ contract PreviewPrimaryTerminalMismatchTest is Test {
             abi.encode(uint128(0))
         );
 
-        (address tokenOut, IJBTerminal destTerminal) = resolver.resolveTokenOut(router, 1, address(inputToken), "");
+        (address tokenOut, IJBTerminal destTerminal) = resolver.resolveTokenOut({
+            router: router, wrappedNativeToken: address(weth), projectId: 1, tokenIn: address(inputToken), metadata: ""
+        });
 
         assertEq(tokenOut, address(token), "fallback discovery should still pick the accepted token");
         assertEq(

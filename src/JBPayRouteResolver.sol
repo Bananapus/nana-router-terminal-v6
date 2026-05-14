@@ -32,18 +32,18 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @notice The directory storing project terminal relationships, cached from the router at construction time.
     IJBDirectory public immutable DIRECTORY;
 
-    /// @notice The ERC-20 wrapper for the chain's native token, cached from the router at construction time.
-    IWETH9 public immutable WRAPPED_NATIVE_TOKEN;
-
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
     /// @param directory The directory storing project terminal relationships.
-    /// @param weth The ERC-20 wrapper for the chain's native token, used for router token normalization.
-    constructor(IJBDirectory directory, IWETH9 weth) {
+    /// @dev The wrapped-native-token address is intentionally NOT cached here. The router passes it in as a parameter
+    /// (`address wrappedNativeToken`) on every external resolver call and the resolver threads it through internal
+    /// helpers. This keeps the resolver's constructor inputs chain-same (no chain-specific WETH baked in) so its
+    /// CREATE address (router + nonce 1) stays unified, AND avoids paying an extra external call per normalization
+    /// step inside loops like `_discoverAcceptedToken`.
+    constructor(IJBDirectory directory) {
         DIRECTORY = directory;
-        WRAPPED_NATIVE_TOKEN = weth;
     }
 
     //*********************************************************************//
@@ -140,12 +140,15 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with `tokenIn`.
     /// @dev Falls back to the first accepted token if no pool exists.
     /// @param router The router whose normalization and pool-discovery helpers should be used.
+    /// @param wrappedNativeToken The router's wrapped-native-token address (threaded from the caller to avoid an extra
+    /// external call on every normalization in this loop).
     /// @param projectId The destination project whose accepted tokens should be searched.
     /// @param tokenIn The input token to find a route from.
     /// @return tokenOut The best accepted token found.
     /// @return destTerminal The terminal that accepts `tokenOut`.
     function _discoverAcceptedToken(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn
     )
@@ -157,7 +160,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         IJBDirectory directory = DIRECTORY;
 
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
-        address normalizedTokenIn = _normalizedTokenOf(tokenIn);
+        address normalizedTokenIn = _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenIn});
 
         // Read the destination project's currently known terminals directly from the directory.
         IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
@@ -187,7 +190,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address candidateToken = contexts[j].token;
 
                 // Normalize the candidate so native-vs-wrapped comparisons behave the same as the router.
-                address normalizedCandidate = _normalizedTokenOf(candidateToken);
+                address normalizedCandidate =
+                    _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken});
 
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
                 if (normalizedCandidate == normalizedTokenIn) {
@@ -366,15 +370,25 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Check whether two tokens share the same routing representation for the router.
+    /// @param wrappedNativeToken The router's wrapped-native-token address, used to normalize native vs wrapped.
     /// @param tokenA The first token to compare.
     /// @param tokenB The second token to compare.
     /// @return hasSameAsset A flag indicating whether the router would treat both tokens as the same asset.
-    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
+    function _hasSameRoutingAsset(
+        address wrappedNativeToken,
+        address tokenA,
+        address tokenB
+    )
+        internal
+        pure
+        returns (bool hasSameAsset)
+    {
         // Treat exact-token matches as the same routing asset without extra normalization work.
         if (tokenA == tokenB) return true;
 
         // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
-        return _normalizedTokenOf(tokenA) == _normalizedTokenOf(tokenB);
+        return _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenA})
+            == _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenB});
     }
 
     /// @notice Whether previewing through a terminal would cycle back into the router.
@@ -397,14 +411,23 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Normalize a token into the form the router uses for routing comparisons.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param token The token to normalize.
     /// @return normalizedToken The normalized token address.
-    function _normalizedTokenOf(address token) internal view returns (address normalizedToken) {
-        return token == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : token;
+    function _normalizedTokenOf(
+        address wrappedNativeToken,
+        address token
+    )
+        internal
+        pure
+        returns (address normalizedToken)
+    {
+        return token == JBConstants.NATIVE_TOKEN ? wrappedNativeToken : token;
     }
 
     /// @notice Preview the amount that would be routed into a specific destination token.
     /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param destProjectId The destination project the router is trying to pay.
     /// @param tokenIn The token currently available to route.
     /// @param amount The amount of `tokenIn` to preview.
@@ -414,6 +437,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return routedAmountIn The amount of `routedTokenIn` that would reach the destination terminal.
     function _previewAmountToToken(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 destProjectId,
         address tokenIn,
         uint256 amount,
@@ -436,7 +460,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
 
         // Return early when the routed token already matches the desired destination token.
-        if (_hasSameRoutingAsset({tokenA: routedTokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({wrappedNativeToken: wrappedNativeToken, tokenA: routedTokenIn, tokenB: tokenOut})) {
             return (tokenOut, routedAmountIn);
         }
 
@@ -467,6 +491,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return hookSpecifications The hook specifications returned by the terminal preview.
     function _previewPayRouteForCandidate(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         uint256 amount,
@@ -490,6 +515,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // First preview the route into the candidate destination token so the terminal is scored on post-route inputs.
         (address routedTokenIn, uint256 routedAmountIn) = _previewAmountToToken({
             router: router,
+            wrappedNativeToken: wrappedNativeToken,
             destProjectId: projectId,
             tokenIn: tokenIn,
             amount: amount,
@@ -532,6 +558,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return amountOut The amount of `tokenOut` that would be routed.
     function _previewRoute(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 destProjectId,
         address tokenIn,
         uint256 amount,
@@ -555,11 +582,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         if (address(destTerminal) != address(0)) return (destTerminal, tokenIn, amount);
 
         // Resolve the destination token and terminal that the project would accept from the remaining input.
-        (tokenOut, destTerminal) =
-            _resolveTokenOut({router: router, projectId: destProjectId, tokenIn: tokenIn, metadata: metadata});
+        (tokenOut, destTerminal) = _resolveTokenOut({
+            router: router,
+            wrappedNativeToken: wrappedNativeToken,
+            projectId: destProjectId,
+            tokenIn: tokenIn,
+            metadata: metadata
+        });
 
         // Return the current amount unchanged when no swap is needed after token resolution.
-        if (_hasSameRoutingAsset({tokenA: tokenIn, tokenB: tokenOut})) {
+        if (_hasSameRoutingAsset({wrappedNativeToken: wrappedNativeToken, tokenA: tokenIn, tokenB: tokenOut})) {
             return (destTerminal, tokenOut, amount);
         }
 
@@ -591,7 +623,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
     {
         // When the input is not a JB project token, the current input already is the routed input.
-        if (_sourceProjectIdOf({router: router, tokenIn: tokenIn}) == 0) return (resolvedTerminal, tokenIn, amount);
+        if (tokenIn == JBConstants.NATIVE_TOKEN || router.TOKENS().projectIdOf(IJBToken(tokenIn)) == 0) {
+            return (resolvedTerminal, tokenIn, amount);
+        }
 
         // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
         return router.previewCashOutLoopOf({
@@ -605,6 +639,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
     /// @notice Resolve what output token a project accepts for a given input token.
     /// @param router The router whose view helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
     /// @param projectId The destination project to pay.
     /// @param tokenIn The input token to route.
     /// @param metadata Metadata forwarded into route-token resolution.
@@ -612,6 +647,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return destTerminal The terminal that accepts `tokenOut`.
     function _resolveTokenOut(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         bytes calldata metadata
@@ -653,8 +689,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Then try the native-token and wrapped-native-token equivalent form before falling back to pool discovery.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == address(WRAPPED_NATIVE_TOKEN)) {
-            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : JBConstants.NATIVE_TOKEN;
+        if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == wrappedNativeToken) {
+            tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? wrappedNativeToken : JBConstants.NATIVE_TOKEN;
             destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) != address(0)
@@ -665,7 +701,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
 
         // Finally discover the best accepted token using the router's liquidity heuristic.
-        (tokenOut, destTerminal) = _discoverAcceptedToken({router: router, projectId: projectId, tokenIn: tokenIn});
+        (tokenOut, destTerminal) = _discoverAcceptedToken({
+            router: router, wrappedNativeToken: wrappedNativeToken, projectId: projectId, tokenIn: tokenIn
+        });
 
         // Revert when discovery failed entirely or only found a circular route.
         if (
@@ -738,21 +776,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         reservedTokenCount = tokenCount - beneficiaryTokenCount;
     }
 
-    /// @notice Resolve which JB project a routed token should cash out from, if any.
-    /// @param router The router terminal whose project-token lookup should be used.
-    /// @param tokenIn The current route input token.
-    /// @return sourceProjectId The source project ID, or 0 when `tokenIn` is not a JB project token.
-    function _sourceProjectIdOf(
-        IJBPayRoutePreviewer router,
-        address tokenIn
-    )
-        internal
-        view
-        returns (uint256 sourceProjectId)
-    {
-        if (tokenIn != JBConstants.NATIVE_TOKEN) sourceProjectId = router.TOKENS().projectIdOf(IJBToken(tokenIn));
-    }
-
     /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
     /// @param currentBeneficiaryTokenCount The beneficiary token count from the strongest route so far.
     /// @param currentReservedTokenCount The reserved token count from the strongest route so far.
@@ -821,6 +844,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @inheritdoc IJBPayRouteResolver
     function previewBestPayRoute(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         uint256 amount,
@@ -864,6 +888,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             // Score the explicitly requested route directly instead of scanning every accepted token.
             return _previewPayRouteForCandidate({
                 router: router,
+                wrappedNativeToken: wrappedNativeToken,
                 projectId: projectId,
                 tokenIn: tokenIn,
                 amount: amount,
@@ -894,7 +919,15 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
             // Isolate each candidate preview so one broken route does not brick the whole search.
             try self.previewPayRouteForCandidate(
-                router, projectId, tokenIn, amount, beneficiary, metadata, candidateTokens[i], candidateTerminal
+                router,
+                wrappedNativeToken,
+                projectId,
+                tokenIn,
+                amount,
+                beneficiary,
+                metadata,
+                candidateTokens[i],
+                candidateTerminal
             ) returns (
                 IJBTerminal candidateDestTerminal,
                 address candidateTokenOut,
@@ -944,7 +977,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // No candidate token could be scored — fall back to the router's generic route resolution.
         // Uses an external self-call (`self.previewFallbackRoute`) so Solidity's try/catch can isolate
         // reverts from broken terminals or price feeds without bricking the entire best-route preview.
-        try self.previewFallbackRoute(router, projectId, tokenIn, amount, beneficiary, metadata) returns (
+        try self.previewFallbackRoute(
+            router, wrappedNativeToken, projectId, tokenIn, amount, beneficiary, metadata
+        ) returns (
             IJBTerminal fallbackDestTerminal,
             address fallbackTokenOut,
             uint256 fallbackAmountOut,
@@ -985,6 +1020,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return hookSpecifications Any pay-hook specifications returned by the terminal preview.
     function previewFallbackRoute(
         IJBPayRoutePreviewer routePreviewer,
+        address wrappedNativeToken,
         uint256 destProjectId,
         address tokenIn,
         uint256 amountIn,
@@ -1005,7 +1041,12 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     {
         // Resolve which terminal and token the fallback route would use.
         (destTerminal, tokenOut, amountOut) = _previewRoute({
-            router: routePreviewer, destProjectId: destProjectId, tokenIn: tokenIn, amount: amountIn, metadata: metadata
+            router: routePreviewer,
+            wrappedNativeToken: wrappedNativeToken,
+            destProjectId: destProjectId,
+            tokenIn: tokenIn,
+            amount: amountIn,
+            metadata: metadata
         });
 
         // Simulate the terminal pay to get token counts and hook specs.
@@ -1045,6 +1086,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @return hookSpecifications The hook specifications returned by the terminal preview.
     function previewPayRouteForCandidate(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         uint256 amount,
@@ -1067,6 +1109,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     {
         return _previewPayRouteForCandidate({
             router: router,
+            wrappedNativeToken: wrappedNativeToken,
             projectId: projectId,
             tokenIn: tokenIn,
             amount: amount,
@@ -1080,6 +1123,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @inheritdoc IJBPayRouteResolver
     function resolveTokenOut(
         IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
         uint256 projectId,
         address tokenIn,
         bytes calldata metadata
@@ -1088,7 +1132,13 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        return _resolveTokenOut({router: router, projectId: projectId, tokenIn: tokenIn, metadata: metadata});
+        return _resolveTokenOut({
+            router: router,
+            wrappedNativeToken: wrappedNativeToken,
+            projectId: projectId,
+            tokenIn: tokenIn,
+            metadata: metadata
+        });
     }
 
     /// @inheritdoc IJBPayRouteResolver

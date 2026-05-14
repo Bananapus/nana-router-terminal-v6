@@ -51,17 +51,10 @@ contract RefundToBeneficiaryTest is Test {
 }
 
 contract HarnessRouterTerminal is JBRouterTerminal {
+    // Solidity disallows named-args in parent ctor invocations; positional required.
     constructor()
         JBRouterTerminal(
-            IJBDirectory(address(0)),
-            IJBTokens(address(0)),
-            IPermit2(address(0)),
-            IWETH9(address(new MockWETH())),
-            IUniswapV3Factory(address(0)),
-            IPoolManager(address(0)),
-            address(0),
-            address(0),
-            address(0)
+            IJBDirectory(address(0)), IJBTokens(address(0)), IPermit2(address(0)), address(0), address(0), msg.sender
         )
     {}
 

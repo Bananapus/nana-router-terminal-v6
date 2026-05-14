@@ -244,12 +244,15 @@ contract V4QuoteAndSettlementForkTest is Test {
             directory: jbDirectory,
             tokens: jbTokens,
             permit2: PERMIT2,
-            weth: WETH,
+            buybackHook: address(0),
+            trustedForwarder: trustedForwarder,
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            wrappedNativeToken: WETH,
             factory: IUniswapV3Factory(address(noV3Factory)),
             poolManager: V4_POOL_MANAGER,
-            buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: trustedForwarder
+            univ4Hook: address(0)
         });
 
         feeProjectId = _launchProject({acceptedToken: JBConstants.NATIVE_TOKEN, decimals: 18});

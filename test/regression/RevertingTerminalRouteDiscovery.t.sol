@@ -138,7 +138,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         vm.etch(address(directory), hex"00");
         vm.etch(address(router), hex"00");
 
-        resolver = new JBPayRouteResolver({directory: directory, weth: weth});
+        resolver = new JBPayRouteResolver({directory: directory});
 
         // Create distinct token addresses for testing.
         tokenA = makeAddr("tokenA");
@@ -198,8 +198,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        (address resolvedTokenOut, IJBTerminal resolvedTerminal) =
-            resolver.resolveTokenOut({router: router, projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""});
+        (address resolvedTokenOut, IJBTerminal resolvedTerminal) = resolver.resolveTokenOut({
+            router: router, wrappedNativeToken: address(weth), projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""
+        });
 
         assertEq(resolvedTokenOut, tokenA, "should resolve to tokenA from the healthy terminal");
         assertEq(address(resolvedTerminal), address(goodTerminal), "should resolve to goodTerminal");
@@ -260,8 +261,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        (address resolvedTokenOut, IJBTerminal resolvedTerminal) =
-            resolver.resolveTokenOut({router: router, projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""});
+        (address resolvedTokenOut, IJBTerminal resolvedTerminal) = resolver.resolveTokenOut({
+            router: router, wrappedNativeToken: address(weth), projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""
+        });
 
         // The reverting terminal is skipped; the good terminal's token is discovered.
         assertEq(resolvedTokenOut, tokenA, "should discover tokenA despite the reverting terminal");
@@ -310,7 +312,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
 
         // Should revert because the only terminal reverts, leaving no discovered route.
         vm.expectRevert();
-        resolver.resolveTokenOut({router: router, projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""});
+        resolver.resolveTokenOut({
+            router: router, wrappedNativeToken: address(weth), projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -408,6 +412,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         // Call previewBestPayRoute — should succeed despite the reverting terminal.
         (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
+            wrappedNativeToken: address(weth),
             projectId: PROJECT_ID,
             tokenIn: tokenIn,
             amount: 100 ether,
@@ -466,6 +471,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         // values.
         (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
+            wrappedNativeToken: address(weth),
             projectId: PROJECT_ID,
             tokenIn: tokenIn,
             amount: 100 ether,

@@ -71,6 +71,7 @@ contract JBRouterTerminal is
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    error JBRouterTerminal_AlreadyConfigured();
     error JBRouterTerminal_AmountOverflow(uint256 amount);
     error JBRouterTerminal_CallerNotPool(address caller);
     error JBRouterTerminal_CallerNotPoolManager(address caller);
@@ -87,6 +88,7 @@ contract JBRouterTerminal is
     );
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+    error JBRouterTerminal_Unauthorized(address caller);
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
@@ -119,34 +121,33 @@ contract JBRouterTerminal is
     //*********************************************************************//
 
     /// @notice The canonical buyback hook whose preview hook specification metadata this router understands.
+    /// @dev Chain-same: `JBBuybackHook` is deployed via CREATE2 to a unified address on every chain, so this stays
+    /// `immutable` without breaking the router's own chain-same CREATE2 address.
     address public immutable BUYBACK_HOOK;
-
-    /// @notice The canonical Uniswap V4 router hook address used by supported hooked pools.
-    address public immutable UNIV4_HOOK;
 
     /// @notice The directory of terminals and controllers for projects.
     IJBDirectory public immutable DIRECTORY;
 
-    /// @notice The Uniswap V3 factory used for pool discovery and verification.
-    IUniswapV3Factory public immutable FACTORY;
-
     /// @notice The Permit2 contract used for token approvals and transfers.
     IPermit2 public immutable override PERMIT2;
 
-    /// @notice The Uniswap V4 PoolManager. Can be address(0) if V4 is not deployed on this chain.
-    IPoolManager public immutable POOL_MANAGER;
-
     /// @notice Manages minting, burning, and balances of projects' tokens and token credits.
     IJBTokens public immutable TOKENS;
-
-    /// @notice The ERC-20 wrapper for the native token.
-    IWETH9 public immutable WRAPPED_NATIVE_TOKEN;
 
     //*********************************************************************//
     // -------------- internal immutable stored properties -------------- //
     //*********************************************************************//
 
+    /// @notice The deployer authorized to call `setChainSpecificConstants` exactly once.
+    /// @dev Held immutable so the constructor inputs are byte-identical across chains and the CREATE2 address is
+    /// unified. Mirrors the `JBOptimismSuckerDeployer.setChainSpecificConstants` pattern in nana-suckers-v6.
+    address internal immutable _DEPLOYER;
+
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
+    /// @dev Deployed in the constructor with chain-same inputs (just `directory` — the resolver does NOT cache
+    /// `WRAPPED_NATIVE_TOKEN` locally; the router passes it in on every external resolver call as a parameter to
+    /// avoid an extra external call on each normalization step). Because this router's address is chain-same via
+    /// CREATE2 and the resolver is deployed at the router's nonce 1, the resolver's address is chain-same too.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
 
     /// @notice Pre-computed metadata ID for "permit2".
@@ -159,6 +160,32 @@ contract JBRouterTerminal is
     bytes4 internal immutable _QUOTE_FOR_SWAP_ID;
 
     //*********************************************************************//
+    // --------------------- public stored properties -------------------- //
+    //*********************************************************************//
+
+    /// @notice The Uniswap V3 factory used for pool discovery and verification.
+    /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
+    /// constructor inputs are byte-identical on every chain (Uniswap V3 deploys to a different factory address per
+    /// chain).
+    IUniswapV3Factory public FACTORY;
+
+    /// @notice The Uniswap V4 PoolManager. Can be `address(0)` if V4 is not deployed on this chain.
+    /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
+    /// constructor inputs are byte-identical on every chain.
+    IPoolManager public POOL_MANAGER;
+
+    /// @notice The canonical Uniswap V4 router hook address used by supported hooked pools.
+    /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable because
+    /// `JBUniswapV4Hook` inherits Uniswap's `BaseHook -> ImmutableState`, which forces a chain-specific PoolManager
+    /// immutable inside the hook itself — making the hook chain-different by design.
+    address public UNIV4_HOOK;
+
+    /// @notice The ERC-20 wrapper for the native token.
+    /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
+    /// constructor inputs are byte-identical on every chain (WETH/WCELO/etc. differ per chain).
+    IWETH9 public override WRAPPED_NATIVE_TOKEN;
+
+    //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
     //*********************************************************************//
 
@@ -169,33 +196,26 @@ contract JBRouterTerminal is
     /// @param directory A contract storing directories of terminals and controllers for each project.
     /// @param tokens A contract managing project token balances.
     /// @param permit2 A permit2 utility.
-    /// @param weth The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum, WCELO on Celo).
-    /// @param factory The Uniswap V3 factory for pool discovery.
-    /// @param poolManager The Uniswap V4 PoolManager (address(0) if V4 not available).
-    /// @param univ4Hook The canonical Uniswap V4 router hook used by supported hooked pools.
+    /// @param buybackHook The canonical buyback hook (chain-same across all chains).
     /// @param trustedForwarder The trusted forwarder for the contract.
+    /// @param deployer The address authorized to call `setChainSpecificConstants` exactly once. Held immutable so the
+    /// constructor inputs are byte-identical across chains and the CREATE2 address is unified.
     constructor(
         IJBDirectory directory,
         IJBTokens tokens,
         IPermit2 permit2,
-        IWETH9 weth,
-        IUniswapV3Factory factory,
-        IPoolManager poolManager,
         address buybackHook,
-        address univ4Hook,
-        address trustedForwarder
+        address trustedForwarder,
+        address deployer
     )
         ERC2771Context(trustedForwarder)
     {
         DIRECTORY = directory;
         TOKENS = tokens;
-        FACTORY = factory;
-        POOL_MANAGER = poolManager;
         PERMIT2 = permit2;
-        WRAPPED_NATIVE_TOKEN = weth;
         BUYBACK_HOOK = buybackHook;
-        UNIV4_HOOK = univ4Hook;
-        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory, weth: weth})));
+        _DEPLOYER = deployer;
+        _PAY_ROUTE_RESOLVER = IJBPayRouteResolver(address(new JBPayRouteResolver({directory: directory})));
 
         // Pre-compute metadata IDs to avoid hashing string literals on every call.
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
@@ -370,6 +390,32 @@ contract JBRouterTerminal is
         // pay(), making a balance-delta check produce false reverts. Fee-on-transfer (FOT) tokens
         // are therefore NOT supported for routed payments — the terminal will receive fewer tokens
         // than `amount` but the router cannot detect or prevent this. See RISKS.md for details.
+    }
+
+    /// @notice One-shot setter for the chain-specific Uniswap and wrapped-native addresses.
+    /// @dev Callable only by `_DEPLOYER` and only once (when `WRAPPED_NATIVE_TOKEN` is still `address(0)`). After this
+    /// call all four values are effectively immutable for the contract's lifetime. Mirrors the
+    /// `JBOptimismSuckerDeployer.setChainSpecificConstants` pattern so the contract's CREATE2 inputs stay
+    /// byte-identical across chains and its deployed address is unified.
+    /// @param wrappedNativeToken The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum,
+    /// WCELO on Celo).
+    /// @param factory The Uniswap V3 factory for pool discovery on this chain.
+    /// @param poolManager The Uniswap V4 PoolManager on this chain (may be `address(0)` if V4 is not deployed there).
+    /// @param univ4Hook The canonical Uniswap V4 router hook on this chain.
+    function setChainSpecificConstants(
+        IWETH9 wrappedNativeToken,
+        IUniswapV3Factory factory,
+        IPoolManager poolManager,
+        address univ4Hook
+    )
+        external
+    {
+        if (msg.sender != _DEPLOYER) revert JBRouterTerminal_Unauthorized({caller: msg.sender});
+        if (address(WRAPPED_NATIVE_TOKEN) != address(0)) revert JBRouterTerminal_AlreadyConfigured();
+        WRAPPED_NATIVE_TOKEN = wrappedNativeToken;
+        FACTORY = factory;
+        POOL_MANAGER = poolManager;
+        UNIV4_HOOK = univ4Hook;
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
@@ -845,8 +891,11 @@ contract JBRouterTerminal is
         )
     {
         // Delegate the heavy preview-selection logic to the helper contract so the router stays within runtime size.
+        // Pass `wrappedNativeToken` once (single SLOAD) so the resolver does not have to call back into the router for
+        // it on every normalization step.
         return _PAY_ROUTE_RESOLVER.previewBestPayRoute({
             router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
             projectId: projectId,
             tokenIn: tokenIn,
             amount: amount,
@@ -880,18 +929,6 @@ contract JBRouterTerminal is
             amount: amount,
             normalizedTokenOut: _normalize(tokenOut)
         });
-    }
-
-    /// @notice Check whether two tokens share the same routing representation.
-    /// @param tokenA The first token to compare.
-    /// @param tokenB The second token to compare.
-    /// @return hasSameAsset A flag indicating whether the router treats both tokens as the same asset.
-    function _hasSameRoutingAsset(address tokenA, address tokenB) internal view returns (bool hasSameAsset) {
-        // Treat exact-token matches as the same asset without doing any normalization work.
-        if (tokenA == tokenB) return true;
-
-        // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
-        return _normalize(tokenA) == _normalize(tokenB);
     }
 
     /// @notice Snapshot a destination terminal's pre-call token balance and check forwarding status.
@@ -1355,7 +1392,7 @@ contract JBRouterTerminal is
         address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
-        bool zeroForOne = _unwrapCurrency(key.currency0) == v4In;
+        bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
 
         // Use extreme sqrtPriceLimitX96 to allow full swap execution. Slippage is enforced by
         // the post-swap minAmountOut check in the unlock callback.
@@ -1470,7 +1507,11 @@ contract JBRouterTerminal is
 
         // Resolve what token the destination project accepts and which terminal to use.
         (tokenOut, destTerminal) = _PAY_ROUTE_RESOLVER.resolveTokenOut({
-            router: IJBPayRoutePreviewer(address(this)), projectId: destProjectId, tokenIn: tokenIn, metadata: metadata
+            router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            projectId: destProjectId,
+            tokenIn: tokenIn,
+            metadata: metadata
         });
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.
@@ -1606,7 +1647,7 @@ contract JBRouterTerminal is
     /// @param amount The amount of `currency` to settle.
     /// @param canUseExistingNativeBalance Whether already-held raw native tokens can be used before unwrapping.
     function _settleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) internal {
-        if (_unwrapCurrency(currency) == address(0)) {
+        if (Currency.unwrap(currency) == address(0)) {
             // Native-funded routes may spend the ETH they already hold.
             // Wrapped-native-funded routes must not consume unrelated raw native tokens already sitting on the router.
             if (canUseExistingNativeBalance) {
@@ -1625,7 +1666,7 @@ contract JBRouterTerminal is
             // ERC20 settlement requires PoolManager to observe the token first (`sync`), then receive the transfer,
             // then finalize the accounting with `settle`.
             POOL_MANAGER.sync(currency);
-            IERC20(_unwrapCurrency(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
+            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
             POOL_MANAGER.settle();
         }
     }
@@ -1638,7 +1679,7 @@ contract JBRouterTerminal is
         POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
 
         // If native token output, wrap it (downstream _handleSwap unwraps if needed).
-        if (_unwrapCurrency(currency) == address(0)) _wrapNativeToken(amount);
+        if (Currency.unwrap(currency) == address(0)) _wrapNativeToken(amount);
     }
 
     /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
@@ -1822,7 +1863,8 @@ contract JBRouterTerminal is
         returns (IJBTerminal terminal, address resultToken)
     {
         if (preferredToken != address(0)) {
-            if (_hasSameRoutingAsset({tokenA: token, tokenB: preferredToken})) {
+            // Same-routing-asset check: exact match, or both normalize to the same wrapped-native form.
+            if (token == preferredToken || _normalize(token) == _normalize(preferredToken)) {
                 terminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: preferredToken});
                 if (address(terminal) != address(0)) return (terminal, preferredToken);
             }
@@ -2022,7 +2064,7 @@ contract JBRouterTerminal is
 
                 // Priority 1: Does the destination project directly accept this token through a usable terminal?
                 IJBTerminal destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: contextToken});
-                candidates = _recordCashOutPathCandidate({
+                _recordCashOutPathCandidate({
                     candidates: candidates, contextToken: contextToken, terminal: terminal, destTerminal: destTerminal
                 });
 
@@ -2056,11 +2098,11 @@ contract JBRouterTerminal is
     }
 
     /// @notice Record a reclaim token as a direct, recursive, or base fallback during cashout-path discovery.
-    /// @param candidates The current fallback candidates accumulated so far.
+    /// @dev Mutates `candidates` in place (memory struct passed by reference) — no return value needed.
+    /// @param candidates The current fallback candidates accumulated so far. Updated in-place by this call.
     /// @param contextToken The token exposed by the current cashout terminal accounting context.
     /// @param terminal The cashout terminal that can reclaim `contextToken`.
     /// @param destTerminal The destination project's direct terminal for `contextToken`, if any.
-    /// @return updatedCandidates The fallback set after considering `contextToken`.
     function _recordCashOutPathCandidate(
         CashOutPathCandidates memory candidates,
         address contextToken,
@@ -2069,10 +2111,7 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (CashOutPathCandidates memory updatedCandidates)
     {
-        updatedCandidates = candidates;
-
         // Treat native ETH as a non-recursive base asset. For ERC-20s, detect whether the token is itself a JB
         // project token so recursive and base fallbacks stay disjoint.
         bool isJbProjectToken;
@@ -2081,22 +2120,22 @@ contract JBRouterTerminal is
         }
 
         // Record the first directly accepted token only when its destination terminal is actually usable.
-        if (address(destTerminal) != address(0) && address(updatedCandidates.directFallbackTerminal) == address(0)) {
-            updatedCandidates.directFallbackToken = contextToken;
-            updatedCandidates.directFallbackTerminal = terminal;
+        if (address(destTerminal) != address(0) && address(candidates.directFallbackTerminal) == address(0)) {
+            candidates.directFallbackToken = contextToken;
+            candidates.directFallbackTerminal = terminal;
         }
 
         // Record the first JB project token so the router can recurse through another cashout hop if no direct or
         // base-token exit ends up existing.
-        if (address(updatedCandidates.fallbackTerminal) == address(0) && isJbProjectToken) {
-            updatedCandidates.fallbackToken = contextToken;
-            updatedCandidates.fallbackTerminal = terminal;
+        if (address(candidates.fallbackTerminal) == address(0) && isJbProjectToken) {
+            candidates.fallbackToken = contextToken;
+            candidates.fallbackTerminal = terminal;
         }
 
         // Record the first non-JB base-token fallback so the router can at least continue via a swap route.
-        if (address(updatedCandidates.baseFallbackTerminal) == address(0) && !isJbProjectToken) {
-            updatedCandidates.baseFallbackToken = contextToken;
-            updatedCandidates.baseFallbackTerminal = terminal;
+        if (address(candidates.baseFallbackTerminal) == address(0) && !isJbProjectToken) {
+            candidates.baseFallbackToken = contextToken;
+            candidates.baseFallbackTerminal = terminal;
         }
     }
 
@@ -2604,13 +2643,6 @@ contract JBRouterTerminal is
     /// @return currency The wrapped currency value.
     function _wrapCurrency(address token) internal pure returns (Currency currency) {
         return Currency.wrap(token);
-    }
-
-    /// @notice Unwrap a Uniswap V4 `Currency` back into an address.
-    /// @param currency The currency value to unwrap.
-    /// @return token The unwrapped token address.
-    function _unwrapCurrency(Currency currency) internal pure returns (address token) {
-        return Currency.unwrap(currency);
     }
 
     /// @notice Return the V3 fee tier at the given index.

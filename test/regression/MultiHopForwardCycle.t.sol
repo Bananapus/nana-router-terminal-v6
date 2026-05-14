@@ -154,12 +154,15 @@ contract MultiHopForwardCycleTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: IPermit2(makeAddr("permit2")),
-            weth: weth,
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            wrappedNativeToken: weth,
             factory: IUniswapV3Factory(makeAddr("factory")),
             poolManager: IPoolManager(address(0)),
-            buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            univ4Hook: address(0)
         });
 
         forwarderB = new ForwarderB(IJBTerminal(address(router)));

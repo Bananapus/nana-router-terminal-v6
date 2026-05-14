@@ -322,12 +322,12 @@ contract RouterTerminalSandwichForkTest is Test {
             directory: jbDirectory,
             tokens: jbTokens,
             permit2: PERMIT2,
-            weth: WETH,
-            factory: V3_FACTORY,
-            poolManager: V4_POOL_MANAGER,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: trustedForwarder
+            trustedForwarder: trustedForwarder,
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            wrappedNativeToken: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
         });
 
         v3Attacker = new V3SwapAttacker();

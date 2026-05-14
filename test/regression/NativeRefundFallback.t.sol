@@ -333,17 +333,20 @@ contract NativeRefundFallbackTest is Test {
         vm.etch(address(permit2), hex"00");
         vm.etch(address(factory), hex"00");
 
-        router = new JBRouterTerminal(
-            directory,
-            tokens,
-            permit2,
-            IWETH9(address(weth)),
-            factory,
-            IPoolManager(address(0)),
-            address(0),
-            address(0),
-            address(0)
-        );
+        router = new JBRouterTerminal({
+            directory: directory,
+            tokens: tokens,
+            permit2: permit2,
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            wrappedNativeToken: IWETH9(address(weth)),
+            factory: factory,
+            poolManager: IPoolManager(address(0)),
+            univ4Hook: address(0)
+        });
     }
 
     /// @notice When the refund recipient can accept ETH, the partial-fill leftover is sent as native ETH.

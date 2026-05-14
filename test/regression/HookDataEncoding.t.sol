@@ -68,12 +68,15 @@ contract HookDataEncodingTest is Test {
             directory: IJBDirectory(address(1)),
             tokens: IJBTokens(address(2)),
             permit2: IPermit2(address(3)),
-            weth: IWETH9(address(4)),
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        router.setChainSpecificConstants({
+            wrappedNativeToken: IWETH9(address(4)),
             factory: IUniswapV3Factory(address(5)),
             poolManager: IPoolManager(address(poolManager)),
-            buybackHook: address(0),
-            univ4Hook: hook,
-            trustedForwarder: address(0)
+            univ4Hook: hook
         });
 
         // Mock the IERC20.transfer call that _settleV4 makes (safeTransfer to pool manager).

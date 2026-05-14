@@ -262,24 +262,24 @@ contract DeployBuybackHookZeroTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: permit2,
-            weth: weth,
-            factory: factory,
-            poolManager: poolManager,
             buybackHook: buybackHook,
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        configuredRouter.setChainSpecificConstants({
+            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
         });
 
         zeroHookRouter = new JBRouterTerminal({
             directory: directory,
             tokens: tokens,
             permit2: permit2,
-            weth: weth,
-            factory: factory,
-            poolManager: poolManager,
             buybackHook: address(0),
-            univ4Hook: address(0),
-            trustedForwarder: address(0)
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        zeroHookRouter.setChainSpecificConstants({
+            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
         });
 
         jbToken = new RegressionMockERC20();

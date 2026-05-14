@@ -146,17 +146,20 @@ contract CashOutLoopLimitTest is Test {
         vm.etch(address(factory), hex"00");
         vm.etch(mockTerminal, hex"00");
 
-        routerTerminal = new JBRouterTerminal(
-            directory,
-            tokens,
-            permit2,
-            weth,
-            factory,
-            IPoolManager(address(0)), // no V4
-            address(0),
-            address(0),
-            address(0)
-        );
+        routerTerminal = new JBRouterTerminal({
+            directory: directory,
+            tokens: tokens,
+            permit2: permit2,
+            buybackHook: address(0),
+            trustedForwarder: address(0),
+            deployer: address(this)
+        });
+        routerTerminal.setChainSpecificConstants({
+            wrappedNativeToken: weth,
+            factory: factory,
+            poolManager: IPoolManager(address(0)), // no V4
+            univ4Hook: address(0)
+        });
 
         tokenA = new MockToken();
         tokenB = new MockToken();
