@@ -2065,10 +2065,7 @@ contract JBRouterTerminal is
                 // Priority 1: Does the destination project directly accept this token through a usable terminal?
                 IJBTerminal destTerminal = _usablePrimaryTerminalOf({projectId: destProjectId, token: contextToken});
                 _recordCashOutPathCandidate({
-                    candidates: candidates,
-                    contextToken: contextToken,
-                    terminal: terminal,
-                    destTerminal: destTerminal
+                    candidates: candidates, contextToken: contextToken, terminal: terminal, destTerminal: destTerminal
                 });
 
                 unchecked {

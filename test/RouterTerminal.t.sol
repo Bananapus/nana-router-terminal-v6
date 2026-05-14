@@ -2171,7 +2171,10 @@ contract RouterTerminalTest is Test {
             address(this)
         );
         noV4Router.setChainSpecificConstants({
-            wrappedNativeToken: mockWeth, factory: mockFactory, poolManager: IPoolManager(address(0)), univ4Hook: address(0)
+            wrappedNativeToken: mockWeth,
+            factory: mockFactory,
+            poolManager: IPoolManager(address(0)),
+            univ4Hook: address(0)
         });
 
         address tokenA = makeAddr("tokenA");

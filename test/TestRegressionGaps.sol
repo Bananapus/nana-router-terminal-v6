@@ -174,7 +174,9 @@ contract TestRegressionGaps is Test {
         router = new RegressionHarness({
             d: dir, p: perms, t: toks, pm: permit2, bh: address(0), tf: address(0), dep: address(this)
         });
-        router.setChainSpecificConstants({wrappedNativeToken: weth, factory: factory, poolManager: pm, univ4Hook: address(0)});
+        router.setChainSpecificConstants({
+            wrappedNativeToken: weth, factory: factory, poolManager: pm, univ4Hook: address(0)
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
