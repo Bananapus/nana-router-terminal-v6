@@ -26,6 +26,8 @@ import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 
+import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
+
 import {DefaultTerminalSegment} from "./structs/DefaultTerminalSegment.sol";
 
 /// @notice A forwarding layer that lets each project choose which router terminal receives its payments, with an
@@ -306,26 +308,45 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return ERC2771Context._msgSender();
     }
 
-    /// @notice Reject terminal choices that would forward the project back into this registry.
+    /// @notice Returns the original payer to record in transient storage. If `_msgSender()` is a
+    /// contract that exposes `IJBPayerTracker.originalPayer()` and that getter returns a non-zero
+    /// value, the upstream payer is propagated so a forwarding chain (project payer -> registry
+    /// -> router) refunds the true originator instead of the intermediary. Otherwise the direct
+    /// caller is recorded — the common direct-call case.
+    /// @return originalPayerOrSender The upstream payer if the resolved sender is a forwarding
+    /// tracker that returns a non-zero address; otherwise the resolved sender itself.
+    function _originalPayerOrSender() internal view returns (address originalPayerOrSender) {
+        // Resolve through ERC-2771 so a trusted meta-tx forwarder is transparently unwrapped.
+        address sender = _msgSender();
+
+        // EOAs and contracts without code can't implement IJBPayerTracker — record them directly.
+        if (sender.code.length == 0) return sender;
+
+        // Probe the caller for IJBPayerTracker.originalPayer() via staticcall so a reverting or
+        // non-conformant caller does not bubble up — fall back to the resolved sender on failure.
+        (bool ok, bytes memory data) = sender.staticcall(abi.encodeWithSelector(IJBPayerTracker.originalPayer.selector));
+
+        // Caller doesn't implement the interface (revert) or returned a truncated payload — treat
+        // it as a direct payment from the caller itself.
+        if (!ok || data.length < 32) return sender;
+
+        // Decode the upstream payer the caller advertised. A zero value means "no upstream tracked",
+        // which only happens when the caller is itself receiving a direct call — record the caller.
+        address upstream = abi.decode(data, (address));
+        return upstream == address(0) ? sender : upstream;
+    }
+
+    /// @notice Reject terminal choices that would forward the project back into this registry,
+    /// directly or transitively. Walks up to the depth limit `JBForwardingCheck` enforces so a
+    /// chain registry -> A -> B -> registry is caught (the previous one-hop probe missed those
+    /// transitive cycles, letting a project lock itself into a route that always loops).
     /// @param projectId The project to validate forwarding for.
     /// @param terminal The terminal to validate.
     function _requireNonCircularTerminalFor(uint256 projectId, IJBTerminal terminal) internal view {
         // Reject direct self-selection so the registry cannot forward a project to itself.
         if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
-
-        // Externally owned accounts cannot implement `terminalOf`, so there is no forwarding route to inspect.
-        if (address(terminal).code.length == 0) return;
-
-        // If the candidate is another forwarding terminal, ask where this project would end up.
-        try IJBForwardingTerminal(address(terminal)).terminalOf({projectId: projectId}) returns (
-            IJBTerminal downstreamTerminal
-        ) {
-            // Reject one-hop forwarding cycles that bounce this project back into the registry.
-            if (address(downstreamTerminal) == address(this)) {
-                revert JBRouterTerminalRegistry_CircularForward({terminal: terminal});
-            }
-        } catch {
-            // Non-forwarding terminals are valid choices; failed interface probes should not block them.
+        if (JBForwardingCheck.isCircularTerminal({target: address(this), projectId: projectId, terminal: terminal})) {
+            revert JBRouterTerminalRegistry_CircularForward({terminal: terminal});
         }
     }
 
@@ -409,8 +430,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         address previousPayer = originalPayer;
 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
-        // leftovers to the true payer.
-        originalPayer = _msgSender();
+        // leftovers to the true payer. If the immediate caller is itself a forwarding intermediary that exposes
+        // its own original payer, propagate that — otherwise refunds in nested forwards stop at the intermediary.
+        originalPayer = _originalPayerOrSender();
 
         // Reject forwards that would bounce straight back into this call's immediate caller.
         _enforceNoCircularForward(terminal);
@@ -559,8 +581,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         address previousPayer = originalPayer;
 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
-        // leftovers to the true payer.
-        originalPayer = _msgSender();
+        // leftovers to the true payer. If the immediate caller is itself a forwarding intermediary that exposes
+        // its own original payer, propagate that — otherwise refunds in nested forwards stop at the intermediary.
+        originalPayer = _originalPayerOrSender();
 
         // Reject forwards that would bounce straight back into this call's immediate caller.
         _enforceNoCircularForward(terminal);
@@ -597,6 +620,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (address(terminal) == address(this)) revert JBRouterTerminalRegistry_CircularForward(terminal);
 
         uint256 count = PROJECTS.count();
+
+        // Reject defaults that would route any current project back into the registry through a
+        // transitive forwarding chain. Probed at the current project-count snapshot since the
+        // default is what unconfigured (and all-future) projects will resolve to.
+        _requireNonCircularTerminalFor({projectId: count, terminal: terminal});
 
         // Snapshot the OUTGOING default so existing projects (ID <= count) continue resolving to
         // it, not to the new default. First-ever call has defaultTerminal == 0 and nothing to snapshot.
