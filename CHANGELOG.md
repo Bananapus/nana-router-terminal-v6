@@ -6,6 +6,32 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### `pay()` routes project-token inputs through atomic cross-project cashout
+
+When `pay(projectId, token, amount, ...)` is called with a JB project token, the router now routes through the source project's atomic `payAfterCashOutTokensOf` entrypoint on `JBMultiTerminal` (introduced in nana-core-v6 PR [#143](https://github.com/Bananapus/nana-core-v6/pull/143)) instead of doing the previous cashout-then-pay sequence as two router-driven steps. The source-side cashout fee is skipped and bound on the destination project's `_feeFreeSurplusOf` via core's balance-delta accounting. The destination project's current ruleset can opt out via `pauseCrossProjectFeeFreeInflows`, in which case the underlying core call reverts.
+
+Selection logic: the router enumerates the source project's terminals and accounting contexts, previews `(cashout, pay-route)` per candidate via `previewCashOutFrom` + `previewBestPayRoute`, and picks the `(sourceTerminal, tokenToReclaim)` that yields the highest beneficiary mint on the destination project. Per-candidate previews are isolated with `try/catch` so one broken candidate cannot brick selection. Reverts with `JBRouterTerminal_NoCashOutPath` when nothing scores.
+
+`addToBalanceOf()` now rejects JB project-token inputs with `JBRouterTerminal_ProjectTokenInputUnsupported(token, sourceProjectId)`. nana-core-v6 has no atomic `cashOut -> addToBalance` equivalent of `payAfterCashOutTokensOf`, and silently routing through a different shape than `pay()` would be a footgun. Callers wanting the previous "cash out a project token and add the reclaim to another project's balance" flow should cash out separately and call `addToBalanceOf` with the reclaim token.
+
+The recursive cashout-loop machinery in the router is removed in this PR (no caller left after the `pay()` and `addToBalanceOf()` changes):
+
+- `JBRouterTerminal`: deleted `_cashOutLoop`, `_previewCashOutLoop`, `previewCashOutLoopOf` (external), `_previewCashOutStep`, `_routeInputFromSource`, `_alignTokenToPreferredToken`, `_effectivePreviewCashOutAmount`, `_findRouteTerminal`, `_findCashOutPath`, `_recordCashOutPathCandidate`, `_minReclaimedFrom`. Removed `_MAX_CASHOUT_ITERATIONS`, `_CASH_OUT_MIN_RECLAIMED_ID`, errors `JBRouterTerminal_CashOutDidNotDeliver` and `JBRouterTerminal_CashOutLoopLimit`. `_route` and `_routeToDestination` no longer go through cashout preview — they only see non-project-token inputs.
+- `JBPayRouteResolver`: deleted `_previewRouteInputFromSource` and its call sites in `_previewAmountToToken` and `_previewRoute`. Added the new `previewBestCashOutPath` external (and its `previewCashOutThenPay` external self-call helper) — these are what the router now calls from `_payAfterCashOut`.
+- `IJBPayRoutePreviewer`: removed `previewCashOutLoopOf` from the preview surface the resolver consumes.
+- `IJBPayRouteResolver`: added `previewBestCashOutPath` and `previewCashOutThenPay`.
+- Removed: `src/structs/CashOutPathCandidates.sol` (the JB-project-token recursion fallback storage that fed `_findCashOutPath`).
+
+A local interface extension lives at `src/interfaces/IJBCashOutTerminalCrossProject.sol`: a minimal re-declaration of `payAfterCashOutTokensOf` plus the canonical `IJBCashOutTerminal` surface, used as the cast target inside the router until the bumped core release folds the function into the canonical interface. When the bumped release is consumed, that file can be deleted and the cast site can use `IJBCashOutTerminal` directly.
+
+Size impact:
+- `JBRouterTerminal` runtime: 23,706 B → 20,211 B (-3,495 B, headroom 870 → 4,365 B against EIP-170 24,576 B).
+- `JBPayRouteResolver` runtime: 10,398 B → 11,100 B (+702 B, headroom 14,178 → 13,476 B).
+
+Integrator impact:
+- `pay()` with a project-token input is strictly better-yielding now (source-side cashout fee skipped) — except when the destination project's ruleset has `pauseCrossProjectFeeFreeInflows = true`, in which case the call reverts. Front-ends should expose the opt-out flag in the destination project's ruleset config so payers can see the failure mode before submitting.
+- `addToBalanceOf()` with a project-token input now reverts. Callers needing the prior shape should perform two transactions: `cashOutTokensOf` on the source project's terminal, then `addToBalanceOf` on the router with the reclaim token.
+
 ### Chain-same CREATE2 address for `JBRouterTerminal`
 
 `JBRouterTerminal` now deploys to the same address on every chain via CREATE2. The four chain-specific

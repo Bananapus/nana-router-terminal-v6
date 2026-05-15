@@ -5,6 +5,7 @@ import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
+import {IJBCashOutTerminalCrossProject} from "./IJBCashOutTerminalCrossProject.sol";
 import {IJBPayRoutePreviewer} from "./IJBPayRoutePreviewer.sol";
 
 /// @notice Resolves the best pay route preview for a router terminal.
@@ -156,4 +157,59 @@ interface IJBPayRouteResolver {
         external
         view
         returns (IJBTerminal terminal);
+
+    /// @notice External self-call wrapper so a single candidate's preview can be isolated with `try/catch` inside
+    /// `previewBestCashOutPath`. Returns `0` for any preview that surfaced a zero reclaim or could not be scored.
+    /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
+    /// @param sourceTerminal The source project's cash-out terminal.
+    /// @param sourceProjectId The source project whose tokens were paid in.
+    /// @param cashOutCount The number of source-project tokens to burn.
+    /// @param tokenToReclaim The candidate `tokenToReclaim` being scored.
+    /// @param beneficiaryProjectId The destination project that should receive the routed payment.
+    /// @param beneficiary The address whose minted destination-project tokens to score.
+    /// @param payMetadata Metadata forwarded into the destination-side preview.
+    /// @return beneficiaryTokenCount The previewed beneficiary token count, or `0` if the candidate is unscoreable.
+    function previewCashOutThenPay(
+        IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
+        IJBCashOutTerminalCrossProject sourceTerminal,
+        uint256 sourceProjectId,
+        uint256 cashOutCount,
+        address tokenToReclaim,
+        uint256 beneficiaryProjectId,
+        address beneficiary,
+        bytes calldata payMetadata
+    )
+        external
+        view
+        returns (uint256 beneficiaryTokenCount);
+
+    /// @notice Pick the `(sourceTerminal, tokenToReclaim)` that yields the highest previewed beneficiary mint when
+    /// the router routes a JB project-token input through `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`.
+    /// @dev Walks the source project's terminals, filters to `IJBCashOutTerminal` implementers, and previews each
+    /// accounting context as a potential `tokenToReclaim`. Each candidate's score is the predicted destination-side
+    /// mint, sourced from `previewCashOutFrom` (cashout side) + `previewBestPayRoute` (destination side). Broken
+    /// candidates are isolated with `try/catch` so a single revert cannot brick selection.
+    /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
+    /// @param sourceProjectId The source project whose tokens were paid in.
+    /// @param cashOutCount The number of source-project tokens to burn.
+    /// @param beneficiaryProjectId The destination project that should receive the routed payment.
+    /// @param beneficiary The address whose minted destination-project tokens to score.
+    /// @param payMetadata Metadata forwarded into the destination-side preview.
+    /// @return sourceTerminal The winning source project's cash-out terminal, or `address(0)` if nothing scored.
+    /// @return tokenToReclaim The winning `tokenToReclaim`, or `address(0)` if nothing scored.
+    function previewBestCashOutPath(
+        IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
+        uint256 sourceProjectId,
+        uint256 cashOutCount,
+        uint256 beneficiaryProjectId,
+        address beneficiary,
+        bytes calldata payMetadata
+    )
+        external
+        view
+        returns (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim);
 }

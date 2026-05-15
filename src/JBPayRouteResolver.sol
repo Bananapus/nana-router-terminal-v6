@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
+import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
+import {IJBCashOutTerminalCrossProject} from "./interfaces/IJBCashOutTerminalCrossProject.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -448,16 +452,12 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address routedTokenIn, uint256 routedAmountIn)
     {
-        // Preview any source-project cashout first so the remaining routing work starts from the right token and
-        // amount.
-        (, routedTokenIn, routedAmountIn) = _previewRouteInputFromSource({
-            router: router,
-            destProjectId: destProjectId,
-            tokenIn: tokenIn,
-            amount: amount,
-            metadata: metadata,
-            preferredToken: tokenOut
-        });
+        // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
+        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`, so the resolver only sees non-project-token
+        // inputs here.
+        destProjectId; // Silence "unused parameter" — kept for natspec / signature stability.
+        routedTokenIn = tokenIn;
+        routedAmountIn = amount;
 
         // Return early when the routed token already matches the desired destination token.
         if (_hasSameRoutingAsset({wrappedNativeToken: wrappedNativeToken, tokenA: routedTokenIn, tokenB: tokenOut})) {
@@ -568,18 +568,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
-        // Preview any source-project cashout before attempting direct-acceptance or swap-route resolution.
-        (destTerminal, tokenIn, amount) = _previewRouteInputFromSource({
-            router: router,
-            destProjectId: destProjectId,
-            tokenIn: tokenIn,
-            amount: amount,
-            metadata: metadata,
-            preferredToken: address(0)
-        });
-
-        // Return immediately when the cashout loop already found the final destination terminal.
-        if (address(destTerminal) != address(0)) return (destTerminal, tokenIn, amount);
+        // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
+        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`; the resolver only handles non-project-token
+        // inputs here.
 
         // Resolve the destination token and terminal that the project would accept from the remaining input.
         (tokenOut, destTerminal) = _resolveTokenOut({
@@ -598,43 +589,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Otherwise preview the swap into the resolved destination token.
         amountOut =
             router.previewSwapAmountOutOf({tokenIn: tokenIn, tokenOut: tokenOut, amount: amount, metadata: metadata});
-    }
-
-    /// @notice Preview how the current route input would change after cashing out a project-token source if needed.
-    /// @param router The router terminal whose preview helpers to use.
-    /// @param destProjectId The destination project the route is trying to reach.
-    /// @param tokenIn The current route input token.
-    /// @param amount The current route input amount.
-    /// @param metadata Metadata that may include a cashout-source override.
-    /// @param preferredToken The preferred token to target during any previewed cashout loop.
-    /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion continues.
-    /// @return routedTokenIn The token that remains to be routed after the previewed cashout step.
-    /// @return routedAmountIn The amount of `routedTokenIn` that remains to be routed.
-    function _previewRouteInputFromSource(
-        IJBPayRoutePreviewer router,
-        uint256 destProjectId,
-        address tokenIn,
-        uint256 amount,
-        bytes calldata metadata,
-        address preferredToken
-    )
-        internal
-        view
-        returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
-    {
-        // When the input is not a JB project token, the current input already is the routed input.
-        if (tokenIn == JBConstants.NATIVE_TOKEN || router.TOKENS().projectIdOf(IJBToken(tokenIn)) == 0) {
-            return (resolvedTerminal, tokenIn, amount);
-        }
-
-        // Otherwise reuse the router's own preview cashout loop so preview and execution stay aligned.
-        return router.previewCashOutLoopOf({
-            destProjectId: destProjectId,
-            token: tokenIn,
-            amount: amount,
-            metadata: metadata,
-            preferredToken: preferredToken
-        });
     }
 
     /// @notice Resolve what output token a project accepts for a given input token.
@@ -1153,6 +1107,164 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     {
         return _usablePrimaryTerminalForCandidate({
             router: router, directory: DIRECTORY, projectId: projectId, candidateToken: token
+        });
+    }
+
+    /// @inheritdoc IJBPayRouteResolver
+    function previewBestCashOutPath(
+        IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
+        uint256 sourceProjectId,
+        uint256 cashOutCount,
+        uint256 beneficiaryProjectId,
+        address beneficiary,
+        bytes calldata payMetadata
+    )
+        external
+        view
+        returns (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim)
+    {
+        // Cache a self-interface once so per-candidate previews can be isolated with `try/catch`.
+        IJBPayRouteResolver self = IJBPayRouteResolver(address(this));
+
+        // Walk the source project's terminals. Best-effort so a single reverting terminal does not brick selection.
+        IJBTerminal[] memory terminals = _safeTerminalsOf({directory: DIRECTORY, projectId: sourceProjectId});
+
+        // Track the highest previewed beneficiary mint observed across all candidates.
+        uint256 bestBeneficiaryCount;
+
+        for (uint256 i; i < terminals.length;) {
+            // Filter to cashout-capable terminals so the eventual `payAfterCashOutTokensOf` call cannot land on a
+            // terminal that does not implement the cashout surface.
+            try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
+                bool supported
+            ) {
+                if (!supported) {
+                    unchecked {
+                        ++i;
+                    }
+                    continue;
+                }
+            } catch {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
+            // Read the source terminal's accounting contexts. Wrap in try/catch so a single reverting terminal does
+            // not brick selection.
+            JBAccountingContext[] memory contexts;
+            try terminals[i].accountingContextsOf(sourceProjectId) returns (JBAccountingContext[] memory ctx) {
+                contexts = ctx;
+            } catch {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
+            IJBCashOutTerminalCrossProject candidateTerminal = IJBCashOutTerminalCrossProject(address(terminals[i]));
+
+            for (uint256 j; j < contexts.length;) {
+                address candidateToken = contexts[j].token;
+
+                // Skip candidates the destination project cannot actually receive on any terminal — core's
+                // `_routeReclaimToBeneficiaryProject` would revert with `RecipientProjectTerminalNotFound` later.
+                if (
+                    address(DIRECTORY.primaryTerminalOf({projectId: beneficiaryProjectId, token: candidateToken}))
+                        == address(0)
+                ) {
+                    unchecked {
+                        ++j;
+                    }
+                    continue;
+                }
+
+                // Score the candidate via an isolated self-call so a single broken preview cannot brick the loop.
+                try self.previewCashOutThenPay(
+                    router,
+                    wrappedNativeToken,
+                    candidateTerminal,
+                    sourceProjectId,
+                    cashOutCount,
+                    candidateToken,
+                    beneficiaryProjectId,
+                    beneficiary,
+                    payMetadata
+                ) returns (uint256 previewedBeneficiaryCount) {
+                    if (previewedBeneficiaryCount > bestBeneficiaryCount) {
+                        bestBeneficiaryCount = previewedBeneficiaryCount;
+                        tokenToReclaim = candidateToken;
+                        sourceTerminal = candidateTerminal;
+                    }
+                } catch {
+                    // Ignore broken candidates so the search can continue scoring the remaining options.
+                }
+
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice External self-call wrapper so a single candidate's preview can be isolated with `try/catch`.
+    /// @dev Only meaningful to call internally from `previewBestCashOutPath`. `previewCashOutFrom` (source side)
+    /// gives the gross reclaim — the cashout-side fee is skipped in the atomic entrypoint, so the gross is what
+    /// the destination receives. `previewBestPayRoute` (destination side) handles any downstream swap/forward leg
+    /// internally. Returns `0` for any preview that surfaced a zero reclaim or could not be scored.
+    /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
+    /// @param sourceTerminal The source project's cash-out terminal.
+    /// @param sourceProjectId The source project whose tokens were paid in.
+    /// @param cashOutCount The number of source-project tokens to burn.
+    /// @param tokenToReclaim The candidate `tokenToReclaim` being scored.
+    /// @param beneficiaryProjectId The destination project that should receive the routed payment.
+    /// @param beneficiary The address whose minted destination-project tokens to score.
+    /// @param payMetadata Metadata forwarded into the destination-side preview.
+    /// @return beneficiaryTokenCount The previewed beneficiary token count, or `0` if the candidate is unscoreable.
+    function previewCashOutThenPay(
+        IJBPayRoutePreviewer router,
+        address wrappedNativeToken,
+        IJBCashOutTerminalCrossProject sourceTerminal,
+        uint256 sourceProjectId,
+        uint256 cashOutCount,
+        address tokenToReclaim,
+        uint256 beneficiaryProjectId,
+        address beneficiary,
+        bytes calldata payMetadata
+    )
+        external
+        view
+        returns (uint256 beneficiaryTokenCount)
+    {
+        // Preview the source-side cashout to obtain the gross reclaim that would land on the destination terminal.
+        (, uint256 reclaimAmount,,) = sourceTerminal.previewCashOutFrom({
+            holder: address(router),
+            projectId: sourceProjectId,
+            cashOutCount: cashOutCount,
+            tokenToReclaim: tokenToReclaim,
+            beneficiary: payable(address(router)),
+            metadata: ""
+        });
+
+        if (reclaimAmount == 0) return 0;
+
+        // Preview the destination-side route. `previewBestPayRoute` explores accepted-token candidates and any
+        // necessary swap leg internally so this scorer doesn't need to re-enumerate.
+        (,,,, beneficiaryTokenCount,,) = IJBPayRouteResolver(address(this)).previewBestPayRoute({
+            router: router,
+            wrappedNativeToken: wrappedNativeToken,
+            projectId: beneficiaryProjectId,
+            tokenIn: tokenToReclaim,
+            amount: reclaimAmount,
+            beneficiary: beneficiary,
+            metadata: payMetadata
         });
     }
 }
