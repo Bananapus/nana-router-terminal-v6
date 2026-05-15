@@ -12,7 +12,7 @@ When `pay(projectId, token, amount, ...)` is called with a JB project token, the
 
 Selection logic: the router enumerates the source project's terminals and accounting contexts, previews `(cashout, pay-route)` per candidate via `previewCashOutFrom` + `previewBestPayRoute`, and picks the `(sourceTerminal, tokenToReclaim)` that yields the highest beneficiary mint on the destination project. Per-candidate previews are isolated with `try/catch` so one broken candidate cannot brick selection. Reverts with `JBRouterTerminal_NoCashOutPath` when nothing scores.
 
-`addToBalanceOf()` now rejects JB project-token inputs with `JBRouterTerminal_ProjectTokenInputUnsupported(token, sourceProjectId)`. nana-core-v6 has no atomic `cashOut -> addToBalance` equivalent of `payAfterCashOutTokensOf`, and silently routing through a different shape than `pay()` would be a footgun. Callers wanting the previous "cash out a project token and add the reclaim to another project's balance" flow should cash out separately and call `addToBalanceOf` with the reclaim token.
+`addToBalanceOf()` routes project-token inputs through the source project's atomic `addToBalanceAfterCashOutTokensOf` entrypoint (the `addToBalance`-flavored counterpart of `payAfterCashOutTokensOf`, also from nana-core-v6 PR #143). Same `(sourceTerminal, tokenToReclaim)` selection as `pay()` (`previewBestCashOutPath`) — scored by predicted beneficiary mint as a proxy for "best yielding route", even though no destination-project tokens are minted in this path. Held-fee return is hardcoded to `false` by the underlying core entrypoint (value top-up only, not fee unlock); `addToBalanceOf` reverts with `JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput` when callers combine `shouldReturnHeldFees: true` with a project-token input rather than silently dropping the flag.
 
 The recursive cashout-loop machinery in the router is removed in this PR (no caller left after the `pay()` and `addToBalanceOf()` changes):
 
@@ -25,12 +25,12 @@ The recursive cashout-loop machinery in the router is removed in this PR (no cal
 A local interface extension lives at `src/interfaces/IJBCashOutTerminalCrossProject.sol`: a minimal re-declaration of `payAfterCashOutTokensOf` plus the canonical `IJBCashOutTerminal` surface, used as the cast target inside the router until the bumped core release folds the function into the canonical interface. When the bumped release is consumed, that file can be deleted and the cast site can use `IJBCashOutTerminal` directly.
 
 Size impact:
-- `JBRouterTerminal` runtime: 23,706 B → 20,211 B (-3,495 B, headroom 870 → 4,365 B against EIP-170 24,576 B).
+- `JBRouterTerminal` runtime: 23,706 B → 20,581 B (-3,125 B, headroom 870 → 3,995 B against EIP-170 24,576 B).
 - `JBPayRouteResolver` runtime: 10,398 B → 11,100 B (+702 B, headroom 14,178 → 13,476 B).
 
 Integrator impact:
-- `pay()` with a project-token input is strictly better-yielding now (source-side cashout fee skipped) — except when the destination project's ruleset has `pauseCrossProjectFeeFreeInflows = true`, in which case the call reverts. Front-ends should expose the opt-out flag in the destination project's ruleset config so payers can see the failure mode before submitting.
-- `addToBalanceOf()` with a project-token input now reverts. Callers needing the prior shape should perform two transactions: `cashOutTokensOf` on the source project's terminal, then `addToBalanceOf` on the router with the reclaim token.
+- `pay()` and `addToBalanceOf()` with a project-token input are strictly better-yielding now (source-side cashout fee skipped) — except when the destination project's ruleset has `pauseCrossProjectFeeFreeInflows = true`, in which case the underlying core call reverts. Front-ends should expose the opt-out flag in the destination project's ruleset config so payers can see the failure mode before submitting.
+- `addToBalanceOf()` rejects `shouldReturnHeldFees: true` combined with a project-token input — the underlying core entrypoint hardcodes held-fee return to `false`. Callers who need held-fee return must use `addToBalanceOf` with a non-project-token (e.g. cash out separately first) or call the source project's terminal directly.
 
 ### Chain-same CREATE2 address for `JBRouterTerminal`
 

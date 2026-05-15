@@ -80,11 +80,11 @@ contract JBRouterTerminal is
     error JBRouterTerminal_NoMsgValueAllowed(uint256 value);
     error JBRouterTerminal_NoObservationHistory(address pool);
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
+    error JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput();
     error JBRouterTerminal_NonStandardTerminalToken(
         address terminal, address token, uint256 expectedAmount, uint256 actualAmount
     );
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
-    error JBRouterTerminal_ProjectTokenInputUnsupported(address token, uint256 sourceProjectId);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
     error JBRouterTerminal_Unauthorized(address caller);
 
@@ -236,10 +236,11 @@ contract JBRouterTerminal is
     {}
 
     /// @notice Add funds to a project's balance by routing the incoming token to whatever token the project accepts.
-    /// @dev JB project-token inputs are rejected here. nana-core-v6 has no atomic `cashOut -> addToBalance` entrypoint
-    /// equivalent to `payAfterCashOutTokensOf`, and the old recursive cashout-loop the router used to perform internally
-    /// is no longer reachable through this entrypoint. Callers wanting to "cash out a project token and add the reclaim
-    /// to another project's balance" should cash out separately and then call `addToBalanceOf` with the reclaim token.
+    /// @dev When `token` is a JB project token, the router routes through the source project's atomic
+    /// `addToBalanceAfterCashOutTokensOf` entrypoint so the source-side cash-out fee is skipped and bound on the
+    /// destination project's fee-free surplus instead. `shouldReturnHeldFees` is not honored in that path — the
+    /// underlying core entrypoint is value top-up only and hardcodes held-fee return to `false`, so the router
+    /// reverts when both are set together rather than silently dropping the flag.
     /// @param projectId The ID of the destination project.
     /// @param token The address of the token to pay in.
     /// @param amount The amount of tokens to send.
@@ -258,21 +259,34 @@ contract JBRouterTerminal is
         payable
         override
     {
-        // Reject JB project-token inputs because no atomic `cashOut -> addToBalance` entrypoint exists. Surface a clear
-        // error instead of silently producing a different route shape than `pay` (which has an atomic equivalent).
+        // Accept the caller's funds first so the actual received balance drives every later decision.
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
+
+        // When the payer presents another project's tokens, route through the source project's atomic cross-project
+        // cashout entrypoint so the source-side fee is skipped and bound on the destination project's fee-free surplus
+        // instead.
         uint256 sourceProjectId = _sourceProjectIdOf(token);
         if (sourceProjectId != 0) {
-            revert JBRouterTerminal_ProjectTokenInputUnsupported({token: token, sourceProjectId: sourceProjectId});
+            // Core's `addToBalanceAfterCashOutTokensOf` hardcodes held-fee return to `false`. Surface a clear error
+            // instead of silently dropping a flag the caller asked for.
+            if (shouldReturnHeldFees) revert JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput();
+            _addToBalanceAfterCashOut({
+                sourceProjectId: sourceProjectId,
+                cashOutCount: amount,
+                beneficiaryProjectId: projectId,
+                addToBalanceMetadata: metadata
+            });
+            return;
         }
 
         // Keep a reference to the terminal that will ultimately receive the routed funds.
         IJBTerminal destTerminal;
 
-        // Accept the caller's funds, resolve the route, and return the terminal/token/amount the destination will see.
+        // Resolve the route and return the terminal/token/amount the destination will see.
         (destTerminal, token, amount) = _route({
             destProjectId: projectId,
             tokenIn: token,
-            amount: _acceptFundsFor({token: token, amount: amount, metadata: metadata}),
+            amount: amount,
             metadata: metadata,
             refundTo: payable(_resolveOriginalPayer(_msgSender()))
         });
@@ -801,6 +815,57 @@ contract JBRouterTerminal is
             minTokensOut: minTokensOut,
             cashOutMetadata: "",
             payMetadata: payMetadata
+        });
+    }
+
+    /// @notice Atomically cash out source-project tokens and add the reclaim to the beneficiary project's balance.
+    /// @dev Reuses the same `(sourceTerminal, tokenToReclaim)` selection as the `pay()` path
+    /// (`previewBestCashOutPath`) — scored by predicted beneficiary mint as a proxy for "best yielding route", even
+    /// though no destination-project tokens are actually minted here. The source-side fee is skipped on-chain and
+    /// bound on the destination project's fee-free surplus via core's balance-delta accounting. Held-fee return is
+    /// hardcoded to `false` by the underlying core entrypoint; the caller's `shouldReturnHeldFees` flag is rejected
+    /// upstream in `addToBalanceOf`.
+    /// @param sourceProjectId The source project whose tokens were paid in.
+    /// @param cashOutCount The number of source-project tokens to burn.
+    /// @param beneficiaryProjectId The destination project whose balance should grow.
+    /// @param addToBalanceMetadata Metadata forwarded into the destination project's `addToBalanceOf` event.
+    function _addToBalanceAfterCashOut(
+        uint256 sourceProjectId,
+        uint256 cashOutCount,
+        uint256 beneficiaryProjectId,
+        bytes calldata addToBalanceMetadata
+    )
+        internal
+    {
+        // Pick the candidate that produces the highest previewed beneficiary mint on the destination project. No
+        // tokens are actually minted in this path, but the same scorer surfaces the route most likely to land the
+        // largest reclaim into B's surplus on the source terminal (the balance-delta core measures for the fee
+        // credit).
+        (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim) =
+            _PAY_ROUTE_RESOLVER.previewBestCashOutPath({
+                router: IJBPayRoutePreviewer(address(this)),
+                wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+                sourceProjectId: sourceProjectId,
+                cashOutCount: cashOutCount,
+                beneficiaryProjectId: beneficiaryProjectId,
+                beneficiary: address(this),
+                payMetadata: addToBalanceMetadata
+            });
+
+        if (address(sourceTerminal) == address(0)) {
+            revert JBRouterTerminal_NoCashOutPath({
+                sourceProjectId: sourceProjectId, destProjectId: beneficiaryProjectId
+            });
+        }
+
+        sourceTerminal.addToBalanceAfterCashOutTokensOf({
+            holder: address(this),
+            projectId: sourceProjectId,
+            cashOutCount: cashOutCount,
+            tokenToReclaim: tokenToReclaim,
+            beneficiaryProjectId: beneficiaryProjectId,
+            cashOutMetadata: "",
+            addToBalanceMetadata: addToBalanceMetadata
         });
     }
 

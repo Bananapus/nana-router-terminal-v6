@@ -4,9 +4,9 @@ pragma solidity ^0.8.0;
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
 
 /// @notice The cross-project cash-out extension surfaced by `JBMultiTerminal` once nana-core-v6 PR #143 lands.
-/// @dev Local re-declaration so the router can call the new function before nana-core-v6 publishes a release that
-/// folds the function into the canonical `IJBCashOutTerminal`. When the bumped core release is consumed, this
-/// interface can be deleted and call sites can cast to `IJBCashOutTerminal` directly.
+/// @dev Local re-declaration so the router can call the new functions before nana-core-v6 publishes a release that
+/// folds them into the canonical `IJBCashOutTerminal`. When the bumped core release is consumed, this interface can
+/// be deleted and call sites can cast to `IJBCashOutTerminal` directly.
 interface IJBCashOutTerminalCrossProject is IJBCashOutTerminal {
     /// @notice Atomically cash out `holder`'s tokens of `projectId` and pay the reclaim into `beneficiaryProjectId`.
     /// @dev Equivalent to `cashOutTokensOf` followed by `pay` on the destination project, except the source-side
@@ -38,4 +38,32 @@ interface IJBCashOutTerminalCrossProject is IJBCashOutTerminal {
     )
         external
         returns (uint256 reclaimAmount, uint256 beneficiaryTokenCount);
+
+    /// @notice Atomically cash out `holder`'s tokens of `projectId` and add the reclaim to `beneficiaryProjectId`'s
+    /// balance — no destination-project tokens minted.
+    /// @dev Equivalent to `cashOutTokensOf` followed by `addToBalanceOf` on the destination project, except the
+    /// source-side cash-out fee is skipped (the equivalent fee is bound on the destination project's side via a
+    /// credit to `_feeFreeSurplusOf[beneficiaryProjectId]` measured from the destination project's balance growth on
+    /// this terminal). Held-fee return is hardcoded to `false` on the destination side — this entrypoint is for value
+    /// top-up only, not fee unlock. The destination project's current ruleset can set `pauseCrossProjectFeeFreeInflows`
+    /// to opt out, in which case the call reverts.
+    /// @param holder The account whose project tokens are being burned.
+    /// @param projectId The ID of the source project being cashed out from.
+    /// @param cashOutCount The number of source-project tokens to burn, with 18 decimals.
+    /// @param tokenToReclaim The terminal token reclaimed from the source project's surplus.
+    /// @param beneficiaryProjectId The destination project receiving the reclaim.
+    /// @param cashOutMetadata Bytes forwarded to the source project's data hook and any cash-out hook specifications.
+    /// @param addToBalanceMetadata Bytes forwarded to the destination project's `addToBalanceOf` event.
+    /// @return reclaimAmount The gross reclaim amount returned by the store.
+    function addToBalanceAfterCashOutTokensOf(
+        address holder,
+        uint256 projectId,
+        uint256 cashOutCount,
+        address tokenToReclaim,
+        uint256 beneficiaryProjectId,
+        bytes calldata cashOutMetadata,
+        bytes calldata addToBalanceMetadata
+    )
+        external
+        returns (uint256 reclaimAmount);
 }
