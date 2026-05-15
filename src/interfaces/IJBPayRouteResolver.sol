@@ -5,7 +5,8 @@ import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 
-import {IJBCashOutTerminalCrossProject} from "./IJBCashOutTerminalCrossProject.sol";
+import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
+
 import {IJBPayRoutePreviewer} from "./IJBPayRoutePreviewer.sol";
 
 /// @notice Resolves the best pay route preview for a router terminal.
@@ -173,7 +174,7 @@ interface IJBPayRouteResolver {
     function previewCashOutThenPay(
         IJBPayRoutePreviewer router,
         address wrappedNativeToken,
-        IJBCashOutTerminalCrossProject sourceTerminal,
+        IJBCashOutTerminal sourceTerminal,
         uint256 sourceProjectId,
         uint256 cashOutCount,
         address tokenToReclaim,
@@ -186,7 +187,7 @@ interface IJBPayRouteResolver {
         returns (uint256 beneficiaryTokenCount);
 
     /// @notice Pick the `(sourceTerminal, tokenToReclaim)` that yields the highest previewed beneficiary mint when
-    /// the router routes a JB project-token input through `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`.
+    /// the router routes a JB project-token input through `IJBCashOutTerminal.payAfterCashOutTokensOf`.
     /// @dev Walks the source project's terminals, filters to `IJBCashOutTerminal` implementers, and previews each
     /// accounting context as a potential `tokenToReclaim`. Each candidate's score is the predicted destination-side
     /// mint, sourced from `previewCashOutFrom` (cashout side) + `previewBestPayRoute` (destination side). Broken
@@ -211,5 +212,5 @@ interface IJBPayRouteResolver {
     )
         external
         view
-        returns (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim);
+        returns (IJBCashOutTerminal sourceTerminal, address tokenToReclaim);
 }

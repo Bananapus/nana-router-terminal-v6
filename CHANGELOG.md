@@ -22,7 +22,14 @@ The recursive cashout-loop machinery in the router is removed in this PR (no cal
 - `IJBPayRouteResolver`: added `previewBestCashOutPath` and `previewCashOutThenPay`.
 - Removed: `src/structs/CashOutPathCandidates.sol` (the JB-project-token recursion fallback storage that fed `_findCashOutPath`).
 
-A local interface extension lives at `src/interfaces/IJBCashOutTerminalCrossProject.sol`: a minimal re-declaration of `payAfterCashOutTokensOf` plus the canonical `IJBCashOutTerminal` surface, used as the cast target inside the router until the bumped core release folds the function into the canonical interface. When the bumped release is consumed, that file can be deleted and the cast site can use `IJBCashOutTerminal` directly.
+Dependency bumps in this PR:
+- `@bananapus/core-v6`: `^0.0.48 → ^0.0.52` (contains nana-core-v6 PR #143).
+- `@bananapus/univ4-router-v6`: `^0.0.22 → ^0.0.31` (matching downstream bump for core 0.0.52 — Bananapus/nana-univ4-router-v6#106).
+- `@bananapus/buyback-hook-v6`: `^0.0.36 → ^0.0.46` (matching downstream bump — Bananapus/nana-buyback-hook-v6#126).
+
+Test coverage in this PR:
+- New paranoid fork suite at `test/fork/RouterTerminalCrossProjectCashOutFork.t.sol` exercises the end-to-end "pay project B (USDC-backed) with project A's tokens via the router" canonical scenario against a real Uniswap V3 WETH/USDC pool on mainnet. Five tests, all passing: end-to-end `pay()`, end-to-end `addToBalanceOf()`, `shouldReturnHeldFees + project-token` rejection, `pauseCrossProjectFeeFreeInflows` opt-out revert, and reentrancy safety against a malicious destination terminal.
+- Deleted regression suites that exclusively exercised the old cashout-then-pay route-ranking machinery: `CashOutCircularPrimaryTerminal.t.sol`, `CashOutFallbackPrefersRecursiveLoop.t.sol`, `ConservativeBuybackPreviewRouteMisrank.t.sol`, `GrossCashOutPreviewRouteMisrank.t.sol`, `RawBuybackQuoteRouteMisrank.t.sol`, `MultiHopCashOutCycle.t.sol`, `DeployBuybackHookZero.t.sol`, `RouterTerminalReentrancy.t.sol`. Removed six obsolete tests from `RouterTerminal.t.sol` (`test_previewPayFor_forwardsCashOutRoute`, `test_previewPayFor_estimatesCashOutThenSwapRouteWithQuoteMetadata`, `test_previewPayFor_prefersRouteWithHigherBuybackHookOutput`, `test_previewAndPay_handleBuybackHookSellSideCashOut`, `test_previewPayFor_matchesPay_cashOutRoute`, `test_pay_cashOutMinReclaimedMetadata`).
 
 Size impact:
 - `JBRouterTerminal` runtime: 23,706 B → 20,581 B (-3,125 B, headroom 870 → 3,995 B against EIP-170 24,576 B).

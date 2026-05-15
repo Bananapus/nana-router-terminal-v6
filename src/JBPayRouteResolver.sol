@@ -15,7 +15,6 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
-import {IJBCashOutTerminalCrossProject} from "./interfaces/IJBCashOutTerminalCrossProject.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -453,7 +452,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (address routedTokenIn, uint256 routedAmountIn)
     {
         // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
-        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`, so the resolver only sees non-project-token
+        // `IJBCashOutTerminal.payAfterCashOutTokensOf`, so the resolver only sees non-project-token
         // inputs here.
         destProjectId; // Silence "unused parameter" — kept for natspec / signature stability.
         routedTokenIn = tokenIn;
@@ -569,7 +568,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
         // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
-        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf`; the resolver only handles non-project-token
+        // `IJBCashOutTerminal.payAfterCashOutTokensOf`; the resolver only handles non-project-token
         // inputs here.
 
         // Resolve the destination token and terminal that the project would accept from the remaining input.
@@ -1110,7 +1109,21 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         });
     }
 
-    /// @inheritdoc IJBPayRouteResolver
+    /// @notice Pick the `(sourceTerminal, tokenToReclaim)` that yields the highest previewed beneficiary mint when
+    /// the router routes a JB project-token input through `IJBCashOutTerminal.payAfterCashOutTokensOf`.
+    /// @dev Walks the source project's terminals, filters to `IJBCashOutTerminal` implementers, and previews each
+    /// accounting context as a potential `tokenToReclaim`. Each candidate's score is the predicted destination-side
+    /// mint, sourced from `previewCashOutFrom` (cashout side) + `previewBestPayRoute` (destination side). Broken
+    /// candidates are isolated with `try/catch` so a single revert cannot brick selection.
+    /// @param router The router terminal whose preview helpers to use.
+    /// @param wrappedNativeToken The router's wrapped-native-token address.
+    /// @param sourceProjectId The source project whose tokens were paid in.
+    /// @param cashOutCount The number of source-project tokens to burn.
+    /// @param beneficiaryProjectId The destination project that should receive the routed payment.
+    /// @param beneficiary The address whose minted destination-project tokens to score.
+    /// @param payMetadata Metadata forwarded into the destination-side preview.
+    /// @return sourceTerminal The winning source project's cash-out terminal, or `address(0)` if nothing scored.
+    /// @return tokenToReclaim The winning `tokenToReclaim`, or `address(0)` if nothing scored.
     function previewBestCashOutPath(
         IJBPayRoutePreviewer router,
         address wrappedNativeToken,
@@ -1122,7 +1135,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     )
         external
         view
-        returns (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim)
+        returns (IJBCashOutTerminal sourceTerminal, address tokenToReclaim)
     {
         // Cache a self-interface once so per-candidate previews can be isolated with `try/catch`.
         IJBPayRouteResolver self = IJBPayRouteResolver(address(this));
@@ -1164,7 +1177,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            IJBCashOutTerminalCrossProject candidateTerminal = IJBCashOutTerminalCrossProject(address(terminals[i]));
+            IJBCashOutTerminal candidateTerminal = IJBCashOutTerminal(address(terminals[i]));
 
             for (uint256 j; j < contexts.length;) {
                 address candidateToken = contexts[j].token;
@@ -1192,7 +1205,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     beneficiaryProjectId,
                     beneficiary,
                     payMetadata
-                ) returns (uint256 previewedBeneficiaryCount) {
+                ) returns (
+                    uint256 previewedBeneficiaryCount
+                ) {
                     if (previewedBeneficiaryCount > bestBeneficiaryCount) {
                         bestBeneficiaryCount = previewedBeneficiaryCount;
                         tokenToReclaim = candidateToken;
@@ -1231,7 +1246,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     function previewCashOutThenPay(
         IJBPayRoutePreviewer router,
         address wrappedNativeToken,
-        IJBCashOutTerminalCrossProject sourceTerminal,
+        IJBCashOutTerminal sourceTerminal,
         uint256 sourceProjectId,
         uint256 cashOutCount,
         address tokenToReclaim,
@@ -1257,7 +1272,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Preview the destination-side route. `previewBestPayRoute` explores accepted-token candidates and any
         // necessary swap leg internally so this scorer doesn't need to re-enumerate.
-        (,,,, beneficiaryTokenCount,,) = IJBPayRouteResolver(address(this)).previewBestPayRoute({
+        (,,,, beneficiaryTokenCount,,) = IJBPayRouteResolver(address(this))
+            .previewBestPayRoute({
             router: router,
             wrappedNativeToken: wrappedNativeToken,
             projectId: beneficiaryProjectId,

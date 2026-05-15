@@ -36,7 +36,6 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
-import {IJBCashOutTerminalCrossProject} from "./interfaces/IJBCashOutTerminalCrossProject.sol";
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
@@ -784,16 +783,15 @@ contract JBRouterTerminal is
         returns (uint256 beneficiaryTokenCount)
     {
         // Pick the candidate that produces the highest previewed beneficiary mint on the destination project.
-        (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim) =
-            _PAY_ROUTE_RESOLVER.previewBestCashOutPath({
-                router: IJBPayRoutePreviewer(address(this)),
-                wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
-                sourceProjectId: sourceProjectId,
-                cashOutCount: cashOutCount,
-                beneficiaryProjectId: beneficiaryProjectId,
-                beneficiary: beneficiary,
-                payMetadata: payMetadata
-            });
+        (IJBCashOutTerminal sourceTerminal, address tokenToReclaim) = _PAY_ROUTE_RESOLVER.previewBestCashOutPath({
+            router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            sourceProjectId: sourceProjectId,
+            cashOutCount: cashOutCount,
+            beneficiaryProjectId: beneficiaryProjectId,
+            beneficiary: beneficiary,
+            payMetadata: payMetadata
+        });
 
         // Surface a clean revert when no candidate produced a usable route so the failure mode matches the previous
         // cashout-loop's `NoCashOutPath` shape.
@@ -841,16 +839,15 @@ contract JBRouterTerminal is
         // tokens are actually minted in this path, but the same scorer surfaces the route most likely to land the
         // largest reclaim into B's surplus on the source terminal (the balance-delta core measures for the fee
         // credit).
-        (IJBCashOutTerminalCrossProject sourceTerminal, address tokenToReclaim) =
-            _PAY_ROUTE_RESOLVER.previewBestCashOutPath({
-                router: IJBPayRoutePreviewer(address(this)),
-                wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
-                sourceProjectId: sourceProjectId,
-                cashOutCount: cashOutCount,
-                beneficiaryProjectId: beneficiaryProjectId,
-                beneficiary: address(this),
-                payMetadata: addToBalanceMetadata
-            });
+        (IJBCashOutTerminal sourceTerminal, address tokenToReclaim) = _PAY_ROUTE_RESOLVER.previewBestCashOutPath({
+            router: IJBPayRoutePreviewer(address(this)),
+            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            sourceProjectId: sourceProjectId,
+            cashOutCount: cashOutCount,
+            beneficiaryProjectId: beneficiaryProjectId,
+            beneficiary: address(this),
+            payMetadata: addToBalanceMetadata
+        });
 
         if (address(sourceTerminal) == address(0)) {
             revert JBRouterTerminal_NoCashOutPath({

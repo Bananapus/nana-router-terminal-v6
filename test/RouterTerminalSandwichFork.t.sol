@@ -735,6 +735,7 @@ contract RouterTerminalSandwichForkTest is Test {
             ownerMustSendPayouts: false,
             holdFees: false,
             scopeCashOutsToLocalBalances: true,
+            pauseCrossProjectFeeFreeInflows: false,
             useDataHookForPay: false,
             useDataHookForCashOut: false,
             dataHook: address(0),
