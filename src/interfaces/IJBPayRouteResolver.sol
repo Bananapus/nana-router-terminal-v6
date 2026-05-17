@@ -187,7 +187,7 @@ interface IJBPayRouteResolver {
         returns (uint256 beneficiaryTokenCount);
 
     /// @notice Pick the `(sourceTerminal, tokenToReclaim)` that yields the highest previewed beneficiary mint when
-    /// the router routes a JB project-token input through `IJBCashOutTerminal.cashOutAndPay`.
+    /// the router routes a JB project-token input through `IJBCashOutTerminal.payAfterCashOutTokensOf`.
     /// @dev Walks the source project's terminals, filters to `IJBCashOutTerminal` implementers, and previews each
     /// accounting context as a potential `tokenToReclaim`. Each candidate's score is the predicted destination-side
     /// mint, sourced from `previewCashOutFrom` (cashout side) + `previewBestPayRoute` (destination side). Broken

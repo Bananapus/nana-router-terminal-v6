@@ -383,7 +383,7 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
         );
 
         // (previewCashOutLoopOf no longer exists — pay() routes project-token inputs via
-        // `IJBCashOutTerminal.cashOutAndPay` instead.)
+        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf` instead.)
 
         // Mock router.previewTerminalPayOf -> return a valid preview.
         JBRuleset memory mockRuleset = JBRuleset({

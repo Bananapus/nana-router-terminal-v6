@@ -8,11 +8,11 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ### `pay()` routes project-token inputs through atomic cross-project cashout
 
-When `pay(projectId, token, amount, ...)` is called with a JB project token, the router now routes through the source project's atomic `cashOutAndPay` entrypoint on `JBMultiTerminal` (introduced in nana-core-v6 PR [#143](https://github.com/Bananapus/nana-core-v6/pull/143) and renamed/split in nana-core-v6 PR [#146](https://github.com/Bananapus/nana-core-v6/pull/146)) instead of doing the previous cashout-then-pay sequence as two router-driven steps. The source-side cashout fee is skipped and bound on the destination project's `_feeFreeSurplusOf` via core's balance-delta accounting. The destination project's current ruleset can opt out via `pauseCrossProjectFeeFreeInflows`, in which case the underlying core call reverts.
+When `pay(projectId, token, amount, ...)` is called with a JB project token, the router now routes through the source project's atomic `payAfterCashOutTokensOf` entrypoint on `JBMultiTerminal` (introduced in nana-core-v6 PR [#143](https://github.com/Bananapus/nana-core-v6/pull/143)) instead of doing the previous cashout-then-pay sequence as two router-driven steps. The source-side cashout fee is skipped and bound on the destination project's `_feeFreeSurplusOf` via core's balance-delta accounting. The destination project's current ruleset can opt out via `pauseCrossProjectFeeFreeInflows`, in which case the underlying core call reverts.
 
 Selection logic: the router enumerates the source project's terminals and accounting contexts, previews `(cashout, pay-route)` per candidate via `previewCashOutFrom` + `previewBestPayRoute`, and picks the `(sourceTerminal, tokenToReclaim)` that yields the highest beneficiary mint on the destination project. Per-candidate previews are isolated with `try/catch` so one broken candidate cannot brick selection. Reverts with `JBRouterTerminal_NoCashOutPath` when nothing scores.
 
-`addToBalanceOf()` routes project-token inputs through the source project's atomic `cashOutAndAddToBalance` entrypoint (the `addToBalance`-flavored counterpart of `cashOutAndPay`, also from nana-core-v6 PR #146). Same `(sourceTerminal, tokenToReclaim)` selection as `pay()` (`previewBestCashOutPath`) — scored by predicted beneficiary mint as a proxy for "best yielding route", even though no destination-project tokens are minted in this path. Held-fee return is hardcoded to `false` by the underlying core entrypoint (value top-up only, not fee unlock); `addToBalanceOf` reverts with `JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput` when callers combine `shouldReturnHeldFees: true` with a project-token input rather than silently dropping the flag.
+`addToBalanceOf()` routes project-token inputs through the source project's atomic `addToBalanceAfterCashOutTokensOf` entrypoint (the `addToBalance`-flavored counterpart of `payAfterCashOutTokensOf`, also from nana-core-v6 PR #143). Same `(sourceTerminal, tokenToReclaim)` selection as `pay()` (`previewBestCashOutPath`) — scored by predicted beneficiary mint as a proxy for "best yielding route", even though no destination-project tokens are minted in this path. Held-fee return is hardcoded to `false` by the underlying core entrypoint (value top-up only, not fee unlock); `addToBalanceOf` reverts with `JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput` when callers combine `shouldReturnHeldFees: true` with a project-token input rather than silently dropping the flag.
 
 The recursive cashout-loop machinery in the router is removed in this PR (no caller left after the `pay()` and `addToBalanceOf()` changes):
 
@@ -23,7 +23,7 @@ The recursive cashout-loop machinery in the router is removed in this PR (no cal
 - Removed: `src/structs/CashOutPathCandidates.sol` (the JB-project-token recursion fallback storage that fed `_findCashOutPath`).
 
 Dependency bumps in this PR:
-- `@bananapus/core-v6`: `^0.0.48 → ^0.0.53` (contains nana-core-v6 PR #143 and #146).
+- `@bananapus/core-v6`: `^0.0.48 → ^0.0.52` (contains nana-core-v6 PR #143).
 - `@bananapus/univ4-router-v6`: `^0.0.22 → ^0.0.31` (matching downstream bump for core 0.0.52 — Bananapus/nana-univ4-router-v6#106).
 - `@bananapus/buyback-hook-v6`: `^0.0.36 → ^0.0.46` (matching downstream bump — Bananapus/nana-buyback-hook-v6#126).
 

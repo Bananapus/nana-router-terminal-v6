@@ -452,7 +452,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (address routedTokenIn, uint256 routedAmountIn)
     {
         // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
-        // `IJBCashOutTerminal.cashOutAndPay`, so the resolver only sees non-project-token inputs here.
+        // `IJBCashOutTerminal.payAfterCashOutTokensOf`, so the resolver only sees non-project-token
+        // inputs here.
         destProjectId; // Silence "unused parameter" — kept for natspec / signature stability.
         routedTokenIn = tokenIn;
         routedAmountIn = amount;
@@ -567,7 +568,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal destTerminal, address tokenOut, uint256 amountOut)
     {
         // Project-token inputs are intercepted upstream in `JBRouterTerminal.pay()` and routed through
-        // `IJBCashOutTerminal.cashOutAndPay`; the resolver only handles non-project-token inputs here.
+        // `IJBCashOutTerminal.payAfterCashOutTokensOf`; the resolver only handles non-project-token
+        // inputs here.
 
         // Resolve the destination token and terminal that the project would accept from the remaining input.
         (tokenOut, destTerminal) = _resolveTokenOut({
@@ -1108,7 +1110,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     }
 
     /// @notice Pick the `(sourceTerminal, tokenToReclaim)` that yields the highest previewed beneficiary mint when
-    /// the router routes a JB project-token input through `IJBCashOutTerminal.cashOutAndPay`.
+    /// the router routes a JB project-token input through `IJBCashOutTerminal.payAfterCashOutTokensOf`.
     /// @dev Walks the source project's terminals, filters to `IJBCashOutTerminal` implementers, and previews each
     /// accounting context as a potential `tokenToReclaim`. Each candidate's score is the predicted destination-side
     /// mint, sourced from `previewCashOutFrom` (cashout side) + `previewBestPayRoute` (destination side). Broken
@@ -1145,8 +1147,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         uint256 bestBeneficiaryCount;
 
         for (uint256 i; i < terminals.length;) {
-            // Filter to cashout-capable terminals so the eventual `cashOutAndPay` call cannot land on a terminal
-            // that does not implement the cashout surface.
+            // Filter to cashout-capable terminals so the eventual `payAfterCashOutTokensOf` call cannot land on a
+            // terminal that does not implement the cashout surface.
             try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                 bool supported
             ) {
