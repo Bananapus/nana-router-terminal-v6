@@ -176,9 +176,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         _deployJbCore();
 
-        buybackHook = new JBBuybackHook(
-            jbDirectory, jbPermissions, jbPrices, jbProjects, jbTokens, V4_POOL_MANAGER, IHooks(address(0)), address(0)
-        );
+        buybackHook =
+            new JBBuybackHook(jbDirectory, jbPermissions, jbPrices, jbProjects, jbTokens, address(this), address(0));
+        buybackHook.setChainSpecificConstants({poolManager: V4_POOL_MANAGER, oracleHook: IHooks(address(0))});
 
         routerTerminal = new JBRouterTerminal({
             directory: jbDirectory,
