@@ -26,6 +26,26 @@ interface IJBPayRoutePreviewer {
     /// @return weth The ERC-20 wrapper for the chain's native token.
     function WRAPPED_NATIVE_TOKEN() external view returns (IWETH9 weth);
 
+    /// @notice Preview the recursive cashout loop the router would use for a project-token input.
+    /// @param destProjectId The destination project the router is trying to pay.
+    /// @param token The current token to route.
+    /// @param amount The amount of `token` to preview.
+    /// @param metadata Metadata forwarded into preview helpers.
+    /// @param preferredToken The token the cashout loop should prefer to land on, or `address(0)` for no preference.
+    /// @return destTerminal The terminal reached by the cashout loop, or address(0) if routing should continue.
+    /// @return finalToken The token produced by the previewed cashout loop.
+    /// @return finalAmount The amount of `finalToken` produced by the previewed cashout loop.
+    function previewCashOutLoopOf(
+        uint256 destProjectId,
+        address token,
+        uint256 amount,
+        bytes calldata metadata,
+        address preferredToken
+    )
+        external
+        view
+        returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount);
+
     /// @notice Preview the amount a direct token-to-token swap would return.
     /// @param tokenIn The input token.
     /// @param tokenOut The output token.

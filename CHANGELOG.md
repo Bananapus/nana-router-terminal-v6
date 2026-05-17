@@ -6,39 +6,6 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
-### `pay()` routes project-token inputs through atomic cross-project cashout
-
-When `pay(projectId, token, amount, ...)` is called with a JB project token, the router now routes through the source project's atomic `payAfterCashOutTokensOf` entrypoint on `JBMultiTerminal` (introduced in nana-core-v6 PR [#143](https://github.com/Bananapus/nana-core-v6/pull/143)) instead of doing the previous cashout-then-pay sequence as two router-driven steps. The source-side cashout fee is skipped and bound on the destination project's `_feeFreeSurplusOf` via core's balance-delta accounting. The destination project's current ruleset can opt out via `pauseCrossProjectFeeFreeInflows`, in which case the underlying core call reverts.
-
-Selection logic: the router enumerates the source project's terminals and accounting contexts, previews `(cashout, pay-route)` per candidate via `previewCashOutFrom` + `previewBestPayRoute`, and picks the `(sourceTerminal, tokenToReclaim)` that yields the highest beneficiary mint on the destination project. Per-candidate previews are isolated with `try/catch` so one broken candidate cannot brick selection. Reverts with `JBRouterTerminal_NoCashOutPath` when nothing scores.
-
-`addToBalanceOf()` routes project-token inputs through the source project's atomic `addToBalanceAfterCashOutTokensOf` entrypoint (the `addToBalance`-flavored counterpart of `payAfterCashOutTokensOf`, also from nana-core-v6 PR #143). Same `(sourceTerminal, tokenToReclaim)` selection as `pay()` (`previewBestCashOutPath`) — scored by predicted beneficiary mint as a proxy for "best yielding route", even though no destination-project tokens are minted in this path. Held-fee return is hardcoded to `false` by the underlying core entrypoint (value top-up only, not fee unlock); `addToBalanceOf` reverts with `JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput` when callers combine `shouldReturnHeldFees: true` with a project-token input rather than silently dropping the flag.
-
-The recursive cashout-loop machinery in the router is removed in this PR (no caller left after the `pay()` and `addToBalanceOf()` changes):
-
-- `JBRouterTerminal`: deleted `_cashOutLoop`, `_previewCashOutLoop`, `previewCashOutLoopOf` (external), `_previewCashOutStep`, `_routeInputFromSource`, `_alignTokenToPreferredToken`, `_effectivePreviewCashOutAmount`, `_findRouteTerminal`, `_findCashOutPath`, `_recordCashOutPathCandidate`, `_minReclaimedFrom`. Removed `_MAX_CASHOUT_ITERATIONS`, `_CASH_OUT_MIN_RECLAIMED_ID`, errors `JBRouterTerminal_CashOutDidNotDeliver` and `JBRouterTerminal_CashOutLoopLimit`. `_route` and `_routeToDestination` no longer go through cashout preview — they only see non-project-token inputs.
-- `JBPayRouteResolver`: deleted `_previewRouteInputFromSource` and its call sites in `_previewAmountToToken` and `_previewRoute`. Added the new `previewBestCashOutPath` external (and its `previewCashOutThenPay` external self-call helper) — these are what the router now calls from `_payAfterCashOut`.
-- `IJBPayRoutePreviewer`: removed `previewCashOutLoopOf` from the preview surface the resolver consumes.
-- `IJBPayRouteResolver`: added `previewBestCashOutPath` and `previewCashOutThenPay`.
-- Removed: `src/structs/CashOutPathCandidates.sol` (the JB-project-token recursion fallback storage that fed `_findCashOutPath`).
-
-Dependency bumps in this PR:
-- `@bananapus/core-v6`: `^0.0.48 → ^0.0.52` (contains nana-core-v6 PR #143).
-- `@bananapus/univ4-router-v6`: `^0.0.22 → ^0.0.31` (matching downstream bump for core 0.0.52 — Bananapus/nana-univ4-router-v6#106).
-- `@bananapus/buyback-hook-v6`: `^0.0.36 → ^0.0.46` (matching downstream bump — Bananapus/nana-buyback-hook-v6#126).
-
-Test coverage in this PR:
-- New paranoid fork suite at `test/fork/RouterTerminalCrossProjectCashOutFork.t.sol` exercises the end-to-end "pay project B (USDC-backed) with project A's tokens via the router" canonical scenario against a real Uniswap V3 WETH/USDC pool on mainnet. Five tests, all passing: end-to-end `pay()`, end-to-end `addToBalanceOf()`, `shouldReturnHeldFees + project-token` rejection, `pauseCrossProjectFeeFreeInflows` opt-out revert, and reentrancy safety against a malicious destination terminal.
-- Deleted regression suites that exclusively exercised the old cashout-then-pay route-ranking machinery: `CashOutCircularPrimaryTerminal.t.sol`, `CashOutFallbackPrefersRecursiveLoop.t.sol`, `ConservativeBuybackPreviewRouteMisrank.t.sol`, `GrossCashOutPreviewRouteMisrank.t.sol`, `RawBuybackQuoteRouteMisrank.t.sol`, `MultiHopCashOutCycle.t.sol`, `DeployBuybackHookZero.t.sol`, `RouterTerminalReentrancy.t.sol`. Removed six obsolete tests from `RouterTerminal.t.sol` (`test_previewPayFor_forwardsCashOutRoute`, `test_previewPayFor_estimatesCashOutThenSwapRouteWithQuoteMetadata`, `test_previewPayFor_prefersRouteWithHigherBuybackHookOutput`, `test_previewAndPay_handleBuybackHookSellSideCashOut`, `test_previewPayFor_matchesPay_cashOutRoute`, `test_pay_cashOutMinReclaimedMetadata`).
-
-Size impact:
-- `JBRouterTerminal` runtime: 23,706 B → 20,581 B (-3,125 B, headroom 870 → 3,995 B against EIP-170 24,576 B).
-- `JBPayRouteResolver` runtime: 10,398 B → 11,100 B (+702 B, headroom 14,178 → 13,476 B).
-
-Integrator impact:
-- `pay()` and `addToBalanceOf()` with a project-token input are strictly better-yielding now (source-side cashout fee skipped) — except when the destination project's ruleset has `pauseCrossProjectFeeFreeInflows = true`, in which case the underlying core call reverts. Front-ends should expose the opt-out flag in the destination project's ruleset config so payers can see the failure mode before submitting.
-- `addToBalanceOf()` rejects `shouldReturnHeldFees: true` combined with a project-token input — the underlying core entrypoint hardcodes held-fee return to `false`. Callers who need held-fee return must use `addToBalanceOf` with a non-project-token (e.g. cash out separately first) or call the source project's terminal directly.
-
 ### Chain-same CREATE2 address for `JBRouterTerminal`
 
 `JBRouterTerminal` now deploys to the same address on every chain via CREATE2. The four chain-specific
