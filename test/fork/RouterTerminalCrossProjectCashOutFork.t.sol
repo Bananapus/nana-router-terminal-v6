@@ -40,7 +40,7 @@ import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 /// @notice Mock destination terminal that tries to call back into the router during `pay()`.
 /// Registered as B's primary terminal for ETH; receives the inner pay() callback from
-/// `A_terminal.payAfterCashOutTokensOf` and attempts to drain state by re-entering.
+/// `A_terminal.cashOutAndPay` and attempts to drain state by re-entering.
 contract MaliciousReentrantBTerminal {
     JBRouterTerminal immutable ROUTER;
     address immutable SOURCE_TOKEN;
@@ -132,10 +132,10 @@ contract MaliciousReentrantBTerminal {
 }
 
 /// @notice Paranoid fork tests for the cross-project cash-out shape introduced in nana-core-v6 PR #143
-/// (`payAfterCashOutTokensOf` and `addToBalanceAfterCashOutTokensOf`).
+/// (`cashOutAndPay` and `cashOutAndAddToBalance`).
 ///
 /// Canonical scenario: project A is backed by ETH; a payer holds A's project tokens and wants to pay project B,
-/// which is backed by USDC. The router routes the payment through `A_terminal.payAfterCashOutTokensOf` so the
+/// which is backed by USDC. The router routes the payment through `A_terminal.cashOutAndPay` so the
 /// source-side cashout fee is skipped on-chain and the fee credit lands on `_feeFreeSurplusOf[B]` instead. The
 /// resulting end-to-end path exercised by these tests is:
 ///
@@ -145,7 +145,7 @@ contract MaliciousReentrantBTerminal {
 ///   router.pay(B, A-token, amount)
 ///        |
 ///        v
-///   A_terminal.payAfterCashOutTokensOf(holder = router, A, amount, ETH, B, beneficiary, ...)
+///   A_terminal.cashOutAndPay(holder = router, A, amount, ETH, B, beneficiary, ...)
 ///        |   (burns A tokens; takes ETH from A's surplus)
 ///        v
 ///   directory.primaryTerminalOf(B, ETH) -> router  (registered as a secondary primary for B's ETH route)
@@ -370,7 +370,7 @@ contract RouterTerminalCrossProjectCashOutForkTest is Test {
     }
 
     /// @notice `shouldReturnHeldFees: true` combined with a project-token input is explicitly rejected by the router
-    /// because the underlying core `addToBalanceAfterCashOutTokensOf` hardcodes held-fee return to `false`. The
+    /// because the underlying core `cashOutAndAddToBalance` hardcodes held-fee return to `false`. The
     /// router surfaces the limitation instead of silently dropping the flag.
     function test_addToBalanceOf_shouldReturnHeldFeesWithProjectTokenInput_reverts() public {
         vm.prank(payer);

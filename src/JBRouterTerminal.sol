@@ -236,7 +236,7 @@ contract JBRouterTerminal is
 
     /// @notice Add funds to a project's balance by routing the incoming token to whatever token the project accepts.
     /// @dev When `token` is a JB project token, the router routes through the source project's atomic
-    /// `addToBalanceAfterCashOutTokensOf` entrypoint so the source-side cash-out fee is skipped and bound on the
+    /// `cashOutAndAddToBalance` entrypoint so the source-side cash-out fee is skipped and bound on the
     /// destination project's fee-free surplus instead. `shouldReturnHeldFees` is not honored in that path — the
     /// underlying core entrypoint is value top-up only and hardcodes held-fee return to `false`, so the router
     /// reverts when both are set together rather than silently dropping the flag.
@@ -266,10 +266,10 @@ contract JBRouterTerminal is
         // instead.
         uint256 sourceProjectId = _sourceProjectIdOf(token);
         if (sourceProjectId != 0) {
-            // Core's `addToBalanceAfterCashOutTokensOf` hardcodes held-fee return to `false`. Surface a clear error
+            // Core's `cashOutAndAddToBalance` hardcodes held-fee return to `false`. Surface a clear error
             // instead of silently dropping a flag the caller asked for.
             if (shouldReturnHeldFees) revert JBRouterTerminal_HeldFeeReturnNotSupportedForProjectTokenInput();
-            _addToBalanceAfterCashOut({
+            _cashOutAndAddToBalance({
                 sourceProjectId: sourceProjectId,
                 cashOutCount: amount,
                 beneficiaryProjectId: projectId,
@@ -344,7 +344,7 @@ contract JBRouterTerminal is
 
     /// @notice Pay a project by routing the incoming token to whatever token the project accepts.
     /// @dev When `token` is a JB project token, the router routes through the source project's atomic
-    /// `payAfterCashOutTokensOf` entrypoint so the source-side cash-out fee is skipped and bound on the destination
+    /// `cashOutAndPay` entrypoint so the source-side cash-out fee is skipped and bound on the destination
     /// project's fee-free surplus instead. Cashout-then-pay as two router-driven steps is intentionally gone — the
     /// destination project's current ruleset can opt out via `pauseCrossProjectFeeFreeInflows`, in which case the
     /// underlying core call reverts. For non-project-token inputs the router falls through to the standard route
@@ -380,7 +380,7 @@ contract JBRouterTerminal is
         // instead.
         uint256 sourceProjectId = _sourceProjectIdOf(token);
         if (sourceProjectId != 0) {
-            return _payAfterCashOut({
+            return _cashOutAndPay({
                 sourceProjectId: sourceProjectId,
                 cashOutCount: amount,
                 beneficiaryProjectId: projectId,
@@ -759,7 +759,7 @@ contract JBRouterTerminal is
     /// @notice Atomically cash out source-project tokens and pay the reclaim into the beneficiary project.
     /// @dev Delegates `(sourceTerminal, tokenToReclaim)` selection to `_PAY_ROUTE_RESOLVER.previewBestCashOutPath`
     /// (kept off the router runtime to stay under the EIP-170 size limit), then executes via the source project's
-    /// `payAfterCashOutTokensOf`. The source-side cash-out fee is skipped on-chain and bound on the destination
+    /// `cashOutAndPay`. The source-side cash-out fee is skipped on-chain and bound on the destination
     /// project's fee-free surplus via core's balance-delta accounting. Reverts with `JBRouterTerminal_NoCashOutPath`
     /// when no candidate yields a usable route. The destination project's current ruleset can opt out via
     /// `pauseCrossProjectFeeFreeInflows`, in which case the underlying core call reverts.
@@ -771,7 +771,7 @@ contract JBRouterTerminal is
     /// the underlying core call).
     /// @param payMetadata Metadata forwarded into the destination project's pay flow.
     /// @return beneficiaryTokenCount The number of destination-project tokens minted to `beneficiary`.
-    function _payAfterCashOut(
+    function _cashOutAndPay(
         uint256 sourceProjectId,
         uint256 cashOutCount,
         uint256 beneficiaryProjectId,
@@ -803,7 +803,7 @@ contract JBRouterTerminal is
 
         // Execute the atomic cashout-then-pay. Slippage is enforced on the destination side by core's
         // `_checkMin(beneficiaryTokenCount, minTokensOut)`.
-        (, beneficiaryTokenCount) = sourceTerminal.payAfterCashOutTokensOf({
+        (, beneficiaryTokenCount) = sourceTerminal.cashOutAndPay({
             holder: address(this),
             projectId: sourceProjectId,
             cashOutCount: cashOutCount,
@@ -827,7 +827,7 @@ contract JBRouterTerminal is
     /// @param cashOutCount The number of source-project tokens to burn.
     /// @param beneficiaryProjectId The destination project whose balance should grow.
     /// @param addToBalanceMetadata Metadata forwarded into the destination project's `addToBalanceOf` event.
-    function _addToBalanceAfterCashOut(
+    function _cashOutAndAddToBalance(
         uint256 sourceProjectId,
         uint256 cashOutCount,
         uint256 beneficiaryProjectId,
@@ -855,7 +855,7 @@ contract JBRouterTerminal is
             });
         }
 
-        sourceTerminal.addToBalanceAfterCashOutTokensOf({
+        sourceTerminal.cashOutAndAddToBalance({
             holder: address(this),
             projectId: sourceProjectId,
             cashOutCount: cashOutCount,
@@ -1448,8 +1448,8 @@ contract JBRouterTerminal is
     }
 
     /// @notice Core routing logic shared by pay() and addToBalanceOf() for non-project-token inputs.
-    /// @dev Project-token inputs are intercepted upstream by `pay()` (atomic `payAfterCashOutTokensOf` path) and
-    /// rejected by `addToBalanceOf()`. This helper only sees base tokens or wrapped-native equivalents.
+    /// @dev Project-token inputs are intercepted upstream by `pay()` / `addToBalanceOf()` using the atomic
+    /// cashout routes. This helper only sees base tokens or wrapped-native equivalents.
     /// @param destProjectId The ID of the destination project.
     /// @param tokenIn The address of the token to route.
     /// @param amount The amount of tokens to route.
