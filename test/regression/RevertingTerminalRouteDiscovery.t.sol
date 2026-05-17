@@ -382,8 +382,13 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(uint256(100 ether))
         );
 
-        // (previewCashOutLoopOf no longer exists — pay() routes project-token inputs via
-        // `IJBCashOutTerminalCrossProject.payAfterCashOutTokensOf` instead.)
+        // Mock router.previewCashOutLoopOf -> returns no cashout (destTerminal=0, finalToken=tokenIn, amount
+        // unchanged).
+        vm.mockCall(
+            address(router),
+            abi.encodeWithSelector(IJBPayRoutePreviewer.previewCashOutLoopOf.selector),
+            abi.encode(IJBTerminal(address(0)), tokenIn, uint256(100 ether))
+        );
 
         // Mock router.previewTerminalPayOf -> return a valid preview.
         JBRuleset memory mockRuleset = JBRuleset({
