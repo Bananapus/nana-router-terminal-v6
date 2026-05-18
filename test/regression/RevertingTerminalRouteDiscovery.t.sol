@@ -173,9 +173,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(goodTerminal))
         );
 
-        // Mock router.WRAPPED_NATIVE_TOKEN() -> our weth address.
+        // Mock router.wrappedNativeToken() -> our weth address.
         vm.mockCall(
-            address(router), abi.encodeCall(IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN, ()), abi.encode(address(weth))
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
         );
 
         // Mock router.TOKENS() -> return a mock that says tokenIn is not a project token.
@@ -236,9 +236,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(goodTerminal))
         );
 
-        // Mock router.WRAPPED_NATIVE_TOKEN().
+        // Mock router.wrappedNativeToken().
         vm.mockCall(
-            address(router), abi.encodeCall(IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN, ()), abi.encode(address(weth))
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
         );
 
         // Mock router.TOKENS().
@@ -292,9 +292,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        // Mock router.WRAPPED_NATIVE_TOKEN().
+        // Mock router.wrappedNativeToken().
         vm.mockCall(
-            address(router), abi.encodeCall(IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN, ()), abi.encode(address(weth))
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
         );
 
         // Mock router.TOKENS().
@@ -347,9 +347,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(goodTerminal))
         );
 
-        // Mock router.WRAPPED_NATIVE_TOKEN().
+        // Mock router.wrappedNativeToken().
         vm.mockCall(
-            address(router), abi.encodeCall(IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN, ()), abi.encode(address(weth))
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
         );
 
         // Mock router.TOKENS() -> mock that says tokenIn is not a project token.
@@ -446,9 +446,9 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        // Mock router.WRAPPED_NATIVE_TOKEN().
+        // Mock router.wrappedNativeToken().
         vm.mockCall(
-            address(router), abi.encodeCall(IJBPayRoutePreviewer.WRAPPED_NATIVE_TOKEN, ()), abi.encode(address(weth))
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
         );
 
         // Mock router.TOKENS().

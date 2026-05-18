@@ -366,7 +366,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         pure
         returns (bool exists, bytes memory data)
     {
-        return JBMetadataResolver.getDataFor({id: JBMetadataResolver.getId(key, address(router)), metadata: metadata});
+        return JBMetadataResolver.getDataFor({
+            id: JBMetadataResolver.getId({purpose: key, target: address(router)}), metadata: metadata
+        });
     }
 
     /// @notice Check whether two tokens share the same routing representation for the router.
@@ -918,17 +920,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             if (_isCircularTerminal({router: router, projectId: projectId, terminal: candidateTerminal})) continue;
 
             // Isolate each candidate preview so one broken route does not brick the whole search.
-            try self.previewPayRouteForCandidate(
-                router,
-                wrappedNativeToken,
-                projectId,
-                tokenIn,
-                amount,
-                beneficiary,
-                metadata,
-                candidateTokens[i],
-                candidateTerminal
-            ) returns (
+            try self.previewPayRouteForCandidate({
+                router: router,
+                wrappedNativeToken: wrappedNativeToken,
+                projectId: projectId,
+                tokenIn: tokenIn,
+                amount: amount,
+                beneficiary: beneficiary,
+                metadata: metadata,
+                tokenOut: candidateTokens[i],
+                destTerminal: candidateTerminal
+            }) returns (
                 IJBTerminal candidateDestTerminal,
                 address candidateTokenOut,
                 uint256 candidateAmountOut,
@@ -977,9 +979,15 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // No candidate token could be scored — fall back to the router's generic route resolution.
         // Uses an external self-call (`self.previewFallbackRoute`) so Solidity's try/catch can isolate
         // reverts from broken terminals or price feeds without bricking the entire best-route preview.
-        try self.previewFallbackRoute(
-            router, wrappedNativeToken, projectId, tokenIn, amount, beneficiary, metadata
-        ) returns (
+        try self.previewFallbackRoute({
+            routePreviewer: router,
+            wrappedNativeToken: wrappedNativeToken,
+            destProjectId: projectId,
+            tokenIn: tokenIn,
+            amountIn: amount,
+            beneficiary: beneficiary,
+            metadata: metadata
+        }) returns (
             IJBTerminal fallbackDestTerminal,
             address fallbackTokenOut,
             uint256 fallbackAmountOut,

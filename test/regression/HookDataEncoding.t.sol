@@ -73,10 +73,10 @@ contract HookDataEncodingTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(address(4)),
-            factory: IUniswapV3Factory(address(5)),
-            poolManager: IPoolManager(address(poolManager)),
-            univ4Hook: hook
+            newWrappedNativeToken: IWETH9(address(4)),
+            newFactory: IUniswapV3Factory(address(5)),
+            newPoolManager: IPoolManager(address(poolManager)),
+            newUniv4Hook: hook
         });
 
         // Mock the IERC20.transfer call that _settleV4 makes (safeTransfer to pool manager).

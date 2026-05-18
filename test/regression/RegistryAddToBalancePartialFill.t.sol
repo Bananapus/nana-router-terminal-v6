@@ -358,7 +358,10 @@ contract RegistryAddToBalancePartialFillTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: weth, factory: factory, poolManager: IPoolManager(address(0)), univ4Hook: address(0)
+            newWrappedNativeToken: weth,
+            newFactory: factory,
+            newPoolManager: IPoolManager(address(0)),
+            newUniv4Hook: address(0)
         });
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 

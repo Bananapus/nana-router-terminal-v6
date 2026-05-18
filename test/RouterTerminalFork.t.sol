@@ -106,7 +106,10 @@ contract RouterTerminalForkTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: WETH, factory: V3_FACTORY, poolManager: V4_POOL_MANAGER, univ4Hook: address(0)
+            newWrappedNativeToken: WETH,
+            newFactory: V3_FACTORY,
+            newPoolManager: V4_POOL_MANAGER,
+            newUniv4Hook: address(0)
         });
 
         // Create test projects.

@@ -175,7 +175,7 @@ contract TestRegressionGaps is Test {
             d: dir, p: perms, t: toks, pm: permit2, bh: address(0), tf: address(0), dep: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: weth, factory: factory, poolManager: pm, univ4Hook: address(0)
+            newWrappedNativeToken: weth, newFactory: factory, newPoolManager: pm, newUniv4Hook: address(0)
         });
     }
 

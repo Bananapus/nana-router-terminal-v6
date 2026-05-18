@@ -280,10 +280,10 @@ contract V4WethInputUsesStuckEthTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: weth,
-            factory: IUniswapV3Factory(address(new NoV3Factory())),
-            poolManager: IPoolManager(address(poolManager)),
-            univ4Hook: address(0)
+            newWrappedNativeToken: weth,
+            newFactory: IUniswapV3Factory(address(new NoV3Factory())),
+            newPoolManager: IPoolManager(address(poolManager)),
+            newUniv4Hook: address(0)
         });
 
         vm.mockCall(

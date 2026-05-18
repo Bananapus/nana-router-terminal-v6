@@ -186,10 +186,10 @@ contract DeployScript is Script, Sphinx {
             deployer: safeAddress()
         });
         terminal.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(weth),
-            factory: IUniswapV3Factory(factory),
-            poolManager: IPoolManager(poolManager),
-            univ4Hook: address(univ4Router.hook)
+            newWrappedNativeToken: IWETH9(weth),
+            newFactory: IUniswapV3Factory(factory),
+            newPoolManager: IPoolManager(poolManager),
+            newUniv4Hook: address(univ4Router.hook)
         });
 
         // Set the terminal as the default for the registry.

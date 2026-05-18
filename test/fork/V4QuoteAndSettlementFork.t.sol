@@ -249,10 +249,10 @@ contract V4QuoteAndSettlementForkTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: WETH,
-            factory: IUniswapV3Factory(address(noV3Factory)),
-            poolManager: V4_POOL_MANAGER,
-            univ4Hook: address(0)
+            newWrappedNativeToken: WETH,
+            newFactory: IUniswapV3Factory(address(noV3Factory)),
+            newPoolManager: V4_POOL_MANAGER,
+            newUniv4Hook: address(0)
         });
 
         feeProjectId = _launchProject({acceptedToken: JBConstants.NATIVE_TOKEN, decimals: 18});
