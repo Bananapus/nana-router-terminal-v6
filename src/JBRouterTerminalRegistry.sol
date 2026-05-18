@@ -358,14 +358,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     function _defaultTerminalFor(uint256 projectId) internal view returns (IJBTerminal terminal) {
         // New projects (created after the most recent setDefaultTerminal) get the current default.
         if (projectId > defaultTerminalProjectIdThreshold) return defaultTerminal;
-        // Older projects walk the history: return the FIRST segment whose maxProjectId covers them.
+
+        // Older projects walk the history. Each segment covers a half-open range
+        // `(minProjectIdExclusive, maxProjectId]` — exactly the cohort that was issued while that segment's terminal
+        // was the active default. Projects whose IDs pre-date every recorded default (the cold-start cohort)
+        // do not match any segment and resolve to `address(0)` — preserving the documented "the default only applies
+        // to projects created AFTER it was set" property at registry cold-start.
         uint256 len = _defaultTerminalHistory.length;
         for (uint256 i; i < len; ++i) {
-            if (projectId <= _defaultTerminalHistory[i].maxProjectId) {
-                return _defaultTerminalHistory[i].terminal;
+            DefaultTerminalSegment storage segment = _defaultTerminalHistory[i];
+            if (projectId > segment.minProjectIdExclusive && projectId <= segment.maxProjectId) {
+                return segment.terminal;
             }
         }
-        // Falls here only if projectId predates the first setDefaultTerminal call (no default ever applied).
         return IJBTerminal(address(0));
     }
 
@@ -626,10 +631,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // default is what unconfigured (and all-future) projects will resolve to.
         _requireNonCircularTerminalFor({projectId: count, terminal: terminal});
 
-        // Snapshot the OUTGOING default so existing projects (ID <= count) continue resolving to
-        // it, not to the new default. First-ever call has defaultTerminal == 0 and nothing to snapshot.
+        // Snapshot the OUTGOING default so projects whose IDs were issued while it was active keep resolving to it.
+        // The segment encodes the half-open range `(prevThreshold, currentCount]` — i.e. exactly the cohort that was
+        // assigned the outgoing default at creation time. The first call ever has `defaultTerminal == 0` and nothing
+        // to snapshot; in that case projects whose IDs already existed remain unaffected by the new default, keeping
+        // the cold-start cohort outside any retroactive routing change.
         if (address(defaultTerminal) != address(0)) {
-            _defaultTerminalHistory.push(DefaultTerminalSegment({maxProjectId: count, terminal: defaultTerminal}));
+            _defaultTerminalHistory.push(
+                DefaultTerminalSegment({
+                    minProjectIdExclusive: defaultTerminalProjectIdThreshold,
+                    maxProjectId: count,
+                    terminal: defaultTerminal
+                })
+            );
         }
 
         defaultTerminal = terminal;
