@@ -145,7 +145,7 @@ contract JBRouterTerminal is
 
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
     /// @dev Deployed in the constructor with chain-same inputs (just `directory` — the resolver does NOT cache
-    /// `WRAPPED_NATIVE_TOKEN` locally; the router passes it in on every external resolver call as a parameter to
+    /// `wrappedNativeToken` locally; the router passes it in on every external resolver call as a parameter to
     /// avoid an extra external call on each normalization step). Because this router's address is chain-same via
     /// CREATE2 and the resolver is deployed at the router's nonce 1, the resolver's address is chain-same too.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
@@ -167,23 +167,23 @@ contract JBRouterTerminal is
     /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
     /// constructor inputs are byte-identical on every chain (Uniswap V3 deploys to a different factory address per
     /// chain).
-    IUniswapV3Factory public FACTORY;
+    IUniswapV3Factory public factory;
 
     /// @notice The Uniswap V4 PoolManager. Can be `address(0)` if V4 is not deployed on this chain.
     /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
     /// constructor inputs are byte-identical on every chain.
-    IPoolManager public POOL_MANAGER;
+    IPoolManager public poolManager;
 
     /// @notice The canonical Uniswap V4 router hook address used by supported hooked pools.
     /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable because
     /// `JBUniswapV4Hook` inherits Uniswap's `BaseHook -> ImmutableState`, which forces a chain-specific PoolManager
     /// immutable inside the hook itself — making the hook chain-different by design.
-    address public UNIV4_HOOK;
+    address public univ4Hook;
 
     /// @notice The ERC-20 wrapper for the native token.
     /// @dev Set once by `_DEPLOYER` via `setChainSpecificConstants`. Held as storage rather than immutable so the
     /// constructor inputs are byte-identical on every chain (WETH/WCELO/etc. differ per chain).
-    IWETH9 public override WRAPPED_NATIVE_TOKEN;
+    IWETH9 public override wrappedNativeToken;
 
     //*********************************************************************//
     // ---------------------- internal stored properties ----------------- //
@@ -393,29 +393,30 @@ contract JBRouterTerminal is
     }
 
     /// @notice One-shot setter for the chain-specific Uniswap and wrapped-native addresses.
-    /// @dev Callable only by `_DEPLOYER` and only once (when `WRAPPED_NATIVE_TOKEN` is still `address(0)`). After this
+    /// @dev Callable only by `_DEPLOYER` and only once (when `wrappedNativeToken` is still `address(0)`). After this
     /// call all four values are effectively immutable for the contract's lifetime. Mirrors the
     /// `JBOptimismSuckerDeployer.setChainSpecificConstants` pattern so the contract's CREATE2 inputs stay
     /// byte-identical across chains and its deployed address is unified.
-    /// @param wrappedNativeToken The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum,
+    /// @param newWrappedNativeToken The ERC-20 wrapper for the chain's native token (e.g. WETH on Ethereum,
     /// WCELO on Celo).
-    /// @param factory The Uniswap V3 factory for pool discovery on this chain.
-    /// @param poolManager The Uniswap V4 PoolManager on this chain (may be `address(0)` if V4 is not deployed there).
-    /// @param univ4Hook The canonical Uniswap V4 router hook on this chain.
+    /// @param newFactory The Uniswap V3 factory for pool discovery on this chain.
+    /// @param newPoolManager The Uniswap V4 PoolManager on this chain (may be `address(0)` if V4 is not deployed
+    /// there).
+    /// @param newUniv4Hook The canonical Uniswap V4 router hook on this chain.
     function setChainSpecificConstants(
-        IWETH9 wrappedNativeToken,
-        IUniswapV3Factory factory,
-        IPoolManager poolManager,
-        address univ4Hook
+        IWETH9 newWrappedNativeToken,
+        IUniswapV3Factory newFactory,
+        IPoolManager newPoolManager,
+        address newUniv4Hook
     )
         external
     {
         if (msg.sender != _DEPLOYER) revert JBRouterTerminal_Unauthorized({caller: msg.sender});
-        if (address(WRAPPED_NATIVE_TOKEN) != address(0)) revert JBRouterTerminal_AlreadyConfigured();
-        WRAPPED_NATIVE_TOKEN = wrappedNativeToken;
-        FACTORY = factory;
-        POOL_MANAGER = poolManager;
-        UNIV4_HOOK = univ4Hook;
+        if (address(wrappedNativeToken) != address(0)) revert JBRouterTerminal_AlreadyConfigured();
+        wrappedNativeToken = newWrappedNativeToken;
+        factory = newFactory;
+        poolManager = newPoolManager;
+        univ4Hook = newUniv4Hook;
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
@@ -451,7 +452,7 @@ contract JBRouterTerminal is
     /// @param data Encoded swap parameters.
     /// @return Encoded output amount.
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        if (msg.sender != address(POOL_MANAGER)) revert JBRouterTerminal_CallerNotPoolManager(msg.sender);
+        if (msg.sender != address(poolManager)) revert JBRouterTerminal_CallerNotPoolManager(msg.sender);
 
         // Decode the swap parameters.
         (
@@ -464,7 +465,7 @@ contract JBRouterTerminal is
         ) = abi.decode(data, (PoolKey, bool, int256, uint160, uint256, bool));
 
         // Execute the swap.
-        BalanceDelta delta = POOL_MANAGER.swap({
+        BalanceDelta delta = poolManager.swap({
             key: key,
             params: SwapParams({
                 zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
@@ -895,7 +896,7 @@ contract JBRouterTerminal is
         // it on every normalization step.
         return _PAY_ROUTE_RESOLVER.previewBestPayRoute({
             router: IJBPayRoutePreviewer(address(this)),
-            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            wrappedNativeToken: address(wrappedNativeToken),
             projectId: projectId,
             tokenIn: tokenIn,
             amount: amount,
@@ -1389,7 +1390,7 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         // Convert wrapped-native-token addresses to V4's native representation (address(0)) for currency comparison.
-        address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
+        address v4In = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
@@ -1403,7 +1404,7 @@ contract JBRouterTerminal is
         // The router only reaches this path with uint256 amounts that fit the signed exact-input convention.
         // forge-lint: disable-next-line(unsafe-typecast)
         int256 exactInputAmount = -int256(amount);
-        bytes memory result = POOL_MANAGER.unlock(
+        bytes memory result = poolManager.unlock(
             abi.encode(key, zeroForOne, exactInputAmount, sqrtPriceLimitX96, minAmountOut, canUseExistingNativeBalance)
         );
 
@@ -1465,7 +1466,7 @@ contract JBRouterTerminal is
                 (bool success,) = refundTo.call{value: refundAmount}("");
                 if (!success) {
                     _wrapNativeToken(refundAmount);
-                    IERC20(address(WRAPPED_NATIVE_TOKEN)).safeTransfer(refundTo, refundAmount);
+                    IERC20(address(wrappedNativeToken)).safeTransfer({to: refundTo, value: refundAmount});
                 }
             } else {
                 _transferFrom({from: address(this), to: refundTo, token: tokenIn, amount: refundAmount});
@@ -1508,7 +1509,7 @@ contract JBRouterTerminal is
         // Resolve what token the destination project accepts and which terminal to use.
         (tokenOut, destTerminal) = _PAY_ROUTE_RESOLVER.resolveTokenOut({
             router: IJBPayRoutePreviewer(address(this)),
-            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            wrappedNativeToken: address(wrappedNativeToken),
             projectId: destProjectId,
             tokenIn: tokenIn,
             metadata: metadata
@@ -1661,13 +1662,13 @@ contract JBRouterTerminal is
                 _unwrapNativeToken(amount);
             }
             // Native settlement uses `msg.value` because PoolManager expects ETH to accompany the settle call.
-            POOL_MANAGER.settle{value: amount}();
+            poolManager.settle{value: amount}();
         } else {
             // ERC20 settlement requires PoolManager to observe the token first (`sync`), then receive the transfer,
             // then finalize the accounting with `settle`.
-            POOL_MANAGER.sync(currency);
-            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(POOL_MANAGER), value: amount});
-            POOL_MANAGER.settle();
+            poolManager.sync(currency);
+            IERC20(Currency.unwrap(currency)).safeTransfer({to: address(poolManager), value: amount});
+            poolManager.settle();
         }
     }
 
@@ -1676,7 +1677,7 @@ contract JBRouterTerminal is
     /// @param amount The amount of `currency` to take.
     function _takeV4(Currency currency, uint256 amount) internal {
         // Pull the owed output asset into the router before any later wrapping/unwrapping or forwarding logic runs.
-        POOL_MANAGER.take({currency: currency, to: address(this), amount: amount});
+        poolManager.take({currency: currency, to: address(this), amount: amount});
 
         // If native token output, wrap it (downstream _handleSwap unwraps if needed).
         if (Currency.unwrap(currency) == address(0)) _wrapNativeToken(amount);
@@ -1726,13 +1727,13 @@ contract JBRouterTerminal is
         if (token == preferredToken) return (token, amount);
 
         // Wrap native tokens when the preferred token is the ERC-20 wrapper.
-        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(WRAPPED_NATIVE_TOKEN)) {
+        if (token == JBConstants.NATIVE_TOKEN && preferredToken == address(wrappedNativeToken)) {
             _wrapNativeToken(amount);
             return (preferredToken, amount);
         }
 
         // Unwrap wrapped native tokens when the preferred token is the native-token sentinel.
-        if (token == address(WRAPPED_NATIVE_TOKEN) && preferredToken == JBConstants.NATIVE_TOKEN) {
+        if (token == address(wrappedNativeToken) && preferredToken == JBConstants.NATIVE_TOKEN) {
             _unwrapNativeToken(amount);
             return (preferredToken, amount);
         }
@@ -1744,13 +1745,13 @@ contract JBRouterTerminal is
     /// @notice Wrap native tokens into their ERC-20 wrapped representation.
     /// @param amount The amount of native tokens to wrap.
     function _wrapNativeToken(uint256 amount) internal {
-        WRAPPED_NATIVE_TOKEN.deposit{value: amount}();
+        wrappedNativeToken.deposit{value: amount}();
     }
 
     /// @notice Unwrap wrapped native tokens into native tokens.
     /// @param amount The amount of wrapped native tokens to unwrap.
     function _unwrapNativeToken(uint256 amount) internal {
-        WRAPPED_NATIVE_TOKEN.withdraw(amount);
+        wrappedNativeToken.withdraw(amount);
     }
 
     //*********************************************************************//
@@ -1763,14 +1764,14 @@ contract JBRouterTerminal is
     /// @param fee The fee tier to query.
     /// @return The pool address, or address(0) if none exists.
     function _getPool(address tokenA, address tokenB, uint24 fee) internal view returns (address) {
-        return FACTORY.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
+        return factory.getPool({tokenA: tokenA, tokenB: tokenB, fee: fee});
     }
 
     /// @notice Look up the in-range liquidity of a V4 pool.
     /// @param id The pool ID to query.
     /// @return The pool's current in-range liquidity.
     function _getLiquidity(PoolId id) internal view returns (uint128) {
-        return POOL_MANAGER.getLiquidity(id);
+        return poolManager.getLiquidity(id);
     }
 
     /// @notice Read slot0 from a V4 pool.
@@ -1784,7 +1785,7 @@ contract JBRouterTerminal is
         view
         returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)
     {
-        return POOL_MANAGER.getSlot0(id);
+        return poolManager.getSlot0(id);
     }
 
     /// @notice Look up the primary terminal for a project and token.
@@ -1942,11 +1943,11 @@ contract JBRouterTerminal is
         updatedBestPool = bestPool;
 
         // Exit early on chains where V4 is not deployed.
-        if (address(POOL_MANAGER) == address(0)) return updatedBestPool;
+        if (address(poolManager) == address(0)) return updatedBestPool;
 
         // Convert wrapped native token -> address(0) for V4 native representation.
-        address v4In = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
-        address v4Out = normalizedTokenOut == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenOut;
+        address v4In = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
+        address v4Out = normalizedTokenOut == address(wrappedNativeToken) ? address(0) : normalizedTokenOut;
 
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
@@ -1954,7 +1955,7 @@ contract JBRouterTerminal is
         for (uint256 i; i < 4;) {
             for (uint256 j; j < 2;) {
                 // Probe vanilla pools first, then the configured hooked-pool family if one exists.
-                IHooks hooks = j == 0 ? IHooks(address(0)) : IHooks(UNIV4_HOOK);
+                IHooks hooks = j == 0 ? IHooks(address(0)) : IHooks(univ4Hook);
                 if (j != 0 && address(hooks) == address(0)) {
                     unchecked {
                         ++j;
@@ -2245,7 +2246,7 @@ contract JBRouterTerminal is
     /// This fallback is an accepted product risk for programmatic integrations that cannot provide an external quote,
     /// but it should be understood as a bounded-convenience path rather than a fully manipulation-resistant one.
     ///
-    /// SECURITY NOTE: The spot price read from `POOL_MANAGER.getSlot0(id)` is an instantaneous value
+    /// SECURITY NOTE: The spot price read from `poolManager.getSlot0(id)` is an instantaneous value
     /// that can be manipulated within the same block (e.g. via sandwich attacks or flash loans). Unlike V3 pools,
     /// V4 vanilla pools do not expose a built-in TWAP oracle, so there is no manipulation-resistant price source
     /// available on-chain for automatic quoting.
@@ -2303,7 +2304,7 @@ contract JBRouterTerminal is
             secondsAgos[1] = 0; // End of the window (current block).
 
             // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
-            try IGeomeanOracle(address(key.hooks)).observe(key, secondsAgos) returns (
+            try IGeomeanOracle(address(key.hooks)).observe({key: key, secondsAgos: secondsAgos}) returns (
                 int56[] memory tickCumulatives, uint160[] memory
             ) {
                 // Guard against malicious/broken hooks returning fewer elements than requested.
@@ -2335,8 +2336,8 @@ contract JBRouterTerminal is
 
         // V4 uses address(0) for native tokens; map the wrapped native token so OracleLibrary token sorting matches the
         // pool.
-        normalizedTokenIn = normalizedTokenIn == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenIn;
-        normalizedTokenOut = normalizedTokenOut == address(WRAPPED_NATIVE_TOKEN) ? address(0) : normalizedTokenOut;
+        normalizedTokenIn = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
+        normalizedTokenOut = normalizedTokenOut == address(wrappedNativeToken) ? address(0) : normalizedTokenOut;
 
         if (!usedTwap) {
             // Without TWAP, instantaneous liquidity and spot price are both JIT-manipulable.
@@ -2403,7 +2404,7 @@ contract JBRouterTerminal is
     /// @return normalizedToken The normalized token address.
     function _normalize(address token) internal view returns (address) {
         // Replace the native-token sentinel with the wrapped native token so both share one routing representation.
-        return token == JBConstants.NATIVE_TOKEN ? address(WRAPPED_NATIVE_TOKEN) : token;
+        return token == JBConstants.NATIVE_TOKEN ? address(wrappedNativeToken) : token;
     }
 
     /// @notice Discover a pool and compute the minimum acceptable output for a swap. Uses a user-provided quote if

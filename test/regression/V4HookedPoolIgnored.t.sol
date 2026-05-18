@@ -87,10 +87,10 @@ contract V4HookedPoolIgnoredTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(address(0xBEEF)),
-            factory: IUniswapV3Factory(address(new NoV3Factory())),
-            poolManager: IPoolManager(address(poolManager)),
-            univ4Hook: hook
+            newWrappedNativeToken: IWETH9(address(0xBEEF)),
+            newFactory: IUniswapV3Factory(address(new NoV3Factory())),
+            newPoolManager: IPoolManager(address(poolManager)),
+            newUniv4Hook: hook
         });
     }
 

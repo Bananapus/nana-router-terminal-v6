@@ -143,10 +143,10 @@ contract RouterTerminalERC2771Test is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(address(weth)),
-            factory: mockFactory,
-            poolManager: mockPoolManager,
-            univ4Hook: address(0)
+            newWrappedNativeToken: IWETH9(address(weth)),
+            newFactory: mockFactory,
+            newPoolManager: mockPoolManager,
+            newUniv4Hook: address(0)
         });
     }
 

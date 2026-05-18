@@ -516,10 +516,10 @@ contract RouterTerminalInvariant is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(address(weth)),
-            factory: IUniswapV3Factory(mockFactory),
-            poolManager: IPoolManager(mockPoolManager),
-            univ4Hook: address(0)
+            newWrappedNativeToken: IWETH9(address(weth)),
+            newFactory: IUniswapV3Factory(mockFactory),
+            newPoolManager: IPoolManager(mockPoolManager),
+            newUniv4Hook: address(0)
         });
 
         // ── Mock: directory.primaryTerminalOf returns our destTerminal for each token ──

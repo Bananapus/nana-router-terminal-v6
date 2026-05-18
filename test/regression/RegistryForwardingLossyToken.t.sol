@@ -177,7 +177,7 @@ contract RegistryForwardingLossyTokenTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: weth, factory: factory, poolManager: poolManager, univ4Hook: address(0)
+            newWrappedNativeToken: weth, newFactory: factory, newPoolManager: poolManager, newUniv4Hook: address(0)
         });
 
         registry = new JBRouterTerminalRegistry({

@@ -284,10 +284,10 @@ contract MultiHopCashOutCycleTest is Test {
             deployer: address(this)
         });
         router.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(makeAddr("weth")),
-            factory: IUniswapV3Factory(address(new MockNoV3Factory())),
-            poolManager: IPoolManager(address(0)),
-            univ4Hook: address(0)
+            newWrappedNativeToken: IWETH9(makeAddr("weth")),
+            newFactory: IUniswapV3Factory(address(new MockNoV3Factory())),
+            newPoolManager: IPoolManager(address(0)),
+            newUniv4Hook: address(0)
         });
 
         sourceToken = new MockCycleToken();

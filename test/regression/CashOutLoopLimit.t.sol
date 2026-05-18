@@ -155,10 +155,10 @@ contract CashOutLoopLimitTest is Test {
             deployer: address(this)
         });
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: weth,
-            factory: factory,
-            poolManager: IPoolManager(address(0)), // no V4
-            univ4Hook: address(0)
+            newWrappedNativeToken: weth,
+            newFactory: factory,
+            newPoolManager: IPoolManager(address(0)), // no V4
+            newUniv4Hook: address(0)
         });
 
         tokenA = new MockToken();

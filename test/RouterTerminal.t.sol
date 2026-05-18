@@ -474,7 +474,7 @@ contract RouterTerminalHarness is JBRouterTerminal {
     {
         return _PAY_ROUTE_RESOLVER.resolveTokenOut({
             router: IJBPayRoutePreviewer(address(this)),
-            wrappedNativeToken: address(WRAPPED_NATIVE_TOKEN),
+            wrappedNativeToken: address(wrappedNativeToken),
             projectId: projectId,
             tokenIn: tokenIn,
             metadata: metadata
@@ -546,7 +546,10 @@ contract RouterTerminalTest is Test {
             address(this)
         );
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: mockWeth, factory: mockFactory, poolManager: mockPoolManager, univ4Hook: address(0)
+            newWrappedNativeToken: mockWeth,
+            newFactory: mockFactory,
+            newPoolManager: mockPoolManager,
+            newUniv4Hook: address(0)
         });
     }
 
@@ -2171,10 +2174,10 @@ contract RouterTerminalTest is Test {
             address(this)
         );
         noV4Router.setChainSpecificConstants({
-            wrappedNativeToken: mockWeth,
-            factory: mockFactory,
-            poolManager: IPoolManager(address(0)),
-            univ4Hook: address(0)
+            newWrappedNativeToken: mockWeth,
+            newFactory: mockFactory,
+            newPoolManager: IPoolManager(address(0)),
+            newUniv4Hook: address(0)
         });
 
         address tokenA = makeAddr("tokenA");
@@ -2547,10 +2550,10 @@ contract SettleV4DeficitTest is Test {
             address(this)
         );
         routerTerminal.setChainSpecificConstants({
-            wrappedNativeToken: IWETH9(address(weth)),
-            factory: mockFactory,
-            poolManager: IPoolManager(address(poolManager)),
-            univ4Hook: address(0)
+            newWrappedNativeToken: IWETH9(address(weth)),
+            newFactory: mockFactory,
+            newPoolManager: IPoolManager(address(poolManager)),
+            newUniv4Hook: address(0)
         });
     }
 
