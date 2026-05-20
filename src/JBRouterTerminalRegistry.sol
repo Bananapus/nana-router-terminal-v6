@@ -151,7 +151,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         returns (JBAccountingContext memory context)
     {
         // Get the terminal for the project (falls back to the threshold-resolved default).
-        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
         // Get the accounting context for the token.
         return terminal.accountingContextForTokenOf({projectId: projectId, token: token});
@@ -167,7 +167,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         returns (JBAccountingContext[] memory contexts)
     {
         // Get the terminal for the project (falls back to the threshold-resolved default).
-        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
         // Get the accounting contexts.
         return terminal.accountingContextsOf(projectId);
@@ -254,7 +254,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     {
         // Read the terminal explicitly configured for this project, falling back to the
         // threshold-resolved default if none is pinned.
-        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
         // Forward the preview request unchanged to whichever terminal was resolved above.
         return terminal.previewPayFor({
@@ -387,6 +387,16 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (terminal == IJBTerminal(address(0))) terminal = _defaultTerminalFor(projectId);
     }
 
+    /// @notice Resolve the effective terminal for call paths that need to forward into a real terminal.
+    /// @dev `terminalOf`/`defaultTerminalFor` may intentionally return zero for the cold-start cohort. Transactional
+    /// and passthrough view paths must fail before accepting funds or calling address(0).
+    /// @param projectId The project to resolve the terminal for.
+    /// @return terminal The project-specific terminal or threshold-resolved default.
+    function _requireResolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        terminal = _resolvedTerminalOf(projectId);
+        if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
+    }
+
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
@@ -422,8 +432,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         payable
         override
     {
-        // Resolve the terminal that should receive this forwarded add-to-balance call.
-        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        // Resolve the terminal that should receive this forwarded add-to-balance call before accepting funds.
+        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
@@ -573,8 +583,8 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (uint256 result)
     {
-        // Resolve the terminal that should receive this forwarded payment.
-        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        // Resolve the terminal that should receive this forwarded payment before accepting funds.
+        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
