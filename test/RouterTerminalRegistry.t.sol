@@ -19,6 +19,34 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IJBRouterTerminalRegistry} from "../src/interfaces/IJBRouterTerminalRegistry.sol";
 
+contract RegistryTestERC20 {
+    mapping(address account => uint256) public balanceOf;
+    mapping(address owner => mapping(address spender => uint256)) public allowance;
+
+    function mint(address account, uint256 amount) external {
+        balanceOf[account] += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 contract RouterTerminalRegistryTest is Test {
     JBRouterTerminalRegistry registry;
 
@@ -329,6 +357,32 @@ contract RouterTerminalRegistryTest is Test {
         assertEq(returned, 100);
     }
 
+    function test_pay_revertsBeforeAcceptingErc20WhenResolvedTerminalIsZero() public {
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        RegistryTestERC20 token = new RegistryTestERC20();
+        token.mint(address(this), 1 ether);
+        token.approve(address(registry), 1 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalNotSet.selector, projectId)
+        );
+        registry.pay({
+            projectId: projectId,
+            token: address(token),
+            amount: 1 ether,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        assertEq(token.balanceOf(address(this)), 1 ether);
+        assertEq(token.balanceOf(address(registry)), 0);
+    }
+
     function test_previewPayFor_forwardsToDefault() public {
         vm.prank(owner);
         registry.setDefaultTerminal(terminalA);
@@ -388,6 +442,29 @@ contract RouterTerminalRegistryTest is Test {
             memo: "",
             metadata: ""
         });
+    }
+
+    function test_addToBalanceOf_revertsBeforeForwardingNativeWhenResolvedTerminalIsZero() public {
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        vm.deal(address(this), 1 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalRegistry.JBRouterTerminalRegistry_TerminalNotSet.selector, projectId)
+        );
+        registry.addToBalanceOf{value: 1 ether}({
+            projectId: projectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: 1 ether,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+
+        assertEq(address(registry).balance, 0);
+        assertEq(address(this).balance, 1 ether);
     }
 
     // ──────────────────────────────────────────────────────────────────────
