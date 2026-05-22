@@ -1195,7 +1195,8 @@ contract JBRouterTerminal is
                 tokenToReclaim: tokenToReclaim,
                 minTokensReclaimed: 0,
                 beneficiary: payable(address(this)),
-                metadata: ""
+                metadata: "",
+                referralProjectId: 0
             });
 
             // Measure the reclaimed-token balance delta so fee-on-transfer behavior cannot fake delivery.
