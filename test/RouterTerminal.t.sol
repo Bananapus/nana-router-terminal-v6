@@ -301,7 +301,8 @@ contract MockPreviewCashOutTerminal {
         address tokenToReclaim,
         uint256,
         address payable beneficiary,
-        bytes calldata
+        bytes calldata,
+        uint256 /* referralProjectId */
     )
         external
         returns (uint256)
@@ -386,7 +387,8 @@ contract MockConfigurableCashOutTerminal {
         address tokenToReclaim,
         uint256,
         address payable beneficiary,
-        bytes calldata
+        bytes calldata,
+        uint256 /* referralProjectId */
     )
         external
         returns (uint256)
@@ -2491,7 +2493,8 @@ contract RouterTerminalTest is Test {
                     JBConstants.NATIVE_TOKEN,
                     0, // router passes 0 and enforces via balance-delta
                     payable(address(routerTerminal)),
-                    bytes("")
+                    bytes(""),
+                    uint256(0) // referralProjectId
                 )
             )
         );

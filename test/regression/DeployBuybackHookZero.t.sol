@@ -155,7 +155,8 @@ contract RegressionMockCashOutTerminal {
         address tokenToReclaim,
         uint256,
         address payable beneficiary,
-        bytes calldata
+        bytes calldata,
+        uint256 /* referralProjectId */
     )
         external
         returns (uint256)
