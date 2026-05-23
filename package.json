@@ -1,6 +1,6 @@
 {
   "name": "@bananapus/router-terminal-v6",
-  "version": "0.0.48",
+  "version": "0.0.49",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -10,8 +10,7 @@
     "foundry.toml",
     "references/",
     "remappings.txt",
-    "script/Deploy.s.sol",
-    "script/helpers/",
+    "script/",
     "src/"
   ],
   "engines": {
