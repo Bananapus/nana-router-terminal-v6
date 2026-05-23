@@ -242,7 +242,8 @@ contract RawBuybackQuoteRouteMisrankTest is RouterTerminalTest {
                 int24(0),
                 uint128(0),
                 PoolId.wrap(bytes32(0)),
-                rawSwapQuote
+                rawSwapQuote,
+                false
             )
         });
     }

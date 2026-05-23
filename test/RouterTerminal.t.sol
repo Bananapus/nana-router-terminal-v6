@@ -2309,7 +2309,7 @@ contract RouterTerminalTest is Test {
             noop: false,
             amount: 0,
             metadata: abi.encode(
-                quotedAmount, uint256(0), uint256(0), int24(0), uint128(0), PoolId.wrap(bytes32(0)), quotedAmount
+                quotedAmount, uint256(0), uint256(0), int24(0), uint128(0), PoolId.wrap(bytes32(0)), quotedAmount, false
             )
         });
     }
