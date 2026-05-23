@@ -7,7 +7,6 @@
     "url": "git+https://github.com/Bananapus/nana-router-terminal-v6"
   },
   "files": [
-    "CHANGELOG.md",
     "foundry.toml",
     "references/",
     "remappings.txt",
