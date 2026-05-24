@@ -1078,7 +1078,7 @@ contract JBRouterTerminal is
 
             try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
-                emit Permit2AllowanceFailed({token: token, owner: sender, reason: reason});
+                emit Permit2AllowanceFailed({token: token, owner: sender, reason: reason, caller: sender});
             }
         }
 

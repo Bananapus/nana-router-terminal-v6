@@ -735,7 +735,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             try PERMIT2.permit({owner: _msgSender(), permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 // Emit a failure event so callers can surface the permit2 error reason.
-                emit Permit2AllowanceFailed({token: token, owner: _msgSender(), reason: reason});
+                emit Permit2AllowanceFailed({token: token, owner: _msgSender(), reason: reason, caller: _msgSender()});
             }
         }
 

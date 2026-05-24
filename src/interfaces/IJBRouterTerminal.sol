@@ -8,6 +8,13 @@ import {PoolInfo} from "../structs/PoolInfo.sol";
 
 /// @notice A terminal that routes payments by discovering what token a project accepts and converting automatically.
 interface IJBRouterTerminal is IJBTerminal {
+    /// @notice A Permit2 allowance approval failed.
+    /// @param token The token the approval was attempted for.
+    /// @param owner The owner of the tokens.
+    /// @param reason The failure reason.
+    /// @param caller The address that called the terminal function.
+    event Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason, address caller);
+
     /// @notice Discover the best pool across both V3 and V4 for a token pair.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).

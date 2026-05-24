@@ -42,7 +42,8 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param token The token the approval was attempted for.
     /// @param owner The owner of the tokens.
     /// @param reason The failure reason.
-    event Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason);
+    /// @param caller The address that called the terminal function.
+    event Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason, address caller);
 
     /// @notice The default terminal used when a project has not set a specific terminal.
     /// @dev Only applies to projects with ID > `defaultTerminalProjectIdThreshold`. Older projects resolve via

@@ -166,9 +166,10 @@ contract Permit2AllowanceFailedTest is Test {
         );
 
         // Expect the Permit2AllowanceFailed event to be emitted.
-        // The event is: Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason)
+        // The event is: Permit2AllowanceFailed(address indexed token, address indexed owner, bytes reason, address
+        // caller)
         vm.expectEmit(true, true, false, false, address(registry));
-        emit IJBRouterTerminalRegistry.Permit2AllowanceFailed(address(token), payer, revertReason);
+        emit IJBRouterTerminalRegistry.Permit2AllowanceFailed(address(token), payer, revertReason, payer);
 
         // Call pay as the payer. The permit2 will fail, event emits, and fallback transfer completes.
         vm.prank(payer);
