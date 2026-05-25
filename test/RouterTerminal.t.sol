@@ -635,7 +635,7 @@ contract RouterTerminalTest is Test {
         JBRouterTerminalRegistry registry =
             new JBRouterTerminalRegistry(mockPermissions, mockProjects, mockPermit2, terminalOwner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(mockProjects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(terminalOwner);
         registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
@@ -661,7 +661,7 @@ contract RouterTerminalTest is Test {
         JBRouterTerminalRegistry registry =
             new JBRouterTerminalRegistry(mockPermissions, mockProjects, mockPermit2, terminalOwner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(mockProjects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(terminalOwner);
         registry.setDefaultTerminal(IJBTerminal(address(routerTerminal)));
@@ -2366,10 +2366,10 @@ contract RouterTerminalTest is Test {
     }
 
     //*********************************************************************//
-    // ----------- Bug fix regression tests: V4 sign convention ---------- //
+    // ------------ Regression tests: V4 sign convention ---------------- //
     //*********************************************************************//
 
-    /// @notice The V4 unlock callback should receive a negative amountSpecified for exact-input (fix #1).
+    /// @notice The V4 unlock callback should receive a negative amountSpecified for exact-input swaps.
     function test_unlockCallback_negativeAmountSpecified() public {
         address tokenA = makeAddr("tokenA");
         address tokenB = makeAddr("tokenB");
@@ -2389,7 +2389,7 @@ contract RouterTerminalTest is Test {
         uint160 sqrtPriceLimitX96 = 4_295_128_740; // MIN_SQRT_RATIO + 1
         uint256 minAmountOut = 0;
 
-        // Encode the data as the contract would encode it (with the sign fix).
+        // Encode the data as the contract encodes exact-input V4 swaps.
         bytes memory callbackData = abi.encode(key, true, amountSpecified, sqrtPriceLimitX96, minAmountOut, false);
 
         // Mock the PoolManager.swap call — it should receive a negative amountSpecified.
@@ -2421,10 +2421,10 @@ contract RouterTerminalTest is Test {
     }
 
     //*********************************************************************//
-    // --------- Bug fix regression tests: cashout slippage -------------- //
+    // ---------- Regression tests: cashout slippage --------------------- //
     //*********************************************************************//
 
-    /// @notice cashOutMinReclaimed metadata should be forwarded to the cashout terminal (fix #4).
+    /// @notice cashOutMinReclaimed metadata should be forwarded to the cashout terminal.
     function test_pay_cashOutMinReclaimedMetadata() public {
         MockERC20 jbTokenMock = new MockERC20();
         address jbToken = address(jbTokenMock);
@@ -2480,7 +2480,7 @@ contract RouterTerminalTest is Test {
             );
         }
 
-        // The router now passes minTokensReclaimed=0 to the terminal and enforces the user's
+        // The router passes minTokensReclaimed=0 to the terminal and enforces the user's
         // minimum via the balance-delta check instead (to support buyback-hook sell-side flows).
         vm.expectCall(
             address(mockCashOutTerminal),
@@ -2573,7 +2573,7 @@ contract SettleV4DeficitTest is Test {
         // Give the router terminal partial WETH (fund the mock WETH contract with ETH
         // so withdraw can send it back, then credit the router terminal's WETH balance).
         vm.deal(address(weth), wethPortion);
-        weth.deposit{value: 0}(); // just to ensure contract is initialized
+        weth.deposit{value: 0}(); // initialize the mock WETH contract
         // Directly set the WETH balance for the router terminal.
         vm.deal(address(weth), wethPortion); // ensure WETH contract has ETH to pay out
         // Credit WETH balance to the router terminal by depositing on its behalf.

@@ -9,7 +9,7 @@
 ## Change Checklist
 
 - If you edit route discovery, verify both direct acceptance and swap-based routes.
-- If you edit the cash-out loop, check credit-based flows and fork tests, not just simple payments.
+- If you edit the cash-out loop, check project-token cash-out flows and fork tests, not only simple payments.
 - If you edit slippage or quote logic, inspect [`src/JBPayRouteResolver.sol`](../src/JBPayRouteResolver.sol) and the preview tests together.
 - If you edit preview behavior, verify route ranking still normalizes buyback-hook hints and still agrees with execution.
 - If you edit refund or partial-fill handling, verify baseline snapshots and destination-terminal receipt enforcement together.
@@ -21,7 +21,7 @@
 - Preview output drifts from execution because quote and execution paths were edited independently.
 - Registry state makes a project use a different router than expected.
 - Metadata overrides force an output token or cash-out source that the caller did not intend.
-- A terminal-facing ERC-20 path reverts because the destination terminal did not actually receive the nominal amount. This now indicates a non-standard final-hop token path, not just a documentation caveat.
+- On `addToBalanceOf` paths, a terminal-facing ERC-20 receipt mismatch indicates a non-standard final-hop token path.
 
 ## Useful Proof Points
 

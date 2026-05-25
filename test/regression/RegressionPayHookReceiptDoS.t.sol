@@ -107,8 +107,8 @@ contract HookForwardingTerminal is IJBTerminal {
 }
 
 contract RegressionPayHookReceiptDoSTest is Test {
-    /// @notice After fix: pay() no longer enforces _enforceStandardTerminalReceipt, so a terminal
-    ///         that forwards tokens to a pay hook should succeed rather than revert.
+    /// @notice pay() skips `_enforceStandardTerminalReceipt`, so a terminal that forwards tokens to a pay hook
+    ///         should succeed rather than revert.
     function test_routerAllowsErc20TerminalThatForwardsToPayHook() external {
         uint256 projectId = 1;
         address payer = address(0xA11CE);
@@ -155,7 +155,7 @@ contract RegressionPayHookReceiptDoSTest is Test {
 
         vm.startPrank(payer);
         token.approve(address(router), amount);
-        // fix: pay() no longer reverts when hooks consume tokens — should succeed.
+        // pay() should succeed when hooks consume tokens during terminal settlement.
         uint256 beneficiaryTokenCount = router.pay({
             projectId: projectId,
             token: address(token),

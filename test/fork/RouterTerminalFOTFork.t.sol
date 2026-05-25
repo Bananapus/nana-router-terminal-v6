@@ -91,16 +91,14 @@ contract MockFoTToken {
     event Transfer(address indexed from, address indexed to, uint256 value);
 }
 
-/// @notice Fork test: fee-on-transfer token through the router terminal.
-/// @dev Verifies that the receipt enforcement correctly detects and rejects FOT tokens,
-///      preventing accounting mismatches between the router and the destination terminal.
+/// @notice Fork tests for fee-on-transfer tokens through the router terminal.
+/// @dev Verifies that `pay` accepts the terminal-side fee loss, while `addToBalanceOf` rejects it with receipt
+///      enforcement.
 ///
 ///      The router's `_acceptFundsFor` uses balance-delta to capture the actual received amount
-///      (handles the first transfer fee). However, the second transfer (router → terminal) also
-///      incurs a fee, causing `_enforceStandardTerminalReceipt` to revert with
-///      `JBRouterTerminal_NonStandardTerminalToken`.
+///      (handles the first transfer fee). However, the second transfer (router → terminal) can also incur a fee.
 ///
-///      This is the correct defensive behavior — FOT tokens are not supported by design.
+///      FOT tokens are not supported for routed payments because the terminal may receive fewer tokens than `amount`.
 contract RouterTerminalFOTForkTest is Test {
     uint256 constant BLOCK_NUMBER = 21_700_000;
 
@@ -169,21 +167,20 @@ contract RouterTerminalFOTForkTest is Test {
     // FOT: Direct forward (no swap) — router pays project that accepts FOT
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice After the router no longer enforces ERC-20 receipt checks on the pay path
-    ///         (pay hooks may legitimately consume tokens). FOT direct forward now succeeds
-    ///         silently — the terminal receives fewer tokens than `amount`.
+    /// @notice The pay path does not enforce ERC-20 receipt checks because pay hooks may legitimately consume tokens.
+    ///         FOT direct forwarding succeeds silently, and the terminal receives fewer tokens than `amount`.
     ///
     ///         Flow: payer sends 10,000 FOT → router receives 9,900 (1% fee) →
     ///               router approves terminal for 9,900 → terminal pulls 9,900 from router →
     ///               terminal receives 9,801 (1% fee) → NO receipt check → succeeds.
-    function test_fork_fotDirectForward_reverts() public {
+    function test_fork_fotDirectForward_succeedsSilently() public {
         uint256 amount = 10_000e18;
         fotToken.mint(payer, amount);
 
         vm.startPrank(payer);
         fotToken.approve(address(routerTerminal), amount);
 
-        // FIX: pay path no longer enforces receipt check, so this succeeds.
+        // The pay path does not enforce receipt checks, so this succeeds.
         routerTerminal.pay({
             projectId: fotProjectId,
             token: address(fotToken),
@@ -196,7 +193,7 @@ contract RouterTerminalFOTForkTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice FOT addToBalanceOf also reverts for the same receipt mismatch reason.
+    /// @notice FOT addToBalanceOf reverts when the final terminal receives less than the routed amount.
     function test_fork_fotAddToBalance_reverts() public {
         uint256 amount = 5000e18;
         fotToken.mint(payer, amount);

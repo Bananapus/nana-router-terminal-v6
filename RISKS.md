@@ -32,7 +32,7 @@ Only the final output matters; the outer function enforces end-to-end minimum vi
 **Zero oracle quote disables swap protection.** *(Minor)*
 When the oracle returns zero (no liquidity), slippage tolerance becomes zero. The swap would fail anyway due to lack of liquidity, so this has no practical impact.
 
-> **Note:** The V4 TWAP window was hardened from 30s to 120s. This is no longer an accepted risk -- it was fixed.
+> **Status:** The V4 TWAP window is 120s. The former 30s-window concern is historical and is not an accepted risk.
 
 ## Registry & Forwarding Risks
 
@@ -62,8 +62,8 @@ The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validat
 **Unbounded quadratic candidate enumeration.** *(Minor)*
 `_candidatePayRouteTokens` can enumerate O(n^2) candidates in theory. Bounded in practice to ~5-10 terminals per project, keeping gas costs manageable.
 
-**Permit2 try/catch falls through to ERC20 allowance.** *(Minor)*
-Standard Permit2 fallback pattern. If Permit2 signature verification fails, the contract falls back to standard ERC20 `transferFrom` using existing allowance.
+**Permit2 try/catch falls through to ERC-20 allowance.** *(Minor)*
+Standard Permit2 fallback pattern. If Permit2 signature verification fails, the contract falls back to standard ERC-20 `transferFrom` using existing allowance.
 
 ## Pool Discovery Risks
 

@@ -76,8 +76,8 @@ contract RegistryDefaultRetargetsExistingProjectsTest is Test {
         assertEq(
             address(registry.terminalOf(PROJECT_ID_ONE)), address(terminalA), "locked project keeps the old default"
         );
-        // Unlocked legacy project ALSO keeps the old default — resolved via history, not
-        // by silent fall-through to the registry's new defaultTerminal. This is the fix.
+        // Unlocked legacy project also keeps the old default, resolved via history rather than silent fall-through to
+        // the registry's new defaultTerminal.
         assertEq(
             address(registry.terminalOf(PROJECT_ID_TWO)),
             address(terminalA),

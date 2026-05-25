@@ -121,8 +121,8 @@ contract JBRouterTerminal is
     //*********************************************************************//
 
     /// @notice The canonical buyback hook whose preview hook specification metadata this router understands.
-    /// @dev Chain-same: `JBBuybackHook` is deployed via CREATE2 to a unified address on every chain, so this stays
-    /// `immutable` without breaking the router's own chain-same CREATE2 address.
+    /// @dev `JBBuybackHook` is deployed via CREATE2 to a unified address on every chain, so this stays
+    /// `immutable` without breaking the router's own chain-identical CREATE2 address.
     address public immutable BUYBACK_HOOK;
 
     /// @notice The directory of terminals and controllers for projects.
@@ -144,10 +144,10 @@ contract JBRouterTerminal is
     address internal immutable _DEPLOYER;
 
     /// @notice The helper contract used to resolve best pay-route previews without bloating router runtime size.
-    /// @dev Deployed in the constructor with chain-same inputs (just `directory` — the resolver does NOT cache
+    /// @dev Deployed in the constructor with chain-identical inputs (only `directory` — the resolver does NOT cache
     /// `wrappedNativeToken` locally; the router passes it in on every external resolver call as a parameter to
-    /// avoid an extra external call on each normalization step). Because this router's address is chain-same via
-    /// CREATE2 and the resolver is deployed at the router's nonce 1, the resolver's address is chain-same too.
+    /// avoid an extra external call on each normalization step). Because this router's address is unified via
+    /// CREATE2 and the resolver is deployed at the router's nonce 1, the resolver's address is unified too.
     IJBPayRouteResolver internal immutable _PAY_ROUTE_RESOLVER;
 
     /// @notice Pre-computed metadata ID for "permit2".
@@ -196,7 +196,7 @@ contract JBRouterTerminal is
     /// @param directory A contract storing directories of terminals and controllers for each project.
     /// @param tokens A contract managing project token balances.
     /// @param permit2 A permit2 utility.
-    /// @param buybackHook The canonical buyback hook (chain-same across all chains).
+    /// @param buybackHook The canonical buyback hook, deployed to the same address on each supported chain.
     /// @param trustedForwarder The trusted forwarder for the contract.
     /// @param deployer The address authorized to call `setChainSpecificConstants` exactly once. Held immutable so the
     /// constructor inputs are byte-identical across chains and the CREATE2 address is unified.
@@ -1096,7 +1096,7 @@ contract JBRouterTerminal is
     }
 
     /// @notice Run the common post-transfer cleanup after forwarding funds into a destination terminal.
-    /// @param destTerminal The terminal that just received the forwarded call.
+    /// @param destTerminal The terminal that received the forwarded call.
     /// @param token The token that was forwarded into the destination terminal.
     function _afterTransferFor(IJBTerminal destTerminal, address token) internal {
         // Revoke any leftover allowance the destination terminal did not pull so routed calls do not leave approvals
@@ -1258,7 +1258,7 @@ contract JBRouterTerminal is
         address nOut = _normalize(tokenOut);
 
         if (nIn == nOut) {
-            // Same underlying token — just wrap or unwrap.
+            // Same underlying token; wrap or unwrap.
             if (tokenIn == JBConstants.NATIVE_TOKEN) _wrapNativeToken(amount);
             else _unwrapNativeToken(amount);
             return amount;
@@ -2299,7 +2299,7 @@ contract JBRouterTerminal is
 
         // If the pool has a hook, try querying it as a geomean oracle (e.g., JBUniswapV4Hook implements this).
         if (address(key.hooks) != address(0)) {
-            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, now].
+            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, current block time].
             uint32[] memory secondsAgos = new uint32[](2);
             secondsAgos[0] = _TWAP_WINDOW; // Start of the window (120 seconds ago).
             secondsAgos[1] = 0; // End of the window (current block).

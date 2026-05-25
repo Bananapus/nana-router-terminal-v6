@@ -360,7 +360,7 @@ contract RouterTerminalEdgeCasesTest is Test {
         });
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
     }
 

@@ -467,8 +467,8 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             abi.encode(address(0))
         );
 
-        // With the try/catch fallback in the route fallback, the function no longer reverts — it returns zero/empty
-        // values.
+        // With the try/catch fallback in the route fallback, the function returns zero/empty values instead of
+        // reverting.
         (IJBTerminal destTerminal, address resolvedTokenOut,,, uint256 beneficiaryTokenCount,,) = resolver.previewBestPayRoute({
             router: router,
             wrappedNativeToken: address(weth),

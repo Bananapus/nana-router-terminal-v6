@@ -248,7 +248,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         // Fee = amount * 25 / 1000 = 2.5%.
         // The fee in P2 tokens gets cashed out for ETH. Since project 2 has cashOutTaxRate = 0,
         // the cashout returns the proportional surplus (fee_tokens / total_supply * surplus).
-        // We just verify the fee project received a non-zero ETH amount.
+        // Verify the fee project received a non-zero ETH amount.
         // forge-lint: disable-next-line(mixed-case-variable)
         uint256 feeProjectETHGain = feeProjectBalanceAfter - feeProjectBalanceBefore;
         assertGt(feeProjectETHGain, 0, "fee project ETH gain should be > 0");

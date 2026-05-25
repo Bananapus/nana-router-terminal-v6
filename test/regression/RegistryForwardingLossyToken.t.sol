@@ -184,7 +184,7 @@ contract RegistryForwardingLossyTokenTest is Test {
             permissions: permissions, projects: projects, permit2: permit2, owner: owner, trustedForwarder: address(0)
         });
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         token = new LossyToken();
         finalTerminal = new LossyFinalTerminal();
@@ -216,12 +216,11 @@ contract RegistryForwardingLossyTokenTest is Test {
         assertEq(minted, 72.9e18, "call succeeds using the shrunken receipt");
     }
 
-    /// @notice After fix, the router no longer enforces ERC-20 receipt checks on the pay path.
-    /// A lossy (fee-on-transfer) token routed directly to a terminal now succeeds silently — the
+    /// @notice The router does not enforce ERC-20 receipt checks on the pay path.
+    /// A lossy (fee-on-transfer) token routed directly to a terminal succeeds silently — the
     /// terminal receives fewer tokens than `amount` but the router cannot detect or prevent this.
-    /// This test verifies the fix: the call succeeds (no revert) and the terminal receives the
-    /// fee-reduced amount.
-    function test_directRouterPathSucceedsWithLossyTokenAfterM39Fix() public {
+    /// This test verifies the call succeeds and the terminal receives the fee-reduced amount.
+    function test_directRouterPathSucceedsWithLossyTokenOnPayPath() public {
         vm.mockCall(
             address(directory),
             abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(token))),

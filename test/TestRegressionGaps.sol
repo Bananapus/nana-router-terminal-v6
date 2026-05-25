@@ -458,7 +458,7 @@ contract TestRegressionGaps is Test {
     function test_permit2Truncation_registryRevertsOnOverflow() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         MockERC20Std tok = new MockERC20Std();
         address payer = makeAddr("payer");
@@ -629,7 +629,7 @@ contract TestRegressionGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 4 (): MIN_TWAP_WINDOW Enforcement
+    // GAP 4: MIN_TWAP_WINDOW Enforcement
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice MIN_TWAP_WINDOW constant is 120 seconds (2 minutes).
@@ -770,7 +770,7 @@ contract TestRegressionGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 5 (): ERC-20 Partial Fill Leftover — Absolute Balance Check
+    // GAP 5: ERC-20 Partial Fill Leftover — Absolute Balance Check
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice When the router already holds the input token (e.g., ERC-20 partial fill),
@@ -843,14 +843,14 @@ contract TestRegressionGaps is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GAP 6 (): Registry receive() Accepts Native Token Refunds
+    // GAP 6: Registry receive() Accepts Native Token Refunds
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @notice Registry reverts on bare native token transfers (no receive() function).
     function test_registryReceive_revertsOnBareTransfer() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.deal(address(this), 1 ether);
         (bool success,) = address(reg).call{value: 1 ether}("");
@@ -858,15 +858,14 @@ contract TestRegressionGaps is Test {
     }
 
     /// @notice ETH that is directly deposited to the registry (not via partial-fill refund) is still stuck.
-    /// However, partial-fill leftovers are now routed to the original payer for both pay() and addToBalanceOf(),
-    /// so the registry no longer
-    /// receives partial-fill refunds in the first place.
+    /// Partial-fill leftovers route to the original payer for both pay() and addToBalanceOf(), so the registry does
+    /// not receive partial-fill refunds in the first place.
     function test_registryReceive_directDepositStillStuck() public {
         JBRouterTerminalRegistry reg = new JBRouterTerminalRegistry(perms, proj, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(proj), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
-        // Simulate ETH arriving directly (not from partial-fill — that path now goes to the original payer).
+        // Simulate ETH arriving directly; partial-fill refunds go to the original payer instead.
         vm.deal(address(reg), 1 ether);
         assertEq(address(reg).balance, 1 ether);
 
