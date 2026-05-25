@@ -259,7 +259,7 @@ contract NestedForwarder is IJBPayerTracker {
             });
             vm.stopPrank();
 
-            // The registry now reads the forwarder's IJBPayerTracker.originalPayer() and stores
+            // The registry reads the forwarder's IJBPayerTracker.originalPayer() and stores
             // the upstream user, so the downstream terminal refunds the true originator.
             assertEq(terminal.lastRefundTo(), user, "registry propagates upstream payer for refund");
             assertEq(token.balanceOf(user), amount / 2, "true upstream payer receives leftover refund");

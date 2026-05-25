@@ -178,7 +178,7 @@ contract RouterRegistryReceiptMismatchTest is Test {
             permissions: permissions, projects: projects, permit2: permit2, owner: owner, trustedForwarder: address(0)
         });
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         finalTerminal = new MockTerminal();
         token = new MockToken();

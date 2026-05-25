@@ -42,5 +42,5 @@ Universal routing terminal for Juicebox V6. This repo accepts many input tokens,
 - Treat preview behavior, quote selection, and execution callbacks as tightly coupled.
 - When the input token is itself a Juicebox project token, follow the cash-out loop carefully.
 - Refund handling is part of correctness.
-- Final terminal-facing receipt enforcement and callback guards are real security boundaries.
+- `addToBalanceOf` receipt enforcement, pay-path fee-on-transfer limits, and callback guards are real security boundaries.
 - If you touch registry behavior, verify project-specific overrides, allowlisting, and terminal locking together.

@@ -181,7 +181,7 @@ contract RegistryMultiHopForwardingCycleTest is Test {
             "shared forwarding check sees the transitive cycle"
         );
 
-        // Registry now walks the forwarding chain transitively (registry -> firstHop ->
+        // The registry walks the forwarding chain transitively (registry -> firstHop ->
         // secondHop -> registry) and rejects the default before it can be installed.
         vm.prank(owner);
         vm.expectRevert(

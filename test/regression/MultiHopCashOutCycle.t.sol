@@ -342,7 +342,7 @@ contract MultiHopCashOutCycleTest is Test {
     }
 
     function test_projectTokenPayRevertsOnMultiHopCircularTerminalBeforeTryingUsableCashOutPath() public {
-        // The router now previews all candidate routes and selects the best one. When the circular
+        // The router previews all candidate routes and selects the best one. When the circular
         // forwarding terminal is detected, the router falls back to the cash-out path which
         // successfully converts sourceToken -> reclaimToken -> destinationTerminal.
         vm.prank(payer);

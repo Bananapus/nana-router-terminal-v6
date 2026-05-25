@@ -172,7 +172,7 @@ contract DeployScript is Script, Sphinx {
             trustedForwarder: trustedForwarder
         });
 
-        // Deploy the router terminal with chain-same CREATE2 inputs; chain-specific constants
+        // Deploy the router terminal with chain-identical CREATE2 inputs; chain-specific constants
         // (WETH + Uniswap V3 factory + V4 PoolManager + V4 hook) are wired afterwards via the
         // DEPLOYER-gated one-shot setChainSpecificConstants setter on the terminal.
         require(address(buyback.hook) != address(0), "RouterTerminal: missing buyback hook");

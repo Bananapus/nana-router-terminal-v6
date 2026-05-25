@@ -508,7 +508,7 @@ contract RouterTerminalInvariant is Test {
         mockPoolManager = makeAddr("mockPoolManager");
         vm.etch(mockPoolManager, hex"00");
 
-        // Deploy the router terminal (chain-same ctor; chain-specific constants wired below).
+        // Deploy the router terminal with chain-identical constructor inputs; chain-specific constants are wired below.
         router = new JBRouterTerminal({
             directory: IJBDirectory(mockDirectory),
             tokens: IJBTokens(mockTokens),
@@ -647,7 +647,7 @@ contract RouterTerminalInvariant is Test {
 
     /// @notice Sanity check: the fuzzer actually called some operations.
     function invariant_callSummary() public pure {
-        // This invariant just logs — it always passes.
+        // This invariant logs the observed value and always passes.
         // When run with -vv, you can see the operation count.
         assert(true);
     }

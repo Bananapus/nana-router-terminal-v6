@@ -16,9 +16,9 @@ Final accounting still happens in the downstream terminal selected through `nana
 
 - the router's own accounting context is synthetic and must not be treated as the project ledger
 - preview route discovery and live execution must stay aligned
-- refund behavior is part of correctness, not just UX
+- refund behavior is part of correctness, not only UX
 - registry locking prevents silent migration to untrusted router implementations
-- final terminal-facing ERC-20 hops only support standard, non-lossy transfers
+- `addToBalanceOf` final hops reject lossy ERC-20 terminal pulls; `pay` cannot rely on terminal balance deltas because pay hooks can consume tokens during settlement
 - recursive project-token cashout routing is intentionally bounded
 - caller reclaim minima only apply to the first cashout hop, because later hops may change token units
 - circular `router -> registry -> same router` forwarding remains blocked in the registry
@@ -36,7 +36,7 @@ Final accounting still happens in the downstream terminal selected through `nana
 
 - final accounting remains in the downstream terminal selected through `JBDirectory`
 - the router trusts Uniswap V3, Uniswap V4, Permit2, and optional payer trackers for routing-side behavior
-- fee-on-transfer tokens are only tolerated on ingress where received-balance deltas can be reconciled
+- fee-on-transfer tokens are reconciled on ingress but remain unsafe for routed payments because terminal-side loss is not enforced on `pay`
 - the registry is trusted to resolve and forward into the intended router implementation for a project
 
 ## Critical Flows

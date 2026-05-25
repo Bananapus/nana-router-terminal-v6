@@ -31,7 +31,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 1. Deploy or select a `JBRouterTerminal` instance.
 2. Register it for the project in `JBRouterTerminalRegistry`, or rely on the default router if appropriate.
 3. Optionally lock the registry choice so later callers cannot redirect the project to a different router.
-4. Frontends can now route users to a known router without changing downstream accounting contracts.
+4. Frontends can route users to a known router without changing downstream accounting contracts.
 
 **Failure Modes**
 - teams configure a router but do not update the registry entry the frontend actually reads

@@ -365,7 +365,7 @@ contract RegistryAddToBalancePartialFillTest is Test {
         });
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.prank(owner);
         registry.setDefaultTerminal(IJBTerminal(address(router)));
@@ -431,9 +431,9 @@ contract RegistryAddToBalancePartialFillTest is Test {
         registry.addToBalanceOf(projectId, address(tokenIn), 1000 ether, false, "", metadata);
 
         assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
-        assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain leftover after fix");
+        assertEq(tokenIn.balanceOf(address(registry)), 0, "registry should not retain leftover");
         assertEq(tokenIn.balanceOf(address(router)), 0, "router should not retain the leftover");
-        assertEq(tokenIn.balanceOf(user), 400 ether, "payer receives the leftover back via transient storage fix");
+        assertEq(tokenIn.balanceOf(user), 400 ether, "payer receives leftover via original-payer tracking");
     }
 
     function test_registryAddToBalance_partialFillRefundsNativeToOriginalPayer() public {
@@ -492,8 +492,8 @@ contract RegistryAddToBalancePartialFillTest is Test {
         registry.addToBalanceOf{value: 1000 ether}(projectId, JBConstants.NATIVE_TOKEN, 1000 ether, false, "", metadata);
 
         assertEq(destTerminal.lastAmount(), 100 ether, "destination terminal should receive only the filled output");
-        assertEq(address(registry).balance, 0, "registry should not retain leftover after fix");
+        assertEq(address(registry).balance, 0, "registry should not retain leftover");
         assertEq(address(router).balance, 0, "router should not retain raw ETH after refunding leftovers");
-        assertEq(user.balance, 400 ether, "payer receives the native leftover back via transient storage fix");
+        assertEq(user.balance, 400 ether, "payer receives native leftover via original-payer tracking");
     }
 }

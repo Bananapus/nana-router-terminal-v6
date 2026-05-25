@@ -11,13 +11,11 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 
-/// @notice Projects whose IDs were issued before ANY default terminal was set must never resolve to a later default
-/// just because the owner overwrote the default a second time. The cold-start cohort stays on `address(0)` until each
-/// project explicitly calls `setTerminalFor`.
-/// @dev Pre-fix: when the second `setDefaultTerminal` pushed `{maxProjectId: count, terminal: prevDefault}` with only
-/// an upper bound, the resolver returned the prior default for the entire `1..count` range — including the cold-start
-/// cohort that pre-dated even the first default. Post-fix: segments encode `(prevThreshold, currentCount]` and the
-/// cold-start cohort (`projectId <= prevThreshold` for the first segment) matches no segment, returning zero.
+/// @notice Projects whose IDs were issued before any default terminal was set must never resolve to a later default
+/// because the owner overwrote the default. The cold-start cohort stays on `address(0)` until each project explicitly
+/// calls `setTerminalFor`.
+/// @dev Segments encode `(prevThreshold, currentCount]`. The cold-start cohort (`projectId <= prevThreshold` for the
+/// first segment) matches no segment and resolves to zero.
 contract RegistryDefaultColdStartCohortTest is Test {
     JBRouterTerminalRegistry internal registry;
 
@@ -60,7 +58,7 @@ contract RegistryDefaultColdStartCohortTest is Test {
         vm.prank(owner);
         registry.setDefaultTerminal(terminalA);
 
-        // Projects 51..150 are now created with A as their implicit default.
+        // Projects 51..150 are created with A as their implicit default.
         // Second default at count = 150.
         _mockCount(150);
         vm.prank(owner);

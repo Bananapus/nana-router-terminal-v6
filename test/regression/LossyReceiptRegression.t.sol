@@ -120,7 +120,7 @@ contract PullingTerminal is IJBTerminal {
     }
 }
 
-/// @notice regression fix: `addToBalanceOf` still enforces receipt check for lossy ERC-20s.
+/// @notice Regression coverage for lossy ERC-20 receipt handling.
 contract LossyReceiptRegressionTest is Test {
     uint256 constant PROJECT_ID = 1;
     uint256 constant AMOUNT = 100 ether;
@@ -168,7 +168,7 @@ contract LossyReceiptRegressionTest is Test {
         token.mint(payer, AMOUNT * 10);
     }
 
-    /// @notice addToBalanceOf must still revert for fee-on-transfer tokens (receipt enforcement kept).
+    /// @notice addToBalanceOf reverts for fee-on-transfer tokens because receipt enforcement is active.
     function test_addToBalanceOf_revertsForLossyERC20() external {
         vm.startPrank(payer);
         token.approve(address(router), AMOUNT);
@@ -195,12 +195,12 @@ contract LossyReceiptRegressionTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice pay() must NOT revert for lossy tokens after fix (receipt enforcement removed from pay).
+    /// @notice pay() does not revert for lossy tokens because the pay path skips receipt enforcement.
     function test_pay_doesNotRevertForLossyERC20() external {
         vm.startPrank(payer);
         token.approve(address(router), AMOUNT);
 
-        // Should succeed — pay() no longer enforces the receipt check.
+        // pay() skips receipt enforcement, so this succeeds.
         uint256 beneficiaryTokenCount = router.pay({
             projectId: PROJECT_ID,
             token: address(token),

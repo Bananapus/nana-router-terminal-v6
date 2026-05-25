@@ -605,7 +605,7 @@ contract RouterTerminalRegistryTest is Test {
         vm.prank(projectOwner);
         registry.setTerminalFor({projectId: 3, terminal: terminalB});
 
-        // Project 3 now resolves to terminalB despite being in the legacy cohort.
+        // Project 3 resolves to terminalB despite being in the legacy cohort.
         assertEq(address(registry.terminalOf({projectId: 3})), address(terminalB));
     }
 

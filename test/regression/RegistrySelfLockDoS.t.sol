@@ -39,7 +39,7 @@ contract RegistrySelfLockDoSTest is Test {
     function setUp() public {
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
 
-        // PR #108: setDefaultTerminal now reads PROJECTS.count(). Mock it to 0 (fresh chain).
+        // setDefaultTerminal reads PROJECTS.count(); mock it to 0 for a fresh chain.
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
         vm.mockCall(address(projects), abi.encodeCall(IERC721.ownerOf, (PROJECT_ID)), abi.encode(projectOwner));
         vm.mockCall(
@@ -68,7 +68,7 @@ contract RegistrySelfLockDoSTest is Test {
     function test_setDefaultTerminalRejectsForwarderThatResolvesToRegistry() public {
         IJBTerminal forwarder = IJBTerminal(address(new RegistrySelfLockForwarder(registry)));
 
-        // The registry now walks the forwarding chain (forwarder -> registry) and rejects the
+        // The registry walks the forwarding chain (forwarder -> registry) and rejects the
         // default before it can ever be installed, so a locking attempt is never reachable.
         vm.prank(owner);
         vm.expectRevert(
