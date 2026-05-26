@@ -553,7 +553,7 @@ contract TestRegressionGaps is Test {
         bytes memory metadata;
         {
             bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
-            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(uint256(80)));
+            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(80)));
         }
 
         // Mock V3 swap.
@@ -791,7 +791,7 @@ contract TestRegressionGaps is Test {
         bytes memory metadata;
         {
             bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
-            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(uint256(80)));
+            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(80)));
         }
 
         // Mock V3 swap that only consumes 80 of 100 input tokens (partial fill).
@@ -912,7 +912,7 @@ contract TestRegressionGaps is Test {
         bytes memory metadata;
         {
             bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
-            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(uint256(70)));
+            metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(70)));
         }
 
         // Mock V3 swap (partial fill — swap returns only 90 output for 80 input consumed).

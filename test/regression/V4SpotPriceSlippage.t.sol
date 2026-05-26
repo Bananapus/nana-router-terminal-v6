@@ -302,9 +302,10 @@ contract V4SpotPriceSlippageTest is Test {
     //*********************************************************************//
 
     /// @notice Demonstrates that a user-provided quoteForSwap completely overrides the sigmoid calculation.
-    /// @dev In _pickPoolAndQuote, when metadata contains "quoteForSwap", the decoded value is used directly
-    /// as minAmountOut — neither _getV4SpotQuote nor _getV3TwapQuote is called. This test verifies the
-    /// logic by simulating both paths and showing they produce different results.
+    /// @dev In _pickPoolAndQuote, when metadata contains "quoteForSwap", the decoded output token must match the
+    /// selected route and the decoded amount is used directly as minAmountOut. Neither _getV4SpotQuote nor
+    /// _getV3TwapQuote is called. This test verifies the logic by simulating both paths and showing they produce
+    /// different results.
     function test_userQuote_overrides_sigmoidCalculation() public view {
         // Simulate the automatic V4 path with a moderate impact scenario.
         int24 tick = 0;

@@ -286,7 +286,7 @@ contract V4QuoteAndSettlementForkTest is Test {
         // Provide a user quote to control slippage tolerance. We set minAmountOut to 1 USDC
         // to prove the swap executes; the assertions below verify the output is reasonable.
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(uint256(1e6)));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(1e6)));
 
         vm.deal(payer, payAmount);
         vm.prank(payer);
@@ -331,7 +331,7 @@ contract V4QuoteAndSettlementForkTest is Test {
 
         // Provide a user quote. Set minAmountOut to 1 DAI.
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(uint256(1e18)));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(DAI), uint256(1e18)));
 
         vm.deal(payer, payAmount);
         vm.prank(payer);
@@ -377,7 +377,7 @@ contract V4QuoteAndSettlementForkTest is Test {
 
         // Provide a user quote. Set minAmountOut to 1 USDC.
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(uint256(1e6)));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(1e6)));
 
         // Give payer WETH (not raw ETH).
         deal(address(WETH), payer, payAmount);

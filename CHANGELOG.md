@@ -6,6 +6,15 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### `quoteForSwap` binds the quoted output token
+
+`quoteForSwap` metadata now encodes `(address tokenOut, uint256 minAmountOut)` instead of only `uint256 minAmountOut`.
+The router normalizes ETH/WETH and reverts with `JBRouterTerminal_QuoteTokenMismatch` if the quoted token does not
+match the route's selected output token.
+
+Integrator impact: quote providers must encode `abi.encode(tokenOut, minAmountOut)`. Existing callers that still encode
+only `abi.encode(minAmountOut)` must update their metadata construction before using this router version.
+
 ### Chain-same CREATE2 address for `JBRouterTerminal`
 
 `JBRouterTerminal` now deploys to the same address on every chain via CREATE2. The four chain-specific

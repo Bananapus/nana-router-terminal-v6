@@ -1294,7 +1294,7 @@ contract RouterTerminalTest is Test {
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(quotedAmountOut));
+        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
             address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(tokenIn))), abi.encode(uint256(0))
@@ -1352,6 +1352,46 @@ contract RouterTerminalTest is Test {
         assertEq(reservedTokenCount, 42);
     }
 
+    function test_previewSwapAmountOutOf_revertsWhenQuoteTokenMismatches() public {
+        address tokenIn = makeAddr("quoteMismatchTokenIn");
+        address tokenOut = makeAddr("quoteMismatchTokenOut");
+        address wrongTokenOut = makeAddr("quoteMismatchWrongTokenOut");
+        address pool = makeAddr("quoteMismatchPool");
+
+        vm.etch(pool, hex"00");
+
+        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(wrongTokenOut, uint256(55)));
+
+        vm.mockCall(
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)), abi.encode(pool)
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 500)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 10_000)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 100)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1000)));
+        _mockV4NoPools(tokenIn, tokenOut);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_QuoteTokenMismatch.selector, wrongTokenOut, tokenOut
+            )
+        );
+        routerTerminal.previewSwapAmountOutOf(tokenIn, tokenOut, 100, metadata);
+    }
+
     function test_previewPayFor_estimatesCashOutThenSwapRouteWithQuoteMetadata() public {
         uint256 destProjectId = 1;
         uint256 sourceProjectId = 2;
@@ -1370,7 +1410,7 @@ contract RouterTerminalTest is Test {
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(quotedAmountOut));
+        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
             address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))), abi.encode(sourceProjectId)
@@ -1515,7 +1555,7 @@ contract RouterTerminalTest is Test {
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(quotedAmountOut));
+        metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
             address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(tokenIn))), abi.encode(uint256(0))
@@ -1791,7 +1831,7 @@ contract RouterTerminalTest is Test {
         );
 
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(quotedAmountOut));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(workingToken, quotedAmountOut));
 
         vm.mockCall(
             address(mockFactory),
@@ -2493,7 +2533,7 @@ contract RouterTerminalTest is Test {
                     JBConstants.NATIVE_TOKEN,
                     0, // router passes 0 and enforces via balance-delta
                     payable(address(routerTerminal)),
-                    bytes(""),
+                    metadata,
                     uint256(0) // referralProjectId
                 )
             )
