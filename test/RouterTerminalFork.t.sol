@@ -275,7 +275,7 @@ contract RouterTerminalForkTest is Test {
 
         // Set a generous quote (1 USDC minimum — well below market, should succeed).
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(uint256(1e6)));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(1e6)));
 
         vm.deal(payer, amountIn);
 
@@ -312,7 +312,8 @@ contract RouterTerminalForkTest is Test {
         // This is tight enough to trigger SlippageExceeded but not so extreme that
         // sqrtPriceLimitFromAmounts falls back to "no limit".
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(uint256(10_000e6)));
+        bytes memory metadata =
+            JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(10_000e6)));
 
         vm.deal(payer, amountIn);
 

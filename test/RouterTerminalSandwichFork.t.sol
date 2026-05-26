@@ -533,7 +533,7 @@ contract RouterTerminalSandwichForkTest is Test {
 
         // Victim pays with tight user quote.
         bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
-        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(userMinUSDC));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), userMinUSDC));
 
         vm.deal(payer, victimAmount);
         vm.prank(payer);

@@ -87,6 +87,7 @@ contract JBRouterTerminal is
         address terminal, address token, uint256 expectedAmount, uint256 actualAmount
     );
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
+    error JBRouterTerminal_QuoteTokenMismatch(address quotedTokenOut, address expectedTokenOut);
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
     error JBRouterTerminal_Unauthorized(address caller);
 
@@ -909,7 +910,7 @@ contract JBRouterTerminal is
     /// @param tokenIn The token currently available to swap.
     /// @param tokenOut The token the swap should deliver.
     /// @param amount The amount of `tokenIn` to preview.
-    /// @param metadata Metadata that can provide an explicit quote override for the swap.
+    /// @param metadata Metadata that can provide an explicit `(tokenOut, minAmountOut)` quote for the swap.
     /// @return amountOut The predicted amount of `tokenOut` the router would receive.
     function _previewSwapAmountOut(
         address tokenIn,
@@ -2260,7 +2261,8 @@ contract JBRouterTerminal is
     ///
     /// Mitigations in place:
     ///   1. Users SHOULD provide a `quoteForSwap` value in the payment metadata (obtained from an off-chain
-    ///      quoter or RPC simulation). When present, this function is bypassed entirely — see `_pickPoolAndQuote`.
+    ///      quoter or RPC simulation). The quote must encode the output token and minimum output amount. When present,
+    ///      this function is bypassed entirely — see `_pickPoolAndQuote`.
     ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this function uses that oracle-derived tick instead
     ///      of spot.
     ///   3. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
@@ -2416,8 +2418,9 @@ contract JBRouterTerminal is
     /// protection. Integrators should still supply `quoteForSwap` metadata whenever they can.
     ///
     /// Priority for `minAmountOut`:
-    ///   1. **User-provided quote** — If `quoteForSwap` is present in `metadata`, it is used directly.
-    ///      This is the recommended path for MEV protection, especially for V4 pools.
+    ///   1. **User-provided quote** — If `quoteForSwap` is present in `metadata`, it is used after confirming the
+    ///      quote's output token matches the selected route. This is the recommended path for MEV protection,
+    ///      especially for V4 pools.
     ///   2. **V3 TWAP** — If the best pool is V3, uses a manipulation-resistant time-weighted average price.
     ///   3. **V4 automatic quote** — If the best pool is V4, first attempts a hook-provided oracle quote and
     ///      otherwise falls back to the instantaneous `getSlot0` tick. The spot fallback is manipulable within the
@@ -2450,7 +2453,13 @@ contract JBRouterTerminal is
         (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, id: _QUOTE_FOR_SWAP_ID});
 
         if (exists) {
-            (minAmountOut) = abi.decode(quote, (uint256));
+            (address quotedTokenOut, uint256 quotedMinAmountOut) = abi.decode(quote, (address, uint256));
+            if (_normalize(quotedTokenOut) != normalizedTokenOut) {
+                revert JBRouterTerminal_QuoteTokenMismatch({
+                    quotedTokenOut: quotedTokenOut, expectedTokenOut: normalizedTokenOut
+                });
+            }
+            minAmountOut = quotedMinAmountOut;
         }
 
         // Treat a decoded value of 0 the same as "not provided" so that a stale or default-zero quote
