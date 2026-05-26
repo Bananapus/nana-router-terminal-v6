@@ -23,8 +23,8 @@ Why the practical impact is bounded rather than catastrophic:
 
 Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `quoteForSwap` rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
 
-**`quoteForSwap` / auto-selected tokenOut mismatch.** *(Minor)*
-When a user provides `quoteForSwap` metadata, the quote may not match the auto-selected output token. Frontends should set `quoteForSwap` per the expected output token.
+**`quoteForSwap` output token binding.** *(Mitigated)*
+`quoteForSwap` metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must use the two-field payload; old `abi.encode(minAmountOut)` payloads no longer decode successfully.
 
 **Multi-hop cashout slippage cleared after first hop.** *(Minor)*
 Only the final output matters; the outer function enforces end-to-end minimum via `minReclaimed`. Intermediate per-hop slippage checks are intentionally omitted. Maximum 20 recursive cashout iterations allowed (`_MAX_CASHOUT_ITERATIONS`); beyond that the operation reverts.
