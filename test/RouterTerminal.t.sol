@@ -449,6 +449,99 @@ contract MockConfigurableCashOutTerminal {
     receive() external payable {}
 }
 
+contract MockMetadataSensitiveCashOutTerminal {
+    MockERC20 public immutable TOKEN;
+    address public immutable RECLAIM_TOKEN;
+    uint256 public immutable EMPTY_METADATA_AMOUNT;
+    uint256 public immutable NONEMPTY_METADATA_AMOUNT;
+
+    constructor(
+        MockERC20 token_,
+        address reclaimToken_,
+        uint256 emptyMetadataAmount_,
+        uint256 nonemptyMetadataAmount_
+    )
+        payable {
+        TOKEN = token_;
+        RECLAIM_TOKEN = reclaimToken_;
+        EMPTY_METADATA_AMOUNT = emptyMetadataAmount_;
+        NONEMPTY_METADATA_AMOUNT = nonemptyMetadataAmount_;
+    }
+
+    function cashOutTokensOf(
+        address holder,
+        uint256,
+        uint256 cashOutCount,
+        address tokenToReclaim,
+        uint256,
+        address payable beneficiary,
+        bytes calldata metadata,
+        uint256
+    )
+        external
+        returns (uint256 amount)
+    {
+        require(tokenToReclaim == RECLAIM_TOKEN, "MockMetadataSensitiveCashOutTerminal: wrong reclaim token");
+        TOKEN.burn(holder, cashOutCount);
+        amount = metadata.length == 0 ? EMPTY_METADATA_AMOUNT : NONEMPTY_METADATA_AMOUNT;
+
+        if (tokenToReclaim == JBConstants.NATIVE_TOKEN) {
+            (bool success,) = beneficiary.call{value: amount}("");
+            require(success, "MockMetadataSensitiveCashOutTerminal: ETH send failed");
+        } else {
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
+            IERC20(tokenToReclaim).transfer(beneficiary, amount);
+        }
+    }
+
+    function previewCashOutFrom(
+        address,
+        uint256,
+        uint256,
+        address tokenToReclaim,
+        address payable,
+        bytes calldata metadata
+    )
+        external
+        view
+        returns (
+            JBRuleset memory ruleset,
+            uint256 reclaimAmount,
+            uint256 reservedTokenCount,
+            JBCashOutHookSpecification[] memory hooks
+        )
+    {
+        require(tokenToReclaim == RECLAIM_TOKEN, "MockMetadataSensitiveCashOutTerminal: wrong reclaim token");
+        ruleset = JBRuleset({
+            cycleNumber: 1,
+            id: 4,
+            basedOnId: 0,
+            start: 0,
+            duration: 0,
+            weight: 0,
+            weightCutPercent: 0,
+            approvalHook: IJBRulesetApprovalHook(address(0)),
+            metadata: 0
+        });
+        reclaimAmount = metadata.length == 0 ? EMPTY_METADATA_AMOUNT : NONEMPTY_METADATA_AMOUNT;
+        reservedTokenCount = 0;
+        hooks = new JBCashOutHookSpecification[](0);
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IJBTerminal).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] =
+            JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: uint32(uint160(RECLAIM_TOKEN))});
+    }
+
+    receive() external payable {}
+}
+
 /// @notice A harness that exposes internal functions for testing.
 contract RouterTerminalHarness is JBRouterTerminal {
     constructor(
@@ -1466,7 +1559,7 @@ contract RouterTerminalTest is Test {
                     100,
                     JBConstants.NATIVE_TOKEN,
                     payable(address(routerTerminal)),
-                    bytes("")
+                    metadata
                 )
             ),
             abi.encode(
@@ -2043,6 +2136,50 @@ contract RouterTerminalTest is Test {
         assertEq(destTerminal.totalReceived(), reclaimAmount);
         assertEq(token.balanceOf(address(routerTerminal)), 0);
         assertEq(address(routerTerminal).balance, 0);
+    }
+
+    function test_previewCashOutLoop_forwardsFirstHopMetadata() public {
+        uint256 destProjectId = 1;
+        uint256 sourceProjectId = 2;
+        uint256 amount = 100;
+        MockERC20 token = new MockERC20();
+        address jbToken = address(token);
+
+        MockPreviewDestTerminal destTerminal = new MockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 1);
+        MockMetadataSensitiveCashOutTerminal cashOutTerminal =
+            new MockMetadataSensitiveCashOutTerminal{value: 100}(token, JBConstants.NATIVE_TOKEN, 100, 10);
+
+        vm.mockCall(
+            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(jbToken))), abi.encode(sourceProjectId)
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
+            abi.encode(address(destTerminal))
+        );
+
+        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+        sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
+            abi.encode(sourceTerminals)
+        );
+
+        bytes4 metadataId = JBMetadataResolver.getId("sourceCashoutMode", address(cashOutTerminal));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(1)));
+
+        (IJBTerminal routedTerminal, address finalToken, uint256 finalAmount) = routerTerminal.previewCashOutLoopOf({
+            destProjectId: destProjectId,
+            token: jbToken,
+            amount: amount,
+            metadata: metadata,
+            preferredToken: JBConstants.NATIVE_TOKEN
+        });
+
+        assertEq(address(routedTerminal), address(destTerminal));
+        assertEq(finalToken, JBConstants.NATIVE_TOKEN);
+        assertEq(finalAmount, 10);
     }
 
     //*********************************************************************//
