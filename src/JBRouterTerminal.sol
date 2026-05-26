@@ -1189,6 +1189,9 @@ contract JBRouterTerminal is
             // Pass minTokensReclaimed=0 to the terminal because the buyback hook's sell-side delivers tokens via
             // callback (reclaimAmount=0 from the terminal's perspective), which would fail the terminal's own min
             // check. The router enforces the user's minimum via the balance-delta check below instead.
+            // Still forward the original metadata on the first hop so the source hook can use the same user floor
+            // when choosing between direct cash-out and its own routed cash-out path.
+            bytes memory hopMetadata = i == 0 ? metadata : bytes("");
             cashOutTerminal.cashOutTokensOf({
                 holder: address(this),
                 projectId: sourceProjectId,
@@ -1196,7 +1199,7 @@ contract JBRouterTerminal is
                 tokenToReclaim: tokenToReclaim,
                 minTokensReclaimed: 0,
                 beneficiary: payable(address(this)),
-                metadata: "",
+                metadata: hopMetadata,
                 referralProjectId: 0
             });
 

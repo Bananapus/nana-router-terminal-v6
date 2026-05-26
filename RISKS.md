@@ -27,7 +27,10 @@ Frontends and programmatic callers that route value-sensitive swaps through V4 s
 `quoteForSwap` metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must use the two-field payload; old `abi.encode(minAmountOut)` payloads no longer decode successfully.
 
 **Multi-hop cashout slippage cleared after first hop.** *(Minor)*
-Only the final output matters; the outer function enforces end-to-end minimum via `minReclaimed`. Intermediate per-hop slippage checks are intentionally omitted. Maximum 20 recursive cashout iterations allowed (`_MAX_CASHOUT_ITERATIONS`); beyond that the operation reverts.
+`cashOutMinReclaimed` applies to the first cash-out hop only. The router forwards the original metadata to that hop so
+the source hook can make the same route-selection decision the router later enforces against the actual balance delta.
+After the first hop, the metadata-level floor is cleared because later hops may use different token units. Maximum 20
+recursive cashout iterations are allowed (`_MAX_CASHOUT_ITERATIONS`); beyond that the operation reverts.
 
 **Zero oracle quote disables swap protection.** *(Minor)*
 When the oracle returns zero (no liquidity), slippage tolerance becomes zero. The swap would fail anyway due to lack of liquidity, so this has no practical impact.
