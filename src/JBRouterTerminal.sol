@@ -2449,11 +2449,13 @@ contract JBRouterTerminal is
             revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
 
-        // Check for a user-provided quote.
+        // `quoteForSwap` is encoded as `(tokenOut, minAmountOut)`. Binding the quote to its output token prevents
+        // metadata quoted for one route from being replayed against another route with a weaker floor.
         (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, id: _QUOTE_FOR_SWAP_ID});
 
         if (exists) {
             (address quotedTokenOut, uint256 quotedMinAmountOut) = abi.decode(quote, (address, uint256));
+            // Normalize ETH/WETH before comparing because pool routes use WETH internally for native-token swaps.
             if (_normalize(quotedTokenOut) != normalizedTokenOut) {
                 revert JBRouterTerminal_QuoteTokenMismatch({
                     quotedTokenOut: quotedTokenOut, expectedTokenOut: normalizedTokenOut
