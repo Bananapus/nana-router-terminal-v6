@@ -2532,6 +2532,7 @@ contract JBRouterTerminal is
                 sourceProjectId: sourceProjectId,
                 destProjectId: destProjectId,
                 amount: amount,
+                metadata: i == 0 ? metadata : bytes(""),
                 preferredToken: preferredToken
             });
 
@@ -2559,12 +2560,14 @@ contract JBRouterTerminal is
     /// @param sourceProjectId The project to cash out tokens from.
     /// @param destProjectId The final destination project to pay.
     /// @param amount The amount of source-project tokens to cash out.
+    /// @param metadata Metadata forwarded into the source terminal preview for this hop.
     /// @return tokenToReclaim The token that would be reclaimed from the source terminal.
     /// @return reclaimAmount The amount of that token that would be reclaimed.
     function _previewCashOutStep(
         uint256 sourceProjectId,
         uint256 destProjectId,
         uint256 amount,
+        bytes memory metadata,
         address preferredToken
     )
         internal
@@ -2587,7 +2590,7 @@ contract JBRouterTerminal is
             cashOutCount: amount,
             tokenToReclaim: tokenToReclaim,
             beneficiary: payable(address(this)),
-            metadata: ""
+            metadata: metadata
         });
 
         // Deployment config makes this router a feeless cash-out beneficiary, so previews use the terminal's raw
