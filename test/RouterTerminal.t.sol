@@ -2533,7 +2533,7 @@ contract RouterTerminalTest is Test {
                     JBConstants.NATIVE_TOKEN,
                     0, // router passes 0 and enforces via balance-delta
                     payable(address(routerTerminal)),
-                    bytes(""),
+                    metadata,
                     uint256(0) // referralProjectId
                 )
             )
