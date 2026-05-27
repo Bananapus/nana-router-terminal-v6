@@ -12,21 +12,21 @@ import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 /// swap sizes. Floor of 2% (or pool fee + 1%), ceiling of 88%.
 library JBSwapLib {
     /// @notice The denominator used for slippage tolerance basis points.
-    uint256 internal constant SLIPPAGE_DENOMINATOR = 10_000;
+    uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
 
     /// @notice The maximum slippage ceiling (88%).
-    uint256 internal constant MAX_SLIPPAGE = 8800;
+    uint256 internal constant _MAX_SLIPPAGE = 8800;
 
     /// @notice The precision multiplier for impact calculations.
-    /// @dev Using 1e18 instead of 1e5 (10 * SLIPPAGE_DENOMINATOR) gives 13 extra orders of magnitude,
+    /// @dev Using 1e18 instead of 1e5 (10 * _SLIPPAGE_DENOMINATOR) gives 13 extra orders of magnitude,
     ///      preventing small-swap-in-deep-pool impacts from rounding to zero.
-    uint256 internal constant IMPACT_PRECISION = 1e18;
+    uint256 internal constant _IMPACT_PRECISION = 1e18;
 
-    /// @notice The K parameter for the sigmoid curve, scaled to match IMPACT_PRECISION.
+    /// @notice The K parameter for the sigmoid curve, scaled to match _IMPACT_PRECISION.
     /// @dev Preserves the same sigmoid shape as the original K=5000 with amplifier=1e5:
-    ///      K_new / IMPACT_PRECISION = K_old / (10 * SLIPPAGE_DENOMINATOR)
+    ///      K_new / _IMPACT_PRECISION = K_old / (10 * _SLIPPAGE_DENOMINATOR)
     ///      → K_new = 5000 * 1e18 / 1e5 = 5e16
-    uint256 internal constant SIGMOID_K = 5e16;
+    uint256 internal constant _SIGMOID_K = 5e16;
 
     //*********************************************************************//
     // -------------------- Slippage Tolerance -------------------------- //
@@ -35,27 +35,27 @@ library JBSwapLib {
     /// @notice Compute a continuous sigmoid slippage tolerance based on swap impact and pool fee.
     /// @dev tolerance = minSlippage + (maxSlippage - minSlippage) * impact / (impact + K)
     ///      When impact is 0 (negligible swap in deep pool), returns minSlippage.
-    /// @param impact The estimated price impact from calculateImpact (scaled by IMPACT_PRECISION).
+    /// @param impact The estimated price impact from calculateImpact (scaled by _IMPACT_PRECISION).
     /// @param poolFeeBps The pool fee in basis points (e.g., 30 for 0.3%).
-    /// @return tolerance The slippage tolerance in basis points of SLIPPAGE_DENOMINATOR.
+    /// @return tolerance The slippage tolerance in basis points of _SLIPPAGE_DENOMINATOR.
     function getSlippageTolerance(uint256 impact, uint256 poolFeeBps) internal pure returns (uint256) {
         // If pool fee alone meets/exceeds the ceiling, return the ceiling.
-        if (poolFeeBps >= MAX_SLIPPAGE) return MAX_SLIPPAGE;
+        if (poolFeeBps >= _MAX_SLIPPAGE) return _MAX_SLIPPAGE;
 
         // Minimum slippage: at least pool fee + 1% buffer, with a floor of 2%.
         uint256 minSlippage = poolFeeBps + 100;
         if (minSlippage < 200) minSlippage = 200;
-        if (minSlippage >= MAX_SLIPPAGE) return MAX_SLIPPAGE;
+        if (minSlippage >= _MAX_SLIPPAGE) return _MAX_SLIPPAGE;
 
         // When impact is 0, sigmoid returns minSlippage directly.
         if (impact == 0) return minSlippage;
 
         // For extreme impact values, cap to prevent overflow in (impact + K).
-        if (impact > type(uint256).max - SIGMOID_K) return MAX_SLIPPAGE;
+        if (impact > type(uint256).max - _SIGMOID_K) return _MAX_SLIPPAGE;
 
         // Sigmoid: minSlippage + (maxSlippage - minSlippage) * impact / (impact + K)
-        uint256 range = MAX_SLIPPAGE - minSlippage;
-        uint256 tolerance = minSlippage + mulDiv({x: range, y: impact, denominator: impact + SIGMOID_K});
+        uint256 range = _MAX_SLIPPAGE - minSlippage;
+        uint256 tolerance = minSlippage + mulDiv({x: range, y: impact, denominator: impact + _SIGMOID_K});
 
         // Return the bounded tolerance implied by the sigmoid curve.
         return tolerance;
@@ -65,13 +65,13 @@ library JBSwapLib {
     // -------------------- Impact Calculation -------------------------- //
     //*********************************************************************//
 
-    /// @notice Estimate the price impact of a swap, scaled by IMPACT_PRECISION.
+    /// @notice Estimate the price impact of a swap, scaled by _IMPACT_PRECISION.
     /// @dev Uses 1e18 precision to capture sub-basis-point impacts for small swaps in deep pools.
     /// @param amountIn The amount of tokens to swap in.
     /// @param liquidity The pool's in-range liquidity.
     /// @param sqrtP The sqrt price in Q96 format.
     /// @param zeroForOne Whether the swap is token0 → token1.
-    /// @return impact The estimated price impact scaled by IMPACT_PRECISION.
+    /// @return impact The estimated price impact scaled by _IMPACT_PRECISION.
     function calculateImpact(
         uint256 amountIn,
         uint128 liquidity,
@@ -86,7 +86,7 @@ library JBSwapLib {
         if (liquidity == 0 || sqrtP == 0) return 0;
 
         // Scale the input amount against the pool liquidity so impact is expressed in the library's precision space.
-        uint256 base = mulDiv({x: amountIn, y: IMPACT_PRECISION, denominator: uint256(liquidity)});
+        uint256 base = mulDiv({x: amountIn, y: _IMPACT_PRECISION, denominator: uint256(liquidity)});
 
         // Convert the liquidity-scaled input into a direction-aware price impact estimate.
         impact = zeroForOne
