@@ -535,8 +535,9 @@ contract MockMetadataSensitiveCashOutTerminal {
 
     function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
         contexts = new JBAccountingContext[](1);
-        contexts[0] =
-            JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: uint32(uint160(RECLAIM_TOKEN))});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 currency = uint32(uint160(RECLAIM_TOKEN));
+        contexts[0] = JBAccountingContext({token: RECLAIM_TOKEN, decimals: 18, currency: currency});
     }
 
     receive() external payable {}
