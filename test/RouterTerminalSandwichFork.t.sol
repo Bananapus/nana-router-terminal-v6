@@ -598,7 +598,7 @@ contract RouterTerminalSandwichForkTest is Test {
         }
 
         console.log("");
-        console.log("RISK (): V4 spot price IS manipulable within the same block.");
+        console.log("RISK: V4 spot price IS manipulable within the same block.");
         console.log("Mitigations: (1) sigmoid 2%% floor, (2) user quote override, (3) V3 pool preferred if deeper.");
         console.log("Recommendation: front-ends MUST supply quoteForSwap metadata for V4 swaps.");
     }

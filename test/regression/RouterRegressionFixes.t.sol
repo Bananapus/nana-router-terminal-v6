@@ -123,19 +123,3 @@ contract CircularTerminalRegressionTest is Test {
         );
     }
 }
-
-/// @title Cash-out minimum must not revert on buyback sell-side
-/// @notice Validates that the router passes minTokensReclaimed=0 to the terminal and enforces the minimum itself.
-contract CashOutMinimumRegressionTest is Test {
-    /// @notice The router's balance-delta check enforces the user's minimum even when the terminal returns 0.
-    /// @dev This is a documentation test — the actual fix is verified by the existing integration tests.
-    /// The key insight: when a buyback hook's sell-side executes during cashout, the terminal reports
-    /// reclaimAmount=0 because the hook delivers tokens via callback. Passing minTokensReclaimed > 0
-    /// to the terminal would revert even though the user receives their tokens.
-    function test_cashOutMinimumEnforcement_documented() public pure {
-        // The fix sets minTokensReclaimed=0 in the terminal call (JBRouterTerminal.sol:1224)
-        // and relies on the balance-delta check at line 1229-1230 to enforce the user's minimum.
-        // This test exists to document the fix rationale.
-        assertTrue(true);
-    }
-}
