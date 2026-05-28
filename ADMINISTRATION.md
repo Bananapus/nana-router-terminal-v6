@@ -39,7 +39,7 @@
 ## Immutable And One-Way
 
 - `lockTerminalFor(...)` is irreversible
-- constructor dependencies on the router are immutable
+- constructor dependencies on the router are immutable, and the chain-specific dependencies wired in via the one-shot `setChainSpecificConstants` setter are write-once (re-call reverts `JBRouterTerminal_AlreadyConfigured`)
 - the current default terminal must move before the old default can be disallowed
 
 ## Operational Notes
