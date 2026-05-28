@@ -2,7 +2,6 @@
 
 `@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best route it can resolve from the configured candidates.
 
-External docs: <https://docs.juicebox.money>
 
 ## Documentation
 
