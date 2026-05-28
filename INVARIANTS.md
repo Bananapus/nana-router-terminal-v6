@@ -1,7 +1,5 @@
 # Invariants of `nana-router-terminal-v6`
 
-Last updated: 2026-05-28.
-
 Scope: three contracts in this package — `JBRouterTerminal` (universal-token payment terminal), `JBRouterTerminalRegistry` (per-project terminal selection with cohort-stable defaults), and `JBPayRouteResolver` (preview-only route ranking helper). Package: `@bananapus/router-terminal-v6`.
 
 Trust model in one sentence: the router is a **stateless routing surface** that accepts ANY token, normalizes through Uniswap V3/V4 swaps and recursive JB cashout loops, and forwards into a destination terminal whose `minReturnedTokens` is the authoritative slippage gate — the router itself holds no project balances between calls, refunds partial-fill leftovers to the *true* original payer (propagated through transient storage when called via the registry), enforces ERC-20 receipt at the final hop on `addToBalanceOf`, and rejects circular forwarding cycles before any irreversible state is written.

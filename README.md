@@ -2,13 +2,19 @@
 
 `@bananapus/router-terminal-v6` is a routing terminal for Juicebox V6. It accepts value in many input tokens, discovers what token the destination project actually accepts, and forwards the payment through the best route it can resolve from the configured candidates.
 
-Docs: <https://docs.juicebox.money>  
-Architecture: [ARCHITECTURE.md](./ARCHITECTURE.md)  
-User journeys: [USER_JOURNEYS.md](./USER_JOURNEYS.md)  
-Skills: [SKILLS.md](./SKILLS.md)  
-Risks: [RISKS.md](./RISKS.md)  
-Administration: [ADMINISTRATION.md](./ADMINISTRATION.md)  
-Audit instructions: [AUDIT_INSTRUCTIONS.md](./AUDIT_INSTRUCTIONS.md)
+External docs: <https://docs.juicebox.money>
+
+## Documentation
+
+- [INVARIANTS.md](./INVARIANTS.md) — runtime invariants enforced by the router, registry, and pay-route resolver.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — system overview, modules, trust boundaries, and critical flows.
+- [ADMINISTRATION.md](./ADMINISTRATION.md) — registry-owner and project-owner control surfaces, locking, and recovery.
+- [RISKS.md](./RISKS.md) — accepted security risks (oracle, slippage, registry forwarding, token compatibility).
+- [USER_JOURNEYS.md](./USER_JOURNEYS.md) — primary actor flows: paying, previewing, locking, and migrating.
+- [AUDIT_INSTRUCTIONS.md](./AUDIT_INSTRUCTIONS.md) — scope, attack surfaces, and verification steps for auditors.
+- [SKILLS.md](./SKILLS.md) — agent-oriented index pointing at the right file or contract for a given task.
+- [STYLE_GUIDE.md](./STYLE_GUIDE.md) — Solidity and repo-layout conventions used across the V6 ecosystem.
+- [CHANGELOG.md](./CHANGELOG.md) — v5 → v6 migration notes and in-v6 behavior changes for integrators.
 
 ## Overview
 
