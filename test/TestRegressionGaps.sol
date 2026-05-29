@@ -537,7 +537,7 @@ contract TestRegressionGaps is Test {
         assertEq(router.DEFAULT_TWAP_WINDOW(), 600);
     }
 
-    /// @notice When user provides quoteForSwap metadata, TWAP is bypassed.
+    /// @notice When user provides pay metadata, TWAP is bypassed.
     function test_shortTwap_bypassedWithUserQuote() public {
         MockERC20Std tok = new MockERC20Std();
         address tokenIn = address(tok);
@@ -552,7 +552,7 @@ contract TestRegressionGaps is Test {
         // Build metadata with user-provided quote — bypasses TWAP entirely.
         bytes memory metadata;
         {
-            bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
+            bytes4 mid = JBMetadataResolver.getId("pay", address(router));
             metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(80)));
         }
 
@@ -790,7 +790,7 @@ contract TestRegressionGaps is Test {
         // Build metadata with user-provided quote (bypasses TWAP).
         bytes memory metadata;
         {
-            bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
+            bytes4 mid = JBMetadataResolver.getId("pay", address(router));
             metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(80)));
         }
 
@@ -911,7 +911,7 @@ contract TestRegressionGaps is Test {
         // Build metadata with user-provided quote (bypasses TWAP).
         bytes memory metadata;
         {
-            bytes4 mid = JBMetadataResolver.getId("quoteForSwap", address(router));
+            bytes4 mid = JBMetadataResolver.getId("pay", address(router));
             metadata = JBMetadataResolver.addToMetadata("", mid, abi.encode(tokenOut, uint256(70)));
         }
 

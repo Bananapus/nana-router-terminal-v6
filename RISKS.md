@@ -5,7 +5,7 @@ Documented risks that were reviewed and accepted.
 ## Oracle & Slippage Risks
 
 **Pool-local V3 TWAP trusted as swap floor for permissionless pools.** *(Medium)*
-An attacker could deploy a manipulable pool with higher liquidity to become the selected candidate. Users should provide `quoteForSwap` metadata from off-chain sources. Mitigated by 120s minimum TWAP window and sigmoid slippage formula.
+An attacker could deploy a manipulable pool with higher liquidity to become the selected candidate. Users should provide `pay` swap-quote metadata from off-chain sources. Mitigated by 120s minimum TWAP window and sigmoid slippage formula.
 
 **Liquidity-based pool selection enables unsafe spot quoting.** *(Medium)*
 Pool discovery ranks candidates by instantaneous liquidity, so an attacker could inflate liquidity to force selection of a manipulable pool. Mitigated by V4 TWAP hardening and sigmoid slippage formula. Users should provide off-chain quotes for high-value swaps.
@@ -18,16 +18,16 @@ In `_getV4SpotQuote`, when the V4 hook provides a TWAP tick (`usedTwap = true`),
 
 Why the practical impact is bounded rather than catastrophic:
 1. The TWAP tick anchors the gross quote price over the 120s window — an attacker cannot move the priced tick within a single block, only widen the tolerance band around it.
-2. Callers can pass `quoteForSwap` metadata to bypass the V4 spot-quote path entirely.
+2. Callers can pass `pay` swap-quote metadata to bypass the V4 spot-quote path entirely.
 3. Pool selection in `_pickPoolAndQuote` can choose a V3 pool over V4 if it has more liquidity (and V3 uses harmonic-mean liquidity).
 
-Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `quoteForSwap` rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
+Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `pay` swap-quote rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
 
-**`quoteForSwap` output token binding.** *(Mitigated)*
-`quoteForSwap` metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must use the two-field payload; old `abi.encode(minAmountOut)` payloads no longer decode successfully.
+**`pay` swap-quote output token binding.** *(Mitigated)*
+`pay` swap-quote metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must use the two-field payload; old `abi.encode(minAmountOut)` payloads no longer decode successfully.
 
 **Multi-hop cashout slippage cleared after first hop.** *(Minor)*
-`cashOutMinReclaimed` applies to the first cash-out hop only. The router forwards the original metadata to that hop so
+`cashOut` applies to the first cash-out hop only. The router forwards the original metadata to that hop so
 the source hook can make the same route-selection decision the router later enforces against the actual balance delta.
 After the first hop, the metadata-level floor is cleared because later hops may use different token units. Maximum 20
 recursive cashout iterations are allowed (`_MAX_CASHOUT_ITERATIONS`); beyond that the operation reverts.
@@ -71,7 +71,7 @@ Standard Permit2 fallback pattern. If Permit2 signature verification fails, the 
 ## Pool Discovery Risks
 
 **Fresh high-liquidity V3 pool without TWAP history can block auto-quoting.** *(Minor)*
-`_discoverPool` selects the highest-liquidity V3 pool, but `_getV3TwapQuote` requires sufficient observation history. A freshly deployed pool with high liquidity wins discovery but fails the TWAP check, reverting the routing flow while lower-liquidity pools with adequate TWAP are ignored. Accepted because: (1) this is self-correcting — the pool accumulates observations over time, (2) the griefing cost is high — attacker must deploy real liquidity, (3) callers can bypass auto-quoting entirely by providing `quoteForSwap` metadata, and (4) the condition is temporary and resolves within the TWAP observation window (default 10 minutes).
+`_discoverPool` selects the highest-liquidity V3 pool, but `_getV3TwapQuote` requires sufficient observation history. A freshly deployed pool with high liquidity wins discovery but fails the TWAP check, reverting the routing flow while lower-liquidity pools with adequate TWAP are ignored. Accepted because: (1) this is self-correcting — the pool accumulates observations over time, (2) the griefing cost is high — attacker must deploy real liquidity, (3) callers can bypass auto-quoting entirely by providing `pay` swap-quote metadata, and (4) the condition is temporary and resolves within the TWAP observation window (default 10 minutes).
 
 ## Multi-Chain Native Token Assumption
 

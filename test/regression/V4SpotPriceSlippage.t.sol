@@ -32,7 +32,7 @@ contract SwapLibHarness {
 /// @dev V4 vanilla pools have no TWAP oracle, so `_getV4SpotQuote` reads `getSlot0` — an instantaneous tick
 /// that can be manipulated within the same block. This test suite verifies that the sigmoid slippage formula
 /// enforces a meaningful minimum output floor regardless of the spot price, and that user-provided quotes
-/// (`quoteForSwap` metadata) bypass the spot-based path entirely.
+/// (`pay` metadata) bypass the spot-based path entirely.
 ///
 /// Because setting up a full V4 PoolManager in unit tests requires significant infrastructure, these tests
 /// exercise the slippage math in isolation via JBSwapLib, which is the same code path used by
@@ -298,11 +298,11 @@ contract V4SpotPriceSlippageTest is Test {
     }
 
     //*********************************************************************//
-    // ---------- quoteForSwap metadata bypasses spot-based path -------- //
+    // ---------- pay metadata bypasses spot-based path -------- //
     //*********************************************************************//
 
-    /// @notice Demonstrates that a user-provided quoteForSwap completely overrides the sigmoid calculation.
-    /// @dev In _pickPoolAndQuote, when metadata contains "quoteForSwap", the decoded output token must match the
+    /// @notice Demonstrates that a user-provided pay completely overrides the sigmoid calculation.
+    /// @dev In _pickPoolAndQuote, when metadata contains "pay", the decoded output token must match the
     /// selected route and the decoded amount is used directly as minAmountOut. Neither _getV4SpotQuote nor
     /// _getV3TwapQuote is called. This test verifies the logic by simulating both paths and showing they produce
     /// different results.
@@ -342,7 +342,7 @@ contract V4SpotPriceSlippageTest is Test {
         assertGt(userQuoteTight, automaticMinOut, "user-provided tight quote should exceed automatic sigmoid minimum");
 
         // Conversely, a user can also set a lower quote (more permissive) — the contract uses it as-is.
-        // This demonstrates that quoteForSwap is a direct override, not a floor.
+        // This demonstrates that pay is a direct override, not a floor.
         uint256 userQuoteLoose = automaticMinOut / 2;
         assertLt(userQuoteLoose, automaticMinOut, "user can also set a more permissive (lower) quote");
     }
