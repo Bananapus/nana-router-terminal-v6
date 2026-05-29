@@ -6,9 +6,30 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
-### `quoteForSwap` binds the quoted output token
+### Metadata purposes renamed to lifecycle-phase names (`pay` / `cashOut`)
 
-`quoteForSwap` metadata now encodes `(address tokenOut, uint256 minAmountOut)` instead of only `uint256 minAmountOut`.
+The router's two metadata purposes were renamed to match the lifecycle-phase naming the buyback hook (as of
+`@bananapus/buyback-hook-v6@0.0.63`) and the 721 tiers hook already use:
+
+- `quoteForSwap` → **`pay`** (the pay-phase swap quote, still encoded `(address tokenOut, uint256 minAmountOut)`).
+- `cashOutMinReclaimed` → **`cashOut`** (the cash-out reclaim floor, still encoded `(uint256 minTokensReclaimed)`).
+
+These purposes are keyed to the router's own address (`JBMetadataResolver.getId(purpose)` → `target: address(this)`),
+so they never collided with the buyback hook's same-named purposes (which are keyed to the buyback address) — the
+rename is purely a naming-consistency change, not a behavioral one. The encodings are unchanged.
+
+Integrator impact: front-ends and programmatic callers building router metadata must key entries to `getId("pay", router)`
+and `getId("cashOut", router)` instead of the old purpose strings. Old `getId("quoteForSwap", ...)` /
+`getId("cashOutMinReclaimed", ...)` entries are silently ignored (different id), which disables slippage protection — so
+this is a required update before using this router version.
+
+Also bumps the `@bananapus/buyback-hook-v6` dependency `^0.0.58` → `^0.0.63` (the release that introduced the matching
+`pay`/`cashOut` purpose names on the buyback hook). The router does not build buyback-targeted metadata, so the bump has
+no behavioral impact on the router beyond staying current.
+
+### `pay` swap quote binds the quoted output token
+
+The `pay` swap-quote metadata encodes `(address tokenOut, uint256 minAmountOut)` instead of only `uint256 minAmountOut`.
 The router normalizes ETH/WETH and reverts with `JBRouterTerminal_QuoteTokenMismatch` if the quoted token does not
 match the route's selected output token.
 

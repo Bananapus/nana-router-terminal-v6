@@ -154,11 +154,11 @@ contract JBRouterTerminal is
     /// @notice Pre-computed metadata ID for "permit2".
     bytes4 internal immutable _PERMIT2_ID;
 
-    /// @notice Pre-computed metadata ID for "cashOutMinReclaimed".
-    bytes4 internal immutable _CASH_OUT_MIN_RECLAIMED_ID;
+    /// @notice Pre-computed metadata ID for "cashOut" (the cash-out reclaim floor).
+    bytes4 internal immutable _CASH_OUT_ID;
 
-    /// @notice Pre-computed metadata ID for "quoteForSwap".
-    bytes4 internal immutable _QUOTE_FOR_SWAP_ID;
+    /// @notice Pre-computed metadata ID for "pay" (the pay-phase swap quote).
+    bytes4 internal immutable _PAY_ID;
 
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
@@ -220,8 +220,8 @@ contract JBRouterTerminal is
 
         // Pre-compute metadata IDs to avoid hashing string literals on every call.
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
-        _CASH_OUT_MIN_RECLAIMED_ID = JBMetadataResolver.getId("cashOutMinReclaimed");
-        _QUOTE_FOR_SWAP_ID = JBMetadataResolver.getId("quoteForSwap");
+        _CASH_OUT_ID = JBMetadataResolver.getId("cashOut");
+        _PAY_ID = JBMetadataResolver.getId("pay");
     }
 
     //*********************************************************************//
@@ -1136,7 +1136,7 @@ contract JBRouterTerminal is
     /// @param destProjectId The ID of the destination project.
     /// @param token The current token to process.
     /// @param amount The amount of the current token.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain cashOutMinReclaimed).
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `cashOut` reclaim floor).
     /// @return destTerminal The terminal that accepts the final token (address(0) if no direct acceptance found).
     /// @return finalToken The token after all cashouts.
     /// @return finalAmount The amount of the final token.
@@ -1240,7 +1240,7 @@ contract JBRouterTerminal is
     /// @param tokenOut The token to convert into.
     /// @param amount The amount to convert.
     /// @param projectId The project ID (passed through to swap callback data).
-    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `pay` swap quote).
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return The amount of tokenOut produced.
     function _convert(
@@ -1422,7 +1422,7 @@ contract JBRouterTerminal is
     /// @param tokenIn The token to swap from.
     /// @param tokenOut The token to swap into.
     /// @param amount The amount of tokenIn to swap.
-    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `pay` swap quote).
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return amountOut The amount of tokenOut received.
     function _handleSwap(
@@ -1587,7 +1587,7 @@ contract JBRouterTerminal is
     /// @param destProjectId The destination project to reach.
     /// @param tokenIn The current route input token.
     /// @param amount The current route input amount.
-    /// @param metadata Metadata that may include a cashOutMinReclaimed floor.
+    /// @param metadata Metadata that may include a `cashOut` reclaim floor.
     /// @param preferredToken The preferred token to target during any cashout loop.
     /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion should continue.
     /// @return routedTokenIn The token that remains to be routed after the cashout step.
@@ -2263,7 +2263,7 @@ contract JBRouterTerminal is
     ///   3. Thin pools, newly initialized pools, and unusually large swaps should not rely on this fallback.
     ///
     /// Mitigations in place:
-    ///   1. Users SHOULD provide a `quoteForSwap` value in the payment metadata (obtained from an off-chain
+    ///   1. Users SHOULD provide a `pay` swap quote in the payment metadata (obtained from an off-chain
     ///      quoter or RPC simulation). The quote must encode the output token and minimum output amount. When present,
     ///      this function is bypassed entirely — see `_pickPoolAndQuote`.
     ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this function uses that oracle-derived tick instead
@@ -2276,7 +2276,7 @@ contract JBRouterTerminal is
     ///      this V4 spot-price path altogether.
     ///
     /// Despite these mitigations, the spot-based fallback does NOT provide full MEV protection. Integrators and
-    /// front-ends should supply `quoteForSwap` metadata for V4 swaps whenever possible so the user's slippage
+    /// front-ends should supply `pay` swap-quote metadata for V4 swaps whenever possible so the user's slippage
     /// tolerance reflects a recent, off-chain-verified price. When no external quote can be provided, this fallback
     /// is still available as an accepted-risk convenience path.
     /// @param key The V4 pool key describing the pool to quote against.
@@ -2376,11 +2376,11 @@ contract JBRouterTerminal is
         }
     }
 
-    /// @notice Parse the optional `cashOutMinReclaimed` metadata.
+    /// @notice Parse the optional `cashOut` metadata (the minimum-reclaim floor).
     /// @param metadata The metadata to inspect for minimum reclaim amounts.
     /// @return minTokensReclaimed The minimum reclaim amount, or 0 if none is specified.
     function _minReclaimedFrom(bytes calldata metadata) internal view returns (uint256 minTokensReclaimed) {
-        (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, id: _CASH_OUT_MIN_RECLAIMED_ID});
+        (bool exists, bytes memory minData) = _getDataFor({metadata: metadata, id: _CASH_OUT_ID});
         if (exists) minTokensReclaimed = abi.decode(minData, (uint256));
     }
 
@@ -2418,10 +2418,10 @@ contract JBRouterTerminal is
     /// @dev For V4 pools without TWAP-capable hooks, `minAmountOut` is derived from the same-block spot tick, which is
     /// manipulable via sandwich attacks. This is an accepted risk for integrations that cannot source external quotes,
     /// especially when routing through deep pools and routine swap sizes, but it should not be treated as full MEV
-    /// protection. Integrators should still supply `quoteForSwap` metadata whenever they can.
+    /// protection. Integrators should still supply `pay` swap-quote metadata whenever they can.
     ///
     /// Priority for `minAmountOut`:
-    ///   1. **User-provided quote** — If `quoteForSwap` is present in `metadata`, it is used after confirming the
+    ///   1. **User-provided quote** — If a `pay` swap quote is present in `metadata`, it is used after confirming the
     ///      quote's output token matches the selected route. This is the recommended path for MEV protection,
     ///      especially for V4 pools.
     ///   2. **V3 TWAP** — If the best pool is V3, uses a manipulation-resistant time-weighted average price.
@@ -2430,7 +2430,7 @@ contract JBRouterTerminal is
     ///      same block (see `_getV4SpotQuote` security note). The sigmoid slippage formula provides a floor but not
     ///      full MEV protection.
     ///
-    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain quoteForSwap).
+    /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `pay` swap quote).
     /// @param normalizedTokenIn The normalized input token address.
     /// @param amount The amount of tokens to swap.
     /// @param normalizedTokenOut The normalized output token address.
@@ -2452,9 +2452,9 @@ contract JBRouterTerminal is
             revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
 
-        // `quoteForSwap` is encoded as `(tokenOut, minAmountOut)`. Binding the quote to its output token prevents
+        // `pay` is encoded as `(tokenOut, minAmountOut)`. Binding the quote to its output token prevents
         // metadata quoted for one route from being replayed against another route with a weaker floor.
-        (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, id: _QUOTE_FOR_SWAP_ID});
+        (bool exists, bytes memory quote) = _getDataFor({metadata: metadata, id: _PAY_ID});
 
         if (exists) {
             (address quotedTokenOut, uint256 quotedMinAmountOut) = abi.decode(quote, (address, uint256));

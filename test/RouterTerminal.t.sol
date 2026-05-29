@@ -1387,7 +1387,7 @@ contract RouterTerminalTest is Test {
 
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
@@ -1454,7 +1454,7 @@ contract RouterTerminalTest is Test {
 
         vm.etch(pool, hex"00");
 
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(wrongTokenOut, uint256(55)));
 
         vm.mockCall(
@@ -1503,7 +1503,7 @@ contract RouterTerminalTest is Test {
 
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
@@ -1648,7 +1648,7 @@ contract RouterTerminalTest is Test {
 
         bytes4 routeTokenOutId = JBMetadataResolver.getId("routeTokenOut", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", routeTokenOutId, abi.encode(tokenOut));
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         metadata = JBMetadataResolver.addToMetadata(metadata, quoteId, abi.encode(tokenOut, quotedAmountOut));
 
         vm.mockCall(
@@ -1924,7 +1924,7 @@ contract RouterTerminalTest is Test {
             abi.encodeWithSignature("Error(string)", "broken candidate")
         );
 
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(workingToken, quotedAmountOut));
 
         vm.mockCall(
@@ -2602,8 +2602,8 @@ contract RouterTerminalTest is Test {
     // ---------- Regression tests: cashout slippage --------------------- //
     //*********************************************************************//
 
-    /// @notice cashOutMinReclaimed metadata should be forwarded to the cashout terminal.
-    function test_pay_cashOutMinReclaimedMetadata() public {
+    /// @notice cashOut metadata should be forwarded to the cashout terminal.
+    function test_pay_cashOutMetadata() public {
         MockERC20 jbTokenMock = new MockERC20();
         address jbToken = address(jbTokenMock);
         address payer = makeAddr("payer");
@@ -2612,10 +2612,10 @@ contract RouterTerminalTest is Test {
             new MockPreviewCashOutTerminal{value: 60e18}(jbTokenMock, 60e18);
         vm.etch(mockTerminal, hex"00");
 
-        // Build metadata with cashOutMinReclaimed — must use router address for getId.
+        // Build metadata with cashOut — must use router address for getId.
         bytes memory metadata;
         {
-            bytes4 metadataId = JBMetadataResolver.getId("cashOutMinReclaimed", address(routerTerminal));
+            bytes4 metadataId = JBMetadataResolver.getId("cashOut", address(routerTerminal));
             metadata = JBMetadataResolver.addToMetadata("", metadataId, abi.encode(uint256(50e18)));
         }
 

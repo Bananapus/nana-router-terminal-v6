@@ -237,7 +237,7 @@ contract RouterTerminalMultihopForkTest is Test {
         // Demand 100,000 DAI for 10,000 USDC — 10x the market rate.
         // This forces the swap to revert with SlippageExceeded because the pool
         // will return ~10,000 DAI (stablecoin pair), far below the 100,000 demanded.
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata =
             JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(DAI), uint256(100_000e18)));
 

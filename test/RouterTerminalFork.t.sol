@@ -274,7 +274,7 @@ contract RouterTerminalForkTest is Test {
         uint256 amountIn = 1 ether;
 
         // Set a generous quote (1 USDC minimum — well below market, should succeed).
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(1e6)));
 
         vm.deal(payer, amountIn);
@@ -311,7 +311,7 @@ contract RouterTerminalForkTest is Test {
         // Set a quote 3x above market (~3,300 USDC/ETH → require 10,000 USDC).
         // This is tight enough to trigger SlippageExceeded but not so extreme that
         // sqrtPriceLimitFromAmounts falls back to "no limit".
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata =
             JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), uint256(10_000e6)));
 

@@ -532,7 +532,7 @@ contract RouterTerminalSandwichForkTest is Test {
         v3Attacker.swap(WETH_USDC_V3, false, int256(attackSize));
 
         // Victim pays with tight user quote.
-        bytes4 quoteId = JBMetadataResolver.getId("quoteForSwap", address(routerTerminal));
+        bytes4 quoteId = JBMetadataResolver.getId("pay", address(routerTerminal));
         bytes memory metadata = JBMetadataResolver.addToMetadata("", quoteId, abi.encode(address(USDC), userMinUSDC));
 
         vm.deal(payer, victimAmount);
@@ -600,7 +600,7 @@ contract RouterTerminalSandwichForkTest is Test {
         console.log("");
         console.log("RISK: V4 spot price IS manipulable within the same block.");
         console.log("Mitigations: (1) sigmoid 2%% floor, (2) user quote override, (3) V3 pool preferred if deeper.");
-        console.log("Recommendation: front-ends MUST supply quoteForSwap metadata for V4 swaps.");
+        console.log("Recommendation: front-ends MUST supply pay metadata for V4 swaps.");
     }
 
     /// @dev Set up a V4 WETH/USDC pool and return the pool key + initial quote.

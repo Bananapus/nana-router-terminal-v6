@@ -424,9 +424,7 @@ contract RegistryAddToBalancePartialFillTest is Test {
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
         metadata = JBMetadataResolver.addToMetadata(
-            metadata,
-            JBMetadataResolver.getId("quoteForSwap", address(router)),
-            abi.encode(address(tokenOut), 100 ether)
+            metadata, JBMetadataResolver.getId("pay", address(router)), abi.encode(address(tokenOut), 100 ether)
         );
 
         vm.prank(user);
@@ -486,9 +484,7 @@ contract RegistryAddToBalancePartialFillTest is Test {
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
         metadata = JBMetadataResolver.addToMetadata(
-            metadata,
-            JBMetadataResolver.getId("quoteForSwap", address(router)),
-            abi.encode(address(tokenOut), 100 ether)
+            metadata, JBMetadataResolver.getId("pay", address(router)), abi.encode(address(tokenOut), 100 ether)
         );
 
         vm.deal(user, 1000 ether);

@@ -314,7 +314,7 @@ contract V4WethInputUsesStuckEthTest is Test {
             "", JBMetadataResolver.getId("routeTokenOut", address(router)), abi.encode(address(tokenOut))
         );
         metadata = JBMetadataResolver.addToMetadata(
-            metadata, JBMetadataResolver.getId("quoteForSwap", address(router)), abi.encode(address(tokenOut), 1)
+            metadata, JBMetadataResolver.getId("pay", address(router)), abi.encode(address(tokenOut), 1)
         );
 
         uint256 payerWethBefore = weth.balanceOf(payer);
