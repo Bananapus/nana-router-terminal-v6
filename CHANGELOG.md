@@ -23,9 +23,10 @@ and `getId("cashOut", router)` instead of the old purpose strings. Old `getId("q
 `getId("cashOutMinReclaimed", ...)` entries are silently ignored (different id), which disables slippage protection — so
 this is a required update before using this router version.
 
-Also bumps the `@bananapus/buyback-hook-v6` dependency `^0.0.58` → `^0.0.63` (the release that introduced the matching
-`pay`/`cashOut` purpose names on the buyback hook). The router does not build buyback-targeted metadata, so the bump has
-no behavioral impact on the router beyond staying current.
+Also bumps the `@bananapus/buyback-hook-v6` dependency `^0.0.58` → `^0.0.64` (0.0.63 introduced the matching
+`pay`/`cashOut` purpose names on the buyback hook; 0.0.64 is a gas-only refactor that pre-computes those IDs as
+constructor immutables). The router does not build buyback-targeted metadata, so the bump has no behavioral impact on
+the router beyond staying current.
 
 ### `pay` swap quote binds the quoted output token
 
