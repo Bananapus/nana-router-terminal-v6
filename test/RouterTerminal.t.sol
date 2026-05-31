@@ -2357,7 +2357,7 @@ contract RouterTerminalTest is Test {
         assertEq(result.v4Key.tickSpacing, int24(10));
     }
 
-    /// @notice COMP-7: a vanilla (hookless) V4 pool exposes no manipulation-resistant price. For a strict leg
+    /// @notice A vanilla (hookless) V4 pool exposes no manipulation-resistant price. For a strict leg
     /// (add-to-balance / cash-out-swap, which has no `minReturnedTokens` backstop) a quote-less swap must refuse the
     /// self-referential spot fallback; for a lenient leg (pay, backstopped) the bounded spot fallback is allowed; and
     /// a caller-supplied `pay` quote is always honored.
