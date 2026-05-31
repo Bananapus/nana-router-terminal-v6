@@ -6,7 +6,7 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
-### Un-backstopped swap legs require a manipulation-resistant quote (COMP-7)
+### Un-backstopped swap legs require a manipulation-resistant quote
 
 The router auto-discovers Uniswap V4 pools including vanilla (hookless) pools, which expose no on-chain
 manipulation-resistant price. For a quote-less swap through such a pool, `_getV4SpotQuote` previously fell back to a
@@ -22,6 +22,19 @@ default (lenient) behavior so estimates still resolve.
 
 Integrator impact: programmatic callers of `addToBalanceOf` (or cash-out-to-add-balance routes) on a pair that only
 has a vanilla V4 pool must now supply a `pay` swap quote, or the call reverts.
+
+### Source cash-outs normalize router-held credits
+
+When a route starts from a JB project token, the router now converts any internal credits it already holds for that
+source project into ERC-20 project tokens before calling the source terminal's `cashOutTokensOf`. Core burns credits
+before ERC-20 balances, so normalizing first keeps each source cash-out scoped to token balances that are visible to the
+router's ERC-20 accounting.
+
+This does not reintroduce credit inputs: callers still cannot route unclaimed credits directly through the router. Credit
+holders must materialize their own credits as ERC-20 project tokens before paying through the router.
+
+Integrator impact: no metadata or interface changes. Source cash-out routes become more robust when the router has
+pre-existing credits for the source project.
 
 ### Metadata purposes renamed to lifecycle-phase names (`pay` / `cashOut`)
 

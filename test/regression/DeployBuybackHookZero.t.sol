@@ -253,6 +253,7 @@ contract DeployBuybackHookZeroTest is Test {
 
         vm.etch(address(directory), hex"00");
         vm.etch(address(tokens), hex"00");
+        vm.mockCall(address(tokens), abi.encodeWithSelector(IJBTokens.creditBalanceOf.selector), abi.encode(0));
         vm.etch(address(permit2), hex"00");
         vm.etch(address(weth), hex"00");
         vm.etch(address(factory), hex"00");

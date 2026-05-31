@@ -449,6 +449,155 @@ contract MockConfigurableCashOutTerminal {
     receive() external payable {}
 }
 
+contract MockCreditTokens {
+    mapping(address holder => mapping(uint256 projectId => uint256)) public creditBalanceOf;
+
+    mapping(address token => uint256 projectId) internal _projectIdOf;
+    mapping(uint256 projectId => MockERC20 token) internal _tokenOf;
+
+    function burnFrom(address holder, uint256 projectId, uint256 count) external {
+        uint256 creditBalance = creditBalanceOf[holder][projectId];
+        uint256 creditsToBurn = creditBalance < count ? creditBalance : count;
+        if (creditsToBurn != 0) creditBalanceOf[holder][projectId] = creditBalance - creditsToBurn;
+
+        uint256 tokensToBurn = count - creditsToBurn;
+        if (tokensToBurn != 0) _tokenOf[projectId].burn(holder, tokensToBurn);
+    }
+
+    function claimTokensFor(address holder, uint256 projectId, uint256 count, address beneficiary) external {
+        creditBalanceOf[holder][projectId] -= count;
+        _tokenOf[projectId].mint(beneficiary, count);
+    }
+
+    function projectIdOf(IJBToken token) external view returns (uint256) {
+        return _projectIdOf[address(token)];
+    }
+
+    function setCreditBalanceOf(address holder, uint256 projectId, uint256 count) external {
+        creditBalanceOf[holder][projectId] = count;
+    }
+
+    function setTokenFor(uint256 projectId, MockERC20 token) external {
+        _projectIdOf[address(token)] = projectId;
+        _tokenOf[projectId] = token;
+    }
+}
+
+contract MockCreditController {
+    MockCreditTokens public immutable TOKENS;
+
+    constructor(MockCreditTokens tokens) {
+        TOKENS = tokens;
+    }
+
+    function claimTokensFor(address holder, uint256 projectId, uint256 tokenCount, address beneficiary) external {
+        TOKENS.claimTokensFor({holder: holder, projectId: projectId, count: tokenCount, beneficiary: beneficiary});
+    }
+}
+
+contract MockCreditAwareCashOutTerminal {
+    MockCreditTokens public immutable TOKENS;
+    MockERC20 public immutable TOKEN;
+    address public immutable RECLAIM_TOKEN;
+    uint256 public immutable PROJECT_ID;
+    uint256 public immutable RECLAIM_AMOUNT;
+
+    uint256 public creditBalanceBeforeBurn;
+    uint256 public tokenBalanceBeforeBurn;
+
+    constructor(
+        MockCreditTokens tokens,
+        MockERC20 token,
+        uint256 projectId,
+        address reclaimToken,
+        uint256 reclaimAmount
+    )
+        payable {
+        TOKENS = tokens;
+        TOKEN = token;
+        PROJECT_ID = projectId;
+        RECLAIM_TOKEN = reclaimToken;
+        RECLAIM_AMOUNT = reclaimAmount;
+    }
+
+    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({
+            token: RECLAIM_TOKEN,
+            decimals: 18,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            currency: uint32(uint160(RECLAIM_TOKEN))
+        });
+    }
+
+    function cashOutTokensOf(
+        address holder,
+        uint256 projectId,
+        uint256 cashOutCount,
+        address tokenToReclaim,
+        uint256,
+        address payable beneficiary,
+        bytes calldata,
+        uint256
+    )
+        external
+        returns (uint256)
+    {
+        require(projectId == PROJECT_ID, "MockCreditAwareCashOutTerminal: wrong project");
+        require(tokenToReclaim == RECLAIM_TOKEN, "MockCreditAwareCashOutTerminal: wrong reclaim token");
+
+        creditBalanceBeforeBurn = TOKENS.creditBalanceOf(holder, projectId);
+        tokenBalanceBeforeBurn = TOKEN.balanceOf(holder);
+
+        TOKENS.burnFrom({holder: holder, projectId: projectId, count: cashOutCount});
+
+        if (tokenToReclaim == JBConstants.NATIVE_TOKEN) {
+            (bool success,) = beneficiary.call{value: RECLAIM_AMOUNT}("");
+            require(success, "MockCreditAwareCashOutTerminal: ETH send failed");
+        } else {
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
+            IERC20(tokenToReclaim).transfer(beneficiary, RECLAIM_AMOUNT);
+        }
+
+        return RECLAIM_AMOUNT;
+    }
+
+    function previewCashOutFrom(
+        address,
+        uint256,
+        uint256,
+        address tokenToReclaim,
+        address payable,
+        bytes calldata
+    )
+        external
+        view
+        returns (JBRuleset memory ruleset, uint256, uint256, JBCashOutHookSpecification[] memory hookSpecifications)
+    {
+        require(tokenToReclaim == RECLAIM_TOKEN, "MockCreditAwareCashOutTerminal: wrong reclaim token");
+        ruleset = JBRuleset({
+            cycleNumber: 1,
+            id: 5,
+            basedOnId: 0,
+            start: 0,
+            duration: 0,
+            weight: 0,
+            weightCutPercent: 0,
+            approvalHook: IJBRulesetApprovalHook(address(0)),
+            metadata: 0
+        });
+        hookSpecifications = new JBCashOutHookSpecification[](0);
+        return (ruleset, RECLAIM_AMOUNT, 0, hookSpecifications);
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBCashOutTerminal).interfaceId || interfaceId == type(IJBTerminal).interfaceId
+            || interfaceId == type(IERC165).interfaceId;
+    }
+
+    receive() external payable {}
+}
+
 contract MockMetadataSensitiveCashOutTerminal {
     MockERC20 public immutable TOKEN;
     address public immutable RECLAIM_TOKEN;
@@ -636,6 +785,7 @@ contract RouterTerminalTest is Test {
         vm.etch(address(mockPermissions), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
+        vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.creditBalanceOf.selector), abi.encode(0));
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
         vm.etch(address(mockPermit2), hex"00");
         mockWeth = IWETH9(address(new MockWETH9()));
@@ -2153,6 +2303,87 @@ contract RouterTerminalTest is Test {
         assertEq(destTerminal.totalReceived(), reclaimAmount);
         assertEq(token.balanceOf(address(routerTerminal)), 0);
         assertEq(address(routerTerminal).balance, 0);
+    }
+
+    function test_pay_claimsRouterCreditsBeforeSourceCashOut() public {
+        uint256 destProjectId = 1;
+        uint256 sourceProjectId = 2;
+        uint256 amount = 100;
+        uint256 creditCount = 7;
+        uint256 reclaimAmount = 60;
+        address payer = makeAddr("creditAwarePayer");
+        address beneficiary = makeAddr("creditAwareBeneficiary");
+        MockCreditTokens creditTokens = new MockCreditTokens();
+        MockCreditController creditController = new MockCreditController(creditTokens);
+        MockERC20 token = new MockERC20();
+        MockPreviewDestTerminal destTerminal = new MockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 777);
+        MockCreditAwareCashOutTerminal cashOutTerminal = new MockCreditAwareCashOutTerminal{value: reclaimAmount}(
+            creditTokens, token, sourceProjectId, JBConstants.NATIVE_TOKEN, reclaimAmount
+        );
+        RouterTerminalHarness creditRouter = new RouterTerminalHarness(
+            mockDirectory,
+            mockPermissions,
+            IJBTokens(address(creditTokens)),
+            mockPermit2,
+            terminalOwner,
+            buybackHook,
+            address(0),
+            address(this)
+        );
+        creditRouter.setChainSpecificConstants({
+            newWrappedNativeToken: mockWeth,
+            newFactory: mockFactory,
+            newPoolManager: mockPoolManager,
+            newUniv4Hook: address(0)
+        });
+
+        creditTokens.setTokenFor({projectId: sourceProjectId, token: token});
+        creditTokens.setCreditBalanceOf({holder: address(creditRouter), projectId: sourceProjectId, count: creditCount});
+        token.mint(payer, amount);
+
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.controllerOf, (sourceProjectId)),
+            abi.encode(address(creditController))
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, address(token))),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (destProjectId, JBConstants.NATIVE_TOKEN)),
+            abi.encode(address(destTerminal))
+        );
+
+        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](1);
+        sourceTerminals[0] = IJBTerminal(address(cashOutTerminal));
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.terminalsOf, (sourceProjectId)),
+            abi.encode(sourceTerminals)
+        );
+
+        vm.startPrank(payer);
+        token.approve({spender: address(creditRouter), amount: amount});
+        uint256 mintedTokenCount = creditRouter.pay({
+            projectId: destProjectId,
+            token: address(token),
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "credit-normalized cashout",
+            metadata: ""
+        });
+        vm.stopPrank();
+
+        assertEq(mintedTokenCount, 777);
+        assertEq(cashOutTerminal.creditBalanceBeforeBurn(), 0);
+        assertEq(cashOutTerminal.tokenBalanceBeforeBurn(), amount + creditCount);
+        assertEq(creditTokens.creditBalanceOf(address(creditRouter), sourceProjectId), 0);
+        assertEq(token.balanceOf(address(creditRouter)), creditCount);
+        assertEq(destTerminal.totalReceived(), reclaimAmount);
     }
 
     function test_previewCashOutLoop_forwardsFirstHopMetadata() public {
