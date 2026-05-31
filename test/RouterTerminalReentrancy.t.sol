@@ -264,6 +264,7 @@ contract RouterTerminalReentrancyTest is Test {
         vm.etch(address(mockPermissions), hex"00");
         mockTokens = IJBTokens(makeAddr("mockTokens"));
         vm.etch(address(mockTokens), hex"00");
+        vm.mockCall(address(mockTokens), abi.encodeWithSelector(IJBTokens.creditBalanceOf.selector), abi.encode(0));
         mockPermit2 = IPermit2(makeAddr("mockPermit2"));
         vm.etch(address(mockPermit2), hex"00");
         mockWeth = IWETH9(makeAddr("mockWeth"));

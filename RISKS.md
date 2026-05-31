@@ -42,6 +42,9 @@ When the oracle returns zero (no liquidity), slippage tolerance becomes zero. Th
 **Credit cash-outs are not supported.** *(Documented limitation)*
 The router does not accept project-token credits as an input. Holders of unclaimed Juicebox credits must first call `JBTokens.claimFor` (or equivalent) to materialize the credits as ERC-20 tokens, then route through the router as a normal ERC-20 payment. This was an intentional simplification: supporting credit inputs required pulling credits via `IJBController.transferCreditsFrom` and carrying a `cashOutSource` metadata override through the cashout loop, which added attack surface (the holder had to be sourced from `msg.sender` rather than `originalPayer()` to prevent spoofing) and ~580 bytes of runtime size. Removing it leaves credit holders with a two-tx flow (`claimFor` → `router.pay`) but keeps the router's contract size below the EIP-170 24,576 B limit with room for future features.
 
+The router may still normalize its own pre-existing credits before a source-project cash-out. That is internal cleanup
+for the router's holder balance, not a supported user input path.
+
 **Forwarding-terminal receipt bypass.** *(Minor)*
 `_isForwardingTerminal` bypasses receipt validation on incoming transfers. Forwarding terminals are registered by project owners and therefore trusted to handle receipts correctly.
 
