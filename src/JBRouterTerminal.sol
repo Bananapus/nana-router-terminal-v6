@@ -191,6 +191,10 @@ contract JBRouterTerminal is
     // ---------------------- internal stored properties ----------------- //
     //*********************************************************************//
 
+    //*********************************************************************//
+    // ------------------- transient stored properties ------------------- //
+    //*********************************************************************//
+
     /// @notice Transient flag: when set, a quote-less swap may NOT fall back to a manipulable spot price — if the
     /// selected pool exposes no manipulation-resistant oracle (a vanilla V4 pool) and the caller supplied no `pay`
     /// quote, `_getV4SpotQuote` reverts and the caller must provide a quote.
