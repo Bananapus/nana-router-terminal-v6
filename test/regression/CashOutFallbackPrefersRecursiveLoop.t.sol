@@ -252,6 +252,7 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
 
         vm.etch(address(directory), hex"00");
         vm.etch(address(tokens), hex"00");
+        vm.mockCall(address(tokens), abi.encodeWithSelector(IJBTokens.creditBalanceOf.selector), abi.encode(0));
         vm.etch(address(makeAddr("permit2")), hex"00");
         vm.etch(address(makeAddr("factory")), hex"00");
 

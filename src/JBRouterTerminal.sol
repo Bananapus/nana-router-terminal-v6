@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IJBCashOutTerminal} from "@bananapus/core-v6/src/interfaces/IJBCashOutTerminal.sol";
+import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -1180,6 +1181,8 @@ contract JBRouterTerminal is
                 sourceProjectId: sourceProjectId, destProjectId: destProjectId, preferredToken: preferredToken
             });
 
+            _claimRouterCreditsFor({projectId: sourceProjectId});
+
             uint256 cashOutCount = amount;
             uint256 balanceBefore = _balanceOf({token: tokenToReclaim, account: address(this)});
 
@@ -1233,6 +1236,20 @@ contract JBRouterTerminal is
 
         // If we reach here, the loop exceeded the maximum iteration count.
         revert JBRouterTerminal_CashOutLoopLimit({maxIterations: _MAX_CASHOUT_ITERATIONS});
+    }
+
+    /// @notice Converts this router's internal project-token credits into ERC-20s before a source cash-out.
+    /// @dev Core burns holder credits before ERC-20 balances. Normalizing first keeps a source cash-out scoped to
+    /// transferable token balances already visible to the router.
+    /// @param projectId The Juicebox project whose tokens are being cashed out.
+    function _claimRouterCreditsFor(uint256 projectId) internal {
+        uint256 creditCount = TOKENS.creditBalanceOf({holder: address(this), projectId: projectId});
+        if (creditCount == 0) return;
+
+        IJBController controller = IJBController(address(DIRECTORY.controllerOf(projectId)));
+        controller.claimTokensFor({
+            holder: address(this), projectId: projectId, tokenCount: creditCount, beneficiary: address(this)
+        });
     }
 
     /// @notice Convert tokenIn to tokenOut. No-op if same, wrap/unwrap for native/wrapped-native, or swap via Uniswap.
