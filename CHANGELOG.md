@@ -6,6 +6,23 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### Un-backstopped swap legs require a manipulation-resistant quote
+
+The router auto-discovers Uniswap V4 pools including vanilla (hookless) pools, which expose no on-chain
+manipulation-resistant price. For a quote-less swap through such a pool, `_getV4SpotQuote` previously fell back to a
+slippage floor derived from the same pool's instantaneous spot tick — self-referential, and exploitable on legs with
+no downstream backstop.
+
+`pay` is unaffected: its top-level `minReturnedTokens` guards the entire routed result end-to-end. But
+`addToBalanceOf` (and cash-out routes that settle via add-to-balance) have no such backstop. A new transient
+`_strictSwapQuote` flag is set on those legs; when set, `_getV4SpotQuote` refuses the spot fallback for a pool with no
+manipulation-resistant oracle and reverts `JBRouterTerminal_ManipulationResistantQuoteRequired`. V3 routing
+(factory-verified + TWAP) and canonical-hook V4 pools (geomean oracle) are unaffected; off-chain previews keep the
+default (lenient) behavior so estimates still resolve.
+
+Integrator impact: programmatic callers of `addToBalanceOf` (or cash-out-to-add-balance routes) on a pair that only
+has a vanilla V4 pool must now supply a `pay` swap quote, or the call reverts.
+
 ### Source cash-outs normalize router-held credits
 
 When a route starts from a JB project token, the router now converts any internal credits it already holds for that
