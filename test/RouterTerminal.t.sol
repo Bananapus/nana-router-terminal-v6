@@ -594,6 +594,22 @@ contract RouterTerminalHarness is JBRouterTerminal {
     function exposedSettleV4(Currency currency, uint256 amount, bool canUseExistingNativeBalance) external {
         _settleV4(currency, amount, canUseExistingNativeBalance);
     }
+
+    /// @dev Exercises the shared quote path under a chosen `_strictSwapQuote` value, mirroring how `addToBalanceOf`
+    /// (strict = true) and `pay` (strict = false) configure it before swapping.
+    function exposedPickPoolAndQuote(
+        bytes calldata metadata,
+        address normalizedTokenIn,
+        uint256 amount,
+        address normalizedTokenOut,
+        bool strict
+    )
+        external
+        returns (uint256 minAmountOut)
+    {
+        _strictSwapQuote = strict;
+        (minAmountOut,) = _pickPoolAndQuote(metadata, normalizedTokenIn, amount, normalizedTokenOut);
+    }
 }
 
 contract RouterTerminalTest is Test {
@@ -2339,6 +2355,54 @@ contract RouterTerminalTest is Test {
         assertTrue(result.isV4);
         assertEq(result.v4Key.fee, 500);
         assertEq(result.v4Key.tickSpacing, int24(10));
+    }
+
+    /// @notice COMP-7: a vanilla (hookless) V4 pool exposes no manipulation-resistant price. For a strict leg
+    /// (add-to-balance / cash-out-swap, which has no `minReturnedTokens` backstop) a quote-less swap must refuse the
+    /// self-referential spot fallback; for a lenient leg (pay, backstopped) the bounded spot fallback is allowed; and
+    /// a caller-supplied `pay` quote is always honored.
+    function test_strictSwapQuote_vanillaV4PoolRequiresQuoteOnUnbackstoppedLegs() public {
+        address tokenIn = makeAddr("tokenIn");
+        address tokenOut = makeAddr("tokenOut");
+        uint256 amount = 1e18;
+
+        // No V3 pool for the pair.
+        vm.mockCall(
+            address(mockFactory), abi.encodeWithSelector(IUniswapV3Factory.getPool.selector), abi.encode(address(0))
+        );
+
+        // A vanilla V4 pool (hooks == address(0), so no oracle) exists at 0.3%/60.
+        (address sorted0, address sorted1) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
+        PoolKey memory v4Key = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: 3000,
+            tickSpacing: int24(60),
+            hooks: IHooks(address(0))
+        });
+        _mockV4PoolExists(v4Key.toId(), uint160(79_228_162_514_264_337_593_543_950_336), 500e18);
+        _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
+        _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
+        _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
+
+        // STRICT leg with no caller quote: must refuse the manipulable spot fallback.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminal.JBRouterTerminal_ManipulationResistantQuoteRequired.selector, v4Key.toId()
+            )
+        );
+        routerTerminal.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
+
+        // LENIENT leg (pay) with no caller quote: the bounded spot fallback is allowed, producing a quote.
+        uint256 lenientQuote = routerTerminal.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, false);
+        assertGt(lenientQuote, 0, "lenient leg should produce a spot-based quote");
+
+        // STRICT leg WITH a caller-supplied `pay` quote: honored (auto-quoting is bypassed).
+        bytes memory metadata = JBMetadataResolver.addToMetadata(
+            "", JBMetadataResolver.getId("pay", address(routerTerminal)), abi.encode(tokenOut, uint256(123))
+        );
+        uint256 strictQuoted = routerTerminal.exposedPickPoolAndQuote(metadata, tokenIn, amount, tokenOut, true);
+        assertEq(strictQuoted, 123, "strict leg with a caller quote uses it");
     }
 
     function test_discoverPool_noPoolManager() public {

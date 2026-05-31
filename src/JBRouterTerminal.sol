@@ -78,6 +78,7 @@ contract JBRouterTerminal is
     error JBRouterTerminal_CashOutDidNotDeliver(address sourceToken, address tokenToReclaim, uint256 cashOutCount);
     error JBRouterTerminal_CashOutLoopLimit(uint256 maxIterations);
     error JBRouterTerminal_InsufficientTwapHistory(address pool, uint256 twapWindow, uint256 minTwapWindow);
+    error JBRouterTerminal_ManipulationResistantQuoteRequired(PoolId poolId);
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
     error JBRouterTerminal_NoLiquidity(address pool, PoolId poolId);
     error JBRouterTerminal_NoMsgValueAllowed(uint256 value);
@@ -190,6 +191,15 @@ contract JBRouterTerminal is
     // ---------------------- internal stored properties ----------------- //
     //*********************************************************************//
 
+    /// @notice Transient flag: when set, a quote-less swap may NOT fall back to a manipulable spot price — if the
+    /// selected pool exposes no manipulation-resistant oracle (a vanilla V4 pool) and the caller supplied no `pay`
+    /// quote, `_getV4SpotQuote` reverts and the caller must provide a quote.
+    /// @dev Set true by `addToBalanceOf` (whose swap has no downstream `minReturnedTokens` backstop) and false by
+    /// `pay` (whose top-level `minReturnedTokens` guards the entire routed result end-to-end). Read at quote time,
+    /// which is synchronous and always precedes the swap's pool callbacks, so it reflects the originating entrypoint.
+    /// Off-chain previews leave it at its default (false), so estimates still resolve. Transient, so it auto-clears.
+    bool internal transient _strictSwapQuote;
+
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
@@ -265,6 +275,11 @@ contract JBRouterTerminal is
         payable
         override
     {
+        // This leg settles via `addToBalanceOf`, which has no `minReturnedTokens` (or any downstream) backstop, so a
+        // quote-less swap must not silently price against a manipulable spot. Require a manipulation-resistant source
+        // (a canonical-hook V4 oracle, a V3 TWAP) or an explicit `pay` quote — see `_getV4SpotQuote`.
+        _strictSwapQuote = true;
+
         // Keep a reference to the terminal that will ultimately receive the routed funds.
         IJBTerminal destTerminal;
 
@@ -354,6 +369,10 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
+        // The top-level `minReturnedTokens` guards the entire routed result end-to-end (a bad intermediate swap
+        // yields fewer final tokens and reverts here), so this leg may use the bounded spot-quote convenience path.
+        _strictSwapQuote = false;
+
         // Keep a reference to the terminal that will receive the routed payment.
         IJBTerminal destTerminal;
 
@@ -2331,8 +2350,14 @@ contract JBRouterTerminal is
             } catch {}
         }
 
-        // If no TWAP was available (no hook, or hook doesn't implement observe), use the instantaneous spot tick.
+        // If no TWAP was available (no hook, or hook doesn't implement observe), there is no manipulation-resistant
+        // price source for this pool. For legs with a downstream backstop (pay's `minReturnedTokens`) or for off-chain
+        // previews, fall back to the instantaneous spot tick (a bounded-convenience path). For legs with NO downstream
+        // backstop (`addToBalanceOf`, and cash-out routes that settle via add-to-balance), refuse: a self-referential
+        // spot floor against an attacker-initialized vanilla pool offers no real protection, so require the caller to
+        // supply a `pay` quote instead.
         if (!usedTwap) {
+            if (_strictSwapQuote) revert JBRouterTerminal_ManipulationResistantQuoteRequired({poolId: id});
             (, tick,,) = _getSlot0(id);
         }
 
