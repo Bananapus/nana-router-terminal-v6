@@ -2270,9 +2270,12 @@ contract JBRouterTerminal is
     }
 
     /// @notice Get an automatic V4 quote with dynamic slippage.
-    /// @dev Prefers a hook-provided geomean/TWAP quote when available. Falls back to the pool's spot tick otherwise.
-    /// This fallback is an accepted product risk for programmatic integrations that cannot provide an external quote,
-    /// but it should be understood as a bounded-convenience path rather than a fully manipulation-resistant one.
+    /// @dev Prefers a hook-provided geomean/TWAP quote when available. For a pool with no such oracle it falls back to
+    /// the pool's spot tick ONLY when `_strictSwapQuote` is false (the `pay` leg — backstopped end-to-end by
+    /// `minReturnedTokens` — and off-chain previews). When `_strictSwapQuote` is true (the `addToBalanceOf` and
+    /// cash-out-swap legs, which have no downstream backstop) it instead reverts
+    /// `JBRouterTerminal_ManipulationResistantQuoteRequired`, forcing the caller to supply a `pay` quote. The spot
+    /// fallback is a bounded-convenience path, not a fully manipulation-resistant one.
     ///
     /// SECURITY NOTE: The spot price read from `poolManager.getSlot0(id)` is an instantaneous value
     /// that can be manipulated within the same block (e.g. via sandwich attacks or flash loans). Unlike V3 pools,
@@ -2297,11 +2300,15 @@ contract JBRouterTerminal is
     ///      scales up to the 88% ceiling via a continuous sigmoid curve.
     ///   4. Pool discovery (`_discoverPool`) may select a V3 pool with TWAP if it has more liquidity, avoiding
     ///      this V4 spot-price path altogether.
+    ///   5. On legs with no downstream `minReturnedTokens` backstop (`addToBalanceOf`, and cash-out routes that
+    ///      settle via add-to-balance), `_strictSwapQuote` is set and this spot fallback is REFUSED: the call reverts
+    ///      `JBRouterTerminal_ManipulationResistantQuoteRequired` unless the caller supplied a `pay` quote.
     ///
     /// Despite these mitigations, the spot-based fallback does NOT provide full MEV protection. Integrators and
     /// front-ends should supply `pay` swap-quote metadata for V4 swaps whenever possible so the user's slippage
     /// tolerance reflects a recent, off-chain-verified price. When no external quote can be provided, this fallback
-    /// is still available as an accepted-risk convenience path.
+    /// remains available as a bounded convenience path ONLY for the backstopped `pay` leg and off-chain previews; the
+    /// un-backstopped `addToBalanceOf` and cash-out-swap legs refuse it (mitigation 5).
     /// @param key The V4 pool key describing the pool to quote against.
     /// @param normalizedTokenIn The normalized token to sell into the pool.
     /// @param normalizedTokenOut The normalized token to buy from the pool.
