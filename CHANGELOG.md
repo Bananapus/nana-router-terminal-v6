@@ -6,6 +6,11 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### `0.0.61` — Raise dependency floors and document conventions in the style guide
+
+Raise the dependency floors to the latest published versions, and document the NatSpec, comment, and lint conventions
+in `STYLE_GUIDE.md`. No source contract changes.
+
 ### The registry's first default terminal also serves projects that pre-date it
 
 `JBRouterTerminalRegistry.setDefaultTerminal` previously recorded a history segment only when replacing an existing
