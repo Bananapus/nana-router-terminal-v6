@@ -6,6 +6,36 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### The registry's first default terminal also serves projects that pre-date it
+
+`JBRouterTerminalRegistry.setDefaultTerminal` previously recorded a history segment only when replacing an existing
+default. The very first call recorded none, so projects that already existed when the registry's default was first set —
+the pre-existing cohort, which includes the canonical fee project (ID 1) and the other canonical revnets — resolved to no
+terminal. As a result those projects could not route any token through the registry: a fee or payment in a token the
+project's own multi-terminal does not hold resolved to nothing and was silently forgiven instead of being swapped to the
+project's accepted token.
+
+The first `setDefaultTerminal` now records a `(0, count]` history segment mapping the pre-existing cohort onto the new
+default, so those projects resolve to it. Later default changes are unchanged: each still snapshots the outgoing default
+for its own cohort, so an already-deployed project is never silently rerouted by a later default change.
+
+Integrator impact: `accountingContextForTokenOf`, `accountingContextsOf`, `terminalOf`, `pay`, and `addToBalanceOf` now
+return data / forward to the resolved default for pre-existing projects instead of reverting
+`JBRouterTerminalRegistry_TerminalNotSet`. The revert still applies when no default has ever been set.
+
+### `discoverPool` returns the best V3 pool even when a deeper V4 pool exists
+
+`JBRouterTerminal.discoverPool` is documented as a V3-only helper for off-chain queries, but it previously returned
+`address(0)` whenever the best OVERALL pool for the pair was a V4 pool — even when a usable V3 pool existed. External
+consumers reading it then saw "no pool" though a V3 pool was available.
+
+`discoverPool` now returns the deepest available V3 pool whenever one exists, independent of whether a deeper V4 pool
+exists for the same pair. It still reverts `JBRouterTerminal_NoPoolFound` only when no V3 pool exists at all.
+`discoverBestPool` (which spans both V3 and V4) is unchanged.
+
+Integrator impact: off-chain consumers of `discoverPool` now receive the V3 pool for pairs that also have a deeper V4
+pool. No interface or on-chain routing behavior changes.
+
 ### Un-backstopped swap legs require a manipulation-resistant quote
 
 The router auto-discovers Uniswap V4 pools including vanilla (hookless) pools, which expose no on-chain

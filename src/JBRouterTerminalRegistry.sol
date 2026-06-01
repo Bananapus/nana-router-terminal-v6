@@ -74,9 +74,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice The `PROJECTS.count()` snapshot at the moment of the last `setDefaultTerminal` call.
     /// Projects with `ID <= defaultTerminalProjectIdThreshold` (i.e. already existing when the most
     /// recent default was set) DO NOT pick up `defaultTerminal` on fall-through; instead they
-    /// resolve against the historical entry in `_defaultTerminalHistory` that covers their ID.
+    /// resolve against the historical entry in `_defaultTerminalHistory` that covers their ID. The
+    /// first default's segment covers every project that already existed when it was set (so those
+    /// projects route through it), while later segments pin each outgoing default to its own cohort.
     /// This prevents the registry owner from silently rerouting payments for already-deployed
-    /// projects via a default change.
+    /// projects via a later default change.
     uint256 public override defaultTerminalProjectIdThreshold;
 
     /// @notice Whether the terminal for a given project has been locked against future updates.
@@ -91,10 +93,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
 
-    /// @notice Append-only history of previous defaults captured at each `setDefaultTerminal` call. Each `segment[i]`
-    /// applies to projectIds in `[<previous threshold> + 1, segment[i].maxProjectId]`. Resolution walks the array
-    /// forward and returns the first segment whose `maxProjectId` covers the queried `projectId`. New defaults push
-    /// the current default onto this history before updating `defaultTerminal`.
+    /// @notice Append-only history of default-terminal cohorts captured at each `setDefaultTerminal` call. Each
+    /// `segment[i]` applies to projectIds in `[<previous threshold> + 1, segment[i].maxProjectId]`. Resolution walks
+    /// the array forward and returns the first segment whose `maxProjectId` covers the queried `projectId`. The first
+    /// call records the projects that already existed mapped to the new default; later calls push the outgoing default
+    /// onto this history before updating `defaultTerminal`.
     DefaultTerminalSegment[] internal _defaultTerminalHistory;
 
     /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
@@ -360,10 +363,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (projectId > defaultTerminalProjectIdThreshold) return defaultTerminal;
 
         // Older projects walk the history. Each segment covers a half-open range
-        // `(minProjectIdExclusive, maxProjectId]` — exactly the cohort that was issued while that segment's terminal
-        // was the active default. Projects whose IDs pre-date every recorded default (the cold-start cohort)
-        // do not match any segment and resolve to `address(0)` — preserving the documented "the default only applies
-        // to projects created AFTER it was set" property at registry cold-start.
+        // `(minProjectIdExclusive, maxProjectId]`. The first segment covers every project that already existed when the
+        // first default was set (mapped to that first default, so they route through it); later segments each cover the
+        // cohort issued while their terminal was the active default. A project only resolves to `address(0)` here when
+        // no default has ever been set.
         uint256 len = _defaultTerminalHistory.length;
         for (uint256 i; i < len; ++i) {
             DefaultTerminalSegment storage segment = _defaultTerminalHistory[i];
@@ -388,7 +391,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     }
 
     /// @notice Resolve the effective terminal for call paths that need to forward into a real terminal.
-    /// @dev `terminalOf`/`defaultTerminalFor` may intentionally return zero for the cold-start cohort. Transactional
+    /// @dev `terminalOf`/`defaultTerminalFor` return zero only when no default has ever been set. Transactional
     /// and passthrough view paths must fail before accepting funds or calling address(0).
     /// @param projectId The project to resolve the terminal for.
     /// @return terminal The project-specific terminal or threshold-resolved default.
@@ -623,12 +626,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Change the registry-wide default terminal for projects created AFTER this call.
     /// @dev Only the registry owner can call this. Automatically allowlists the new default.
-    /// Existing projects (ID <= current `PROJECTS.count()` at call time) keep their historical
-    /// default — the previous `defaultTerminal` is pushed onto `_defaultTerminalHistory` so
-    /// fall-through resolution for those projects continues to return what was current when
-    /// their cohort was last addressed. This eliminates the silent-reroute attack vector
-    /// where the registry owner could redirect payments for already-deployed projects that
-    /// never set an explicit `_terminalOf` override.
+    /// The very first call also maps every project that already existed onto the new default (via a
+    /// history segment) so those pre-existing projects — including the canonical fee project (ID 1) —
+    /// can route tokens through it. Existing projects (ID <= current `PROJECTS.count()` at call time)
+    /// keep their historical default on later changes — the previous `defaultTerminal` is pushed onto
+    /// `_defaultTerminalHistory` so fall-through resolution for those projects continues to return what
+    /// was current when their cohort was last addressed. This means a later default change never
+    /// silently reroutes payments for already-deployed projects that never set an explicit
+    /// `_terminalOf` override.
     /// @param terminal The terminal to set as the default for future projects.
     function setDefaultTerminal(IJBTerminal terminal) external onlyOwner {
         if (address(terminal) == address(0)) revert JBRouterTerminalRegistry_ZeroAddress(address(terminal));
@@ -641,20 +646,20 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // default is what unconfigured (and all-future) projects will resolve to.
         _requireNonCircularTerminalFor({projectId: count, terminal: terminal});
 
-        // Snapshot the OUTGOING default so projects whose IDs were issued while it was active keep resolving to it.
-        // The segment encodes the half-open range `(prevThreshold, currentCount]` — i.e. exactly the cohort that was
-        // assigned the outgoing default at creation time. The first call ever has `defaultTerminal == 0` and nothing
-        // to snapshot; in that case projects whose IDs already existed remain unaffected by the new default, keeping
-        // the cold-start cohort outside any retroactive routing change.
-        if (address(defaultTerminal) != address(0)) {
-            _defaultTerminalHistory.push(
-                DefaultTerminalSegment({
-                    minProjectIdExclusive: defaultTerminalProjectIdThreshold,
-                    maxProjectId: count,
-                    terminal: defaultTerminal
-                })
-            );
-        }
+        // Record a history segment for the cohort whose IDs fall in the half-open range `(prevThreshold,
+        // currentCount]`. On the first call ever (`defaultTerminal == 0`) the segment maps the projects that already
+        // existed — including the canonical fee project (ID 1) — onto the NEW default so they can route tokens
+        // through
+        // it instead of resolving to nothing. On every later call the segment instead pins the OUTGOING default to its
+        // own cohort, so projects whose IDs were issued while it was active keep resolving to it and a default change
+        // never silently reroutes an already-deployed project.
+        _defaultTerminalHistory.push(
+            DefaultTerminalSegment({
+                minProjectIdExclusive: defaultTerminalProjectIdThreshold,
+                maxProjectId: count,
+                terminal: address(defaultTerminal) != address(0) ? defaultTerminal : terminal
+            })
+        );
 
         defaultTerminal = terminal;
         defaultTerminalProjectIdThreshold = count;
