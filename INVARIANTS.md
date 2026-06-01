@@ -69,22 +69,22 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 ## B.2 Permanent commitment via `lockTerminalFor`
 
 - `lockTerminalFor(projectId, expectedTerminal)` (`JBRouterTerminalRegistry.sol:506-537`) is the irreversible commitment surface. Same permission set as `setTerminalFor`. Race-safe: when no explicit override exists, the function snapshots the THRESHOLD-RESOLVED default into `_terminalOf` first (`:517-522`), then compares it against `expectedTerminal`, reverting `JBRouterTerminalRegistry_TerminalMismatch` if a default change raced ahead of the lock (`:524-529`).
-- The lock captures whatever default applied to *this specific project's cohort*, NOT the registry-wide `defaultTerminal`. A project locked at cold-start gets a zero terminal locked — which is why `lockTerminalFor` reverts `JBRouterTerminalRegistry_TerminalNotSet` if both the explicit override and the cohort default are zero (`:520`).
+- The lock captures whatever default applied to *this specific project's cohort*, NOT the registry-wide `defaultTerminal`. When no default has ever been set, a project has no cohort default to lock — which is why `lockTerminalFor` reverts `JBRouterTerminalRegistry_TerminalNotSet` if both the explicit override and the cohort default are zero (`:520`).
 - Once `hasLockedTerminal[projectId] = true`, `setTerminalFor` reverts permanently for that project. There is no unlock function.
 
 ## B.3 Cohort-stable defaults — the silent-reroute guard
 
-- `setDefaultTerminal(terminal)` (`JBRouterTerminalRegistry.sol:633-666`) is `onlyOwner`. Each call:
-  1. Rejects zero address and self-address (`:634-635`).
-  2. Validates non-circularity against the current `PROJECTS.count()` snapshot (`:637-642`).
-  3. Snapshots the OUTGOING default into `_defaultTerminalHistory` as a `DefaultTerminalSegment{minProjectIdExclusive: previousThreshold, maxProjectId: count, terminal: previousDefault}` (`:649-657`). On the very first call there is no outgoing default to snapshot.
-  4. Updates `defaultTerminal` and `defaultTerminalProjectIdThreshold = count` (`:659-660`).
-  5. Allowlists the new default (`:663`).
-- `_defaultTerminalFor(projectId)` (`JBRouterTerminalRegistry.sol:358-375`) returns:
+- `setDefaultTerminal(terminal)` (`JBRouterTerminalRegistry.sol:638-671`) is `onlyOwner`. Each call:
+  1. Rejects zero address and self-address (`:639-640`).
+  2. Validates non-circularity against the current `PROJECTS.count()` snapshot (`:642-647`).
+  3. Records a `DefaultTerminalSegment{minProjectIdExclusive: previousThreshold, maxProjectId: count, terminal: ...}` into `_defaultTerminalHistory` (`:656-662`). On the very first call (`defaultTerminal == 0`) the segment maps the projects that already existed — the pre-existing cohort, including the canonical fee project (ID 1) — onto the NEW default, so they can route tokens through it. On every later call the segment instead pins the OUTGOING default to its own cohort.
+  4. Updates `defaultTerminal` and `defaultTerminalProjectIdThreshold = count` (`:664-665`).
+  5. Allowlists the new default (`:668`).
+- `_defaultTerminalFor(projectId)` (`JBRouterTerminalRegistry.sol:361-378`) returns:
   - `defaultTerminal` if `projectId > defaultTerminalProjectIdThreshold` (new projects pick up the current default), else
-  - the first history segment whose `(minProjectIdExclusive, maxProjectId]` covers `projectId` (existing cohorts keep what was active when their range was created), else
-  - `address(0)` for the cold-start cohort (projects whose IDs pre-date every recorded default never silently inherit a new default).
-- **Invariant (silent-reroute guard):** existing projects without an explicit `_terminalOf` override CANNOT be silently rerouted by a later `setDefaultTerminal` call. The owner can change where *new* cohorts land, but the route surfaces for already-deployed projects are frozen.
+  - the first history segment whose `(minProjectIdExclusive, maxProjectId]` covers `projectId` (the pre-existing cohort resolves to the first default; later cohorts keep what was active when their range was created), else
+  - `address(0)` only when no default has ever been set.
+- **Invariant (serve-then-freeze):** the first default serves every project that already existed when it was set, and from then on existing projects without an explicit `_terminalOf` override CANNOT be silently rerouted by a later `setDefaultTerminal` call. The owner can change where *new* cohorts land, but the route surfaces for already-deployed projects are frozen.
 
 ## B.4 Registry-owner allowlist surface
 
@@ -143,7 +143,7 @@ Implements `IJBTerminal`, `IJBPermitTerminal`, `IUniswapV3SwapCallback`, `IUnloc
 - **`currentSurplusOf(...) → 0`** — `:562-578`. Always zero (router holds no balances).
 - **`migrateBalanceOf(...) → 0`** — `:316-330`. Always zero (no balance to migrate).
 - **`discoverBestPool(normalizedTokenIn, normalizedTokenOut) → PoolInfo`** — `:584-599`. Reverts `JBRouterTerminal_NoPoolFound` if neither V3 nor V4 has a candidate pool.
-- **`discoverPool(normalizedTokenIn, normalizedTokenOut) → IUniswapV3Pool`** — `:605-620`. V3-only convenience wrapper for off-chain queries.
+- **`discoverPool(normalizedTokenIn, normalizedTokenOut) → IUniswapV3Pool`** — `:631-644`. V3-only convenience wrapper for off-chain queries. Returns the deepest V3 pool whenever one exists (via the `_discoverV3Pool` helper), independent of whether a deeper V4 pool exists for the pair; reverts `JBRouterTerminal_NoPoolFound` only when no V3 pool exists at all.
 - **`bestPoolLiquidityOf(tokenA, tokenB) → uint128`** — `:735-737`. The liquidity heuristic the resolver uses to rank candidate accepted tokens.
 
 **Preview surfaces (off-chain quote producers):**
@@ -195,7 +195,7 @@ Implements `IJBRouterTerminalRegistry`, `IJBForwardingTerminal`, `IJBTerminal`, 
 - **`defaultTerminalHistoryAt(index) → DefaultTerminalSegment`** — `:211-218`.
 - **`defaultTerminalHistoryLength() → uint256`** — `:223-225`.
 - **`previewPayFor(projectId, token, amount, beneficiary, metadata)`** — `:238-263`. Forwards to the resolved terminal's `previewPayFor`.
-- **`terminalOf(projectId) → IJBTerminal`** — `:266-268`. `IJBForwardingTerminal` surface; returns zero for the cold-start cohort.
+- **`terminalOf(projectId) → IJBTerminal`** — `:266-268`. `IJBForwardingTerminal` surface; returns zero only when no default has ever been set.
 - **`originalPayer() → address`** — transient storage view; `:109`. Reads as zero outside an in-flight forward.
 
 **Public immutables / stored:**
@@ -241,7 +241,7 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 3. **`minReturnedTokens` is the destination terminal's responsibility.** The router does not impose its own beneficiary-token floor on `pay`; the floor is delegated to the destination terminal which can see pay-hook side effects accurately. `addToBalanceOf` adds a final-hop ERC-20 receipt check because no pay hooks fire.
 4. **Original payer propagated through transient storage.** `JBRouterTerminalRegistry` writes `originalPayer` transient slot before forwarding and restores the previous value after (save/restore pattern supports nested forwards through pay hooks). The router resolves refunds against this slot via `IJBPayerTracker.originalPayer()` when called through the registry. Chains like `projectPayer -> registry -> router` propagate the true originator one extra hop via `_originalPayerOrSender`.
 5. **Non-circular-forward is checked at every irreversible write.** `setTerminalFor`, `lockTerminalFor`, and `setDefaultTerminal` each call `_requireNonCircularTerminalFor` (depth-5 walk via `JBForwardingCheck`). Per-call forwards additionally call `_enforceNoCircularForward` to block immediate-caller cycles.
-6. **Cohort-stable defaults block silent reroutes.** `_defaultTerminalFor` resolves against the snapshot history when `projectId <= defaultTerminalProjectIdThreshold`, so an owner change to `defaultTerminal` cannot retroactively reroute already-deployed projects without explicit overrides.
+6. **First default serves pre-existing projects, then cohort-stable defaults block silent reroutes.** The first `setDefaultTerminal` records a `(0, count]` segment mapping every project that already existed onto that first default, so they can route tokens through it. After that, `_defaultTerminalFor` resolves against the snapshot history when `projectId <= defaultTerminalProjectIdThreshold`, so a later owner change to `defaultTerminal` cannot retroactively reroute already-deployed projects without explicit overrides.
 7. **One-shot deployer setter pins chain-specific constants.** `setChainSpecificConstants` is callable only by the immutable `_DEPLOYER` and only once (`wrappedNativeToken == address(0)` guard). Constructor inputs stay byte-identical across chains so the router's CREATE2 address is unified.
 8. **Pool callbacks are authenticated by structural identity, not allowlist.** The V3 callback verifies `msg.sender` against `factory.getPool(tokenIn, tokenOut, fee)`; the V4 callback verifies `msg.sender == poolManager`. Spoofed callbacks revert before any state change.
 9. **Cashout-loop iteration bound + first-hop-only `minTokensReclaimed`.** The 20-hop ceiling forecloses on infinite recursion through adversarial project-token graphs; the user-supplied reclaim minimum is intentionally NOT carried across hops because token units change between hops.

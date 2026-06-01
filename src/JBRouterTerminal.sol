@@ -622,7 +622,9 @@ contract JBRouterTerminal is
         return pool;
     }
 
-    /// @notice Public wrapper for V3-only _discoverPool, useful for off-chain queries.
+    /// @notice The best Uniswap V3 pool for a token pair, useful for off-chain queries.
+    /// @dev V3-only by design: returns the deepest V3 pool whenever one exists, independent of whether a deeper V4
+    /// pool exists for the same pair. Reverts only when no V3 pool exists at all.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).
     /// @return pool The V3 pool with the highest liquidity.
@@ -635,12 +637,10 @@ contract JBRouterTerminal is
         override
         returns (IUniswapV3Pool pool)
     {
-        PoolInfo memory info =
-            _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
-        if (!info.isV4 && address(info.v3Pool) == address(0)) {
+        pool = _discoverV3Pool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
+        if (address(pool) == address(0)) {
             revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
         }
-        if (!info.isV4) pool = info.v3Pool;
     }
 
     /// @notice Preview a payment by simulating the router's routing logic in view context.
@@ -1933,9 +1933,49 @@ contract JBRouterTerminal is
         view
         returns (PoolInfo memory bestPool)
     {
+        // Search V3 for the deepest pool and its liquidity.
         uint128 bestLiquidity;
+        (bestPool.v3Pool, bestLiquidity) =
+            _discoverV3PoolAndLiquidity({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
 
-        // Search V3.
+        // Search V4, promoting a V4 pool only when it is deeper than the best V3 pool found above.
+        bestPool = _discoverV4Pool({
+            normalizedTokenIn: normalizedTokenIn,
+            normalizedTokenOut: normalizedTokenOut,
+            currentBestLiquidity: bestLiquidity,
+            bestPool: bestPool
+        });
+    }
+
+    /// @notice Find the highest-liquidity Uniswap V3 pool for a token pair across the common fee tiers.
+    /// @param normalizedTokenIn The input token (wrapped if native).
+    /// @param normalizedTokenOut The output token (wrapped if native).
+    /// @return pool The V3 pool with the highest liquidity, or address(0) if none exists.
+    function _discoverV3Pool(
+        address normalizedTokenIn,
+        address normalizedTokenOut
+    )
+        internal
+        view
+        returns (IUniswapV3Pool pool)
+    {
+        (pool,) =
+            _discoverV3PoolAndLiquidity({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
+    }
+
+    /// @notice Find the highest-liquidity Uniswap V3 pool for a token pair along with its liquidity.
+    /// @param normalizedTokenIn The input token (wrapped if native).
+    /// @param normalizedTokenOut The output token (wrapped if native).
+    /// @return pool The V3 pool with the highest liquidity, or address(0) if none exists.
+    /// @return liquidity The liquidity of the returned pool, or 0 if none exists.
+    function _discoverV3PoolAndLiquidity(
+        address normalizedTokenIn,
+        address normalizedTokenOut
+    )
+        internal
+        view
+        returns (IUniswapV3Pool pool, uint128 liquidity)
+    {
         for (uint256 i; i < 4;) {
             address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _feeTier(i)});
 
@@ -1948,23 +1988,15 @@ contract JBRouterTerminal is
 
             uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
 
-            if (poolLiquidity > bestLiquidity) {
-                bestLiquidity = poolLiquidity;
-                bestPool.v3Pool = IUniswapV3Pool(poolAddr);
+            if (poolLiquidity > liquidity) {
+                liquidity = poolLiquidity;
+                pool = IUniswapV3Pool(poolAddr);
             }
 
             unchecked {
                 ++i;
             }
         }
-
-        // Search V4.
-        bestPool = _discoverV4Pool({
-            normalizedTokenIn: normalizedTokenIn,
-            normalizedTokenOut: normalizedTokenOut,
-            currentBestLiquidity: bestLiquidity,
-            bestPool: bestPool
-        });
     }
 
     /// @notice Search supported V4 pools and update the best pool candidate if a deeper V4 pool exists.

@@ -358,10 +358,8 @@ contract RouterTerminalRegistryTest is Test {
     }
 
     function test_pay_revertsBeforeAcceptingErc20WhenResolvedTerminalIsZero() public {
-        _mockProjectsCount({count: 50});
-        vm.prank(owner);
-        registry.setDefaultTerminal(terminalA);
-
+        // No default has ever been set, so the project resolves to no terminal and the call must revert
+        // before pulling any ERC-20 from the caller.
         RegistryTestERC20 token = new RegistryTestERC20();
         token.mint(address(this), 1 ether);
         token.approve(address(registry), 1 ether);
@@ -445,10 +443,8 @@ contract RouterTerminalRegistryTest is Test {
     }
 
     function test_addToBalanceOf_revertsBeforeForwardingNativeWhenResolvedTerminalIsZero() public {
-        _mockProjectsCount({count: 50});
-        vm.prank(owner);
-        registry.setDefaultTerminal(terminalA);
-
+        // No default has ever been set, so the project resolves to no terminal and the call must revert
+        // before forwarding any native value.
         vm.deal(address(this), 1 ether);
 
         vm.expectRevert(
@@ -484,18 +480,40 @@ contract RouterTerminalRegistryTest is Test {
         vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(count));
     }
 
-    function test_setDefaultTerminal_firstCallNoHistory() public {
-        // count == 0 at deploy; the first setDefaultTerminal has no outgoing default to snapshot.
+    function test_setDefaultTerminal_firstCallRecordsPreExistingCohort() public {
+        // count == 0 at deploy; the first setDefaultTerminal records a (0, 0] segment for the
+        // (empty) pre-existing cohort and points all future projects at terminalA.
         _mockProjectsCount({count: 0});
 
         vm.prank(owner);
         registry.setDefaultTerminal(terminalA);
 
         assertEq(registry.defaultTerminalProjectIdThreshold(), 0);
-        assertEq(registry.defaultTerminalHistoryLength(), 0);
+        // The first default always records a segment so any pre-existing project resolves to it.
+        assertEq(registry.defaultTerminalHistoryLength(), 1);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 0}).terminal), address(terminalA));
         // Every projectId > 0 (i.e. every real project) resolves to terminalA.
         assertEq(address(registry.defaultTerminalFor({projectId: 1})), address(terminalA));
         assertEq(address(registry.defaultTerminalFor({projectId: 1000})), address(terminalA));
+    }
+
+    function test_setDefaultTerminal_firstCallServesProjectsThatAlreadyExisted() public {
+        // 5 projects already exist when the first default is set; all 5 resolve to terminalA.
+        _mockProjectsCount({count: 5});
+
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        assertEq(registry.defaultTerminalProjectIdThreshold(), 5);
+        assertEq(registry.defaultTerminalHistoryLength(), 1);
+        // The first segment covers the pre-existing cohort (0, 5].
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).minProjectIdExclusive, 0);
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 5);
+        for (uint256 i = 1; i <= 5; ++i) {
+            assertEq(address(registry.defaultTerminalFor({projectId: i})), address(terminalA), "pre-existing cohort");
+        }
+        // New projects (ID > 5) also resolve to terminalA via the current default.
+        assertEq(address(registry.defaultTerminalFor({projectId: 6})), address(terminalA));
     }
 
     function test_setDefaultTerminal_existingProjectsKeepOldDefault() public {
@@ -509,9 +527,12 @@ contract RouterTerminalRegistryTest is Test {
         vm.prank(owner);
         registry.setDefaultTerminal(terminalB);
 
-        // Threshold = 5, history has one entry {maxProjectId: 5, terminal: terminalA}.
+        // Threshold = 5. History has two entries: the first default's (0, 0] pre-existing segment
+        // and the outgoing default's (0, 5] cohort, both terminalA.
         assertEq(registry.defaultTerminalProjectIdThreshold(), 5);
-        assertEq(registry.defaultTerminalHistoryLength(), 1);
+        assertEq(registry.defaultTerminalHistoryLength(), 2);
+        assertEq(registry.defaultTerminalHistoryAt({index: 1}).maxProjectId, 5);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 1}).terminal), address(terminalA));
 
         // Existing projects (ID <= 5) keep terminalA on fall-through.
         for (uint256 i = 1; i <= 5; ++i) {
@@ -541,15 +562,18 @@ contract RouterTerminalRegistryTest is Test {
 
         // Threshold reflects the most recent setDefaultTerminal call.
         assertEq(registry.defaultTerminalProjectIdThreshold(), 10);
-        // History has 2 entries (no snapshot for first-ever default).
-        assertEq(registry.defaultTerminalHistoryLength(), 2);
+        // History has 3 entries: the first default's (0, 0] pre-existing segment plus one per later change.
+        assertEq(registry.defaultTerminalHistoryLength(), 3);
 
-        // History[0] covers projects 1..5 with terminalA.
-        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 5);
+        // History[0] is the first default's (empty) pre-existing segment (0, 0] with terminalA.
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 0);
         assertEq(address(registry.defaultTerminalHistoryAt({index: 0}).terminal), address(terminalA));
-        // History[1] covers projects 6..10 with terminalB.
-        assertEq(registry.defaultTerminalHistoryAt({index: 1}).maxProjectId, 10);
-        assertEq(address(registry.defaultTerminalHistoryAt({index: 1}).terminal), address(terminalB));
+        // History[1] covers projects 1..5 with terminalA.
+        assertEq(registry.defaultTerminalHistoryAt({index: 1}).maxProjectId, 5);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 1}).terminal), address(terminalA));
+        // History[2] covers projects 6..10 with terminalB.
+        assertEq(registry.defaultTerminalHistoryAt({index: 2}).maxProjectId, 10);
+        assertEq(address(registry.defaultTerminalHistoryAt({index: 2}).terminal), address(terminalB));
 
         // Each cohort resolves to its correct historical default.
         assertEq(address(registry.defaultTerminalFor({projectId: 3})), address(terminalA), "cohort 1");
@@ -724,5 +748,142 @@ contract RouterTerminalRegistryTest is Test {
         assertEq(address(registry.defaultTerminalFor({projectId: 0})), address(0));
         assertEq(address(registry.defaultTerminalFor({projectId: 1})), address(0));
         assertEq(address(registry.defaultTerminalFor({projectId: 1_000_000})), address(0));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // setDefaultTerminal — the first default also serves projects that
+    // already existed when it was set (the pre-existing cohort).
+    //
+    // Projects that pre-date the registry's first default — including the
+    // canonical projects like the fee project (ID 1) — must be able to route
+    // tokens through the default terminal. The first `setDefaultTerminal` call
+    // records a history segment covering `(0, count]` mapped to that new
+    // default so those projects resolve to it instead of `address(0)`.
+    // ──────────────────────────────────────────────────────────────────────
+
+    function test_setDefaultTerminal_firstCallServesPreExistingProjects() public {
+        // 50 projects already exist when the first default is set.
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // The pre-existing cohort (IDs 1..50) now resolves to the first default.
+        assertEq(address(registry.defaultTerminalFor({projectId: 1})), address(terminalA), "fee project resolves");
+        assertEq(address(registry.defaultTerminalFor({projectId: 50})), address(terminalA), "cohort upper edge");
+        assertEq(address(registry.terminalOf({projectId: 1})), address(terminalA), "terminalOf serves pre-existing");
+
+        // The first segment covers the whole pre-existing range `(0, 50]`.
+        assertEq(registry.defaultTerminalHistoryLength(), 1, "one segment recorded on first default");
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).minProjectIdExclusive, 0, "segment lower bound");
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 50, "segment upper bound");
+        assertEq(
+            address(registry.defaultTerminalHistoryAt({index: 0}).terminal),
+            address(terminalA),
+            "segment terminal is the first default"
+        );
+
+        // Projects created after the first default still resolve to the current default.
+        assertEq(address(registry.defaultTerminalFor({projectId: 51})), address(terminalA), "post-first-default");
+    }
+
+    function test_accountingContextForTokenOf_servesPreExistingProject() public {
+        address someToken = makeAddr("someToken");
+
+        // 50 projects already exist when the first default is set.
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // The resolved default terminal answers the accounting-context query for a pre-existing project.
+        JBAccountingContext memory expected = JBAccountingContext({
+            token: someToken,
+            decimals: 6,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            currency: uint32(uint160(someToken))
+        });
+        vm.mockCall(
+            address(terminalA),
+            abi.encodeCall(IJBTerminal.accountingContextForTokenOf, (projectId, someToken)),
+            abi.encode(expected)
+        );
+
+        JBAccountingContext memory context = registry.accountingContextForTokenOf(projectId, someToken);
+        assertEq(context.token, someToken, "pre-existing project gets a real context, not a revert");
+        assertEq(context.decimals, 6);
+        assertEq(context.currency, expected.currency);
+    }
+
+    function test_pay_forwardsToDefaultForPreExistingProject() public {
+        // 50 projects already exist when the first default is set.
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // The resolved default receives the forwarded payment for a pre-existing project.
+        vm.mockCall(address(terminalA), abi.encodeWithSelector(IJBTerminal.pay.selector), abi.encode(uint256(123)));
+
+        vm.deal(address(this), 1 ether);
+        uint256 returned = registry.pay{value: 1 ether}({
+            projectId: projectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: 1 ether,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        assertEq(returned, 123, "pay forwarded to the first default for a pre-existing project");
+    }
+
+    function test_addToBalanceOf_forwardsToDefaultForPreExistingProject() public {
+        // 50 projects already exist when the first default is set.
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // The resolved default receives the forwarded add-to-balance for a pre-existing project.
+        vm.mockCall(address(terminalA), abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector), abi.encode());
+        vm.expectCall(address(terminalA), abi.encodeWithSelector(IJBTerminal.addToBalanceOf.selector));
+
+        vm.deal(address(this), 1 ether);
+        registry.addToBalanceOf{value: 1 ether}({
+            projectId: projectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: 1 ether,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+    }
+
+    function test_setDefaultTerminal_subsequentChangeStillCohortsCorrectly() public {
+        // First default at count = 50 — the pre-existing cohort (1..50) resolves to terminalA.
+        _mockProjectsCount({count: 50});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalA);
+
+        // Second default at count = 150 — projects 51..150 were created under terminalA.
+        _mockProjectsCount({count: 150});
+        vm.prank(owner);
+        registry.setDefaultTerminal(terminalB);
+
+        // Pre-existing cohort (1..50) keeps the first default.
+        assertEq(address(registry.terminalOf({projectId: 1})), address(terminalA), "pre-existing keeps first default");
+        assertEq(address(registry.terminalOf({projectId: 50})), address(terminalA), "pre-existing upper edge");
+
+        // The 51..150 cohort keeps terminalA (it was the default while they were created).
+        assertEq(address(registry.terminalOf({projectId: 51})), address(terminalA), "second cohort lower edge");
+        assertEq(address(registry.terminalOf({projectId: 150})), address(terminalA), "second cohort upper edge");
+
+        // Projects created after the second change get terminalB.
+        assertEq(address(registry.terminalOf({projectId: 151})), address(terminalB), "new cohort lower edge");
+        assertEq(address(registry.terminalOf({projectId: 999})), address(terminalB), "future projects on terminalB");
+
+        // Two segments: the pre-existing `(0, 50]` and the `(50, 150]` cohort, both on terminalA.
+        assertEq(registry.defaultTerminalHistoryLength(), 2, "two segments recorded");
+        assertEq(registry.defaultTerminalHistoryAt({index: 0}).maxProjectId, 50, "segment 0 upper bound");
+        assertEq(registry.defaultTerminalHistoryAt({index: 1}).minProjectIdExclusive, 50, "segment 1 lower bound");
+        assertEq(registry.defaultTerminalHistoryAt({index: 1}).maxProjectId, 150, "segment 1 upper bound");
     }
 }

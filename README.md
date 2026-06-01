@@ -26,7 +26,7 @@ It can route through:
 - Uniswap V3 or V4 swaps
 - recursive Juicebox token cash outs when the input is itself a project token
 
-Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`).
+Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The first `setDefaultTerminal` serves every project that already existed when it was called — including the canonical fee project (ID 1) — so those pre-existing projects can route tokens through the default. After that, the default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`).
 
 Use this repo when UX requires "pay with many tokens, settle into the right one." Do not use it as a replacement for downstream terminal accounting or as an authoritative decimal source.
 

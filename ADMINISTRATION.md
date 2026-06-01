@@ -45,7 +45,7 @@
 ## Operational Notes
 
 - keep the terminal allowlist small and explicit
-- the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that exists when no later override is set; pick it carefully because it propagates to all early projects
+- the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that already exists at that moment (including the canonical fee project, ID 1) plus every later project with no override; pick it carefully because it propagates to all early projects
 - subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
 - still review fall-through resolution before changing the default — `defaultTerminalFor(projectId)` returns the resolved default for any project, and `defaultTerminalHistoryAt(index)` exposes each captured snapshot
 - encourage projects to lock only after validating the resolved terminal and routing behavior

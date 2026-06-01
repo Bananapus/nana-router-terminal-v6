@@ -23,6 +23,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -2501,6 +2502,57 @@ contract RouterTerminalTest is Test {
         assertEq(Currency.unwrap(result.v4Key.currency0), sorted0);
         assertEq(Currency.unwrap(result.v4Key.currency1), sorted1);
         assertEq(result.v4Key.fee, 3000);
+    }
+
+    /// @notice The public V3-only `discoverPool` helper must surface the best available V3 pool even when a deeper
+    /// V4 pool exists for the pair. Off-chain consumers reading it expect "no V3 pool" only when there truly is none.
+    function test_discoverPool_returnsV3EvenWhenV4IsDeeper() public {
+        address tokenA = makeAddr("tokenA");
+        address tokenB = makeAddr("tokenB");
+        address v3Pool = makeAddr("v3Pool");
+        vm.etch(v3Pool, hex"00");
+
+        // V3 pool with moderate liquidity at the 0.3% fee tier.
+        vm.mockCall(
+            address(mockFactory), abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 3000)), abi.encode(v3Pool)
+        );
+        vm.mockCall(v3Pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(100e18)));
+
+        // No other V3 pools.
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 500)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 10_000)),
+            abi.encode(address(0))
+        );
+        vm.mockCall(
+            address(mockFactory),
+            abi.encodeCall(IUniswapV3Factory.getPool, (tokenA, tokenB, 100)),
+            abi.encode(address(0))
+        );
+
+        // A deeper V4 pool exists at 0.3%/60 tick spacing (higher liquidity than the V3 pool).
+        (address sorted0, address sorted1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        PoolKey memory v4Key = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: 3000,
+            tickSpacing: int24(60),
+            hooks: IHooks(address(0))
+        });
+        PoolId v4Id = v4Key.toId();
+        _mockV4PoolExists(v4Id, uint160(79_228_162_514_264_337_593_543_950_336), 500e18);
+        _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
+        _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
+        _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
+
+        // The public V3-only helper returns the V3 pool even though the best overall pool is the deeper V4 pool.
+        IUniswapV3Pool pool = routerTerminal.discoverPool(tokenA, tokenB);
+        assertEq(address(pool), v3Pool, "discoverPool returns the best V3 pool regardless of a deeper V4 pool");
     }
 
     function test_discoverPool_v3WinsOverV4() public {
