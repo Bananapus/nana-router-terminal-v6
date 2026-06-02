@@ -1,6 +1,6 @@
 {
   "name": "@bananapus/router-terminal-v6",
-  "version": "0.0.62",
+  "version": "0.0.63",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -24,10 +24,10 @@
     "artifacts": "source ./.env && npx sphinx artifacts --org-id 'ea165b21-7cdc-4d7b-be59-ecdd4c26bee4' --project-name 'nana-router-terminal-v6'"
   },
   "dependencies": {
-    "@bananapus/buyback-hook-v6": "^0.0.66",
-    "@bananapus/core-v6": "^0.0.78",
+    "@bananapus/buyback-hook-v6": "^0.0.68",
+    "@bananapus/core-v6": "^0.0.81",
     "@bananapus/permission-ids-v6": "^0.0.28",
-    "@bananapus/univ4-router-v6": "^0.0.46",
+    "@bananapus/univ4-router-v6": "^0.0.51",
     "@openzeppelin/contracts": "5.6.1",
     "@uniswap/permit2": "github:Uniswap/permit2#cc56ad0f3439c502c246fc5cfcc3db92bb8b7219",
     "@uniswap/v3-core": "github:Uniswap/v3-core#6562c52e8f75f0c10f9deaf44861847585fc8129",

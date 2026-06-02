@@ -39,8 +39,7 @@ contract SellFallbackLikeCashOutTerminal {
         address tokenToReclaim,
         uint256,
         address payable,
-        bytes calldata,
-        uint256 /* referralProjectId */
+        bytes calldata
     )
         external
         returns (uint256)
