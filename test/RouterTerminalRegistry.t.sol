@@ -201,6 +201,23 @@ contract RouterTerminalRegistryTest is Test {
         assertEq(context.currency, expected.currency);
     }
 
+    function test_accountingContextForTokenOf_returnsEmptyWhenNoTerminalResolves() public {
+        // No default terminal is set on this chain (setUp does not call setDefaultTerminal). The discovery views must
+        // FAIL-OPEN: return an empty context / empty array rather than reverting TerminalNotSet, so callers like
+        // `JBDirectory.primaryTerminalOf` treat the registry as "does not accept this token" and fall through instead
+        // of propagating a revert that would brick the originating operation (e.g. a protocol-fee cash out/payout
+        // routed to fee project #1). Transactional paths are covered by the *_revertsBeforeAccepting* tests.
+        address someToken = makeAddr("someToken");
+
+        JBAccountingContext memory context = registry.accountingContextForTokenOf(projectId, someToken);
+        assertEq(context.token, address(0), "unresolved registry returns an empty accounting context (no revert)");
+        assertEq(context.decimals, 0);
+        assertEq(context.currency, 0);
+
+        JBAccountingContext[] memory contexts = registry.accountingContextsOf(projectId);
+        assertEq(contexts.length, 0, "unresolved registry returns no accounting contexts (no revert)");
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // setTerminalFor
     // ──────────────────────────────────────────────────────────────────────

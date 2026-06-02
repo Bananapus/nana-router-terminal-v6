@@ -6,6 +6,27 @@ This file describes the verified change from `nana-swap-terminal-v5` to the curr
 
 ## In-v6 changes
 
+### `0.0.62` — Fail-open registry discovery views; refund partial-fill source cash-out residue
+
+Two pre-deploy audit fixes; no storage-layout changes.
+
+**`JBRouterTerminalRegistry.accountingContextForTokenOf` / `accountingContextsOf` no longer revert when no terminal
+resolves.** These are read-only *discovery* views: `JBDirectory.primaryTerminalOf` calls `accountingContextForTokenOf`
+and reads an empty context (`token == address(0)`) as "this terminal does not accept the token", falling through to the
+next terminal. Reverting `JBRouterTerminalRegistry_TerminalNotSet` there propagated out of `primaryTerminalOf` and
+bricked the *originating* operation — e.g. a USDC protocol-fee cash-out/payout routed to the fee project on a chain
+where the registry has no default terminal set. The views now resolve via the non-reverting `_resolvedTerminalOf` and
+return an empty context / empty array when nothing resolves, so the caller fails open (the fee is forgiven, not the
+user's cash-out bricked). The transactional/fund-accepting paths (`pay`, `addToBalanceOf`, `previewPayFor`,
+`lockTerminalFor`) keep `_requireResolvedTerminalOf` and still revert before accepting funds or forwarding into
+`address(0)`.
+
+**The recursive source cash-out loop refunds unsold project-token residue.** On a partial buyback-hook fill the hook
+returns the unsold source project tokens to the holder (this router). The loop previously measured only the
+reclaimed-token delta and left that residue stranded on the router. Each hop now measures the source-token residue as
+`balanceAfter + cashOutCount - sourceBalanceBefore` — exactly the hook's returned unsold count, never sweeping
+pre-existing balances — and refunds it to the route's refund recipient (`refundTo`).
+
 ### `0.0.61` — Raise dependency floors and document conventions in the style guide
 
 Raise the dependency floors to the latest published versions, and document the NatSpec, comment, and lint conventions
@@ -26,7 +47,10 @@ for its own cohort, so an already-deployed project is never silently rerouted by
 
 Integrator impact: `accountingContextForTokenOf`, `accountingContextsOf`, `terminalOf`, `pay`, and `addToBalanceOf` now
 return data / forward to the resolved default for pre-existing projects instead of reverting
-`JBRouterTerminalRegistry_TerminalNotSet`. The revert still applies when no default has ever been set.
+`JBRouterTerminalRegistry_TerminalNotSet`. When no default has *ever* been set, the transactional paths (`pay`,
+`addToBalanceOf`, `lockTerminalFor`) still revert; the read-only discovery views (`accountingContextForTokenOf`,
+`accountingContextsOf`, `terminalOf`) instead return an empty context / empty array / `address(0)` — see the `0.0.62`
+entry above.
 
 ### `discoverPool` returns the best V3 pool even when a deeper V4 pool exists
 

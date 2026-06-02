@@ -36,3 +36,6 @@ AUDIT_FINDINGS.md
 NEMESIS_SCOPE.md
 run-nemesis-all.sh
 .claude/
+
+# Local design specs (not part of the published repo docs)
+docs/specs/

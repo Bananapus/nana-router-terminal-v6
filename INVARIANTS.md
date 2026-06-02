@@ -24,6 +24,7 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 - The same balance-delta pattern is used inside the recursive cashout loop (`JBRouterTerminal.sol:1184-1207`): each hop measures the reclaimed balance via `_balanceOf` delta, and a non-zero cashout that delivers no reclaim tokens reverts `JBRouterTerminal_CashOutDidNotDeliver`. Buyback-hook sell-side execution returns `reclaimAmount = 0` from the terminal but delivers proceeds via the hook callback; the balance-delta measurement is the only sound way to detect actual receipt across both paths.
 - Before each source-project cash-out, the router claims any credits it already holds for that source project into ERC-20 project tokens. Core burns credits before ERC-20 balances, so this keeps the burn side aligned with the router's token-balance accounting while preserving the rule that users cannot pass credits directly as router input.
 - Inside `_handleSwap`, the router compares the post-swap normalized-input balance against `refundBalanceBaseline` (`JBRouterTerminal.sol:1127-1133, 1465-1479`) so refunds for partial fills do not sweep ambient router balances. Pre-existing tokens parked on the router from a stuck flow are NOT swept into the current refund.
+- The same partial-fill principle applies to the source cash-out loop: when a buyback-hook fill is partial it returns the unsold source project tokens to the router (the holder), so each hop measures that residue as `balanceAfter + cashOutCount - sourceBalanceBefore` — exactly the hook's returned unsold count — and refunds it to the route's `refundTo`. This both prevents the residue from stranding on the router and, by baselining against the per-hop source balance, never sweeps pre-existing/ambient balances of that token.
 
 ## A.3 Leftover refunded to the *true* originating payer
 
@@ -189,7 +190,7 @@ Implements `IJBRouterTerminalRegistry`, `IJBForwardingTerminal`, `IJBTerminal`, 
 
 **Views:**
 
-- **`accountingContextForTokenOf(projectId, token)` / `accountingContextsOf(projectId)`** — `:144-174`. Delegate to the resolved terminal.
+- **`accountingContextForTokenOf(projectId, token)` / `accountingContextsOf(projectId)`** — `:144-174`. Read-only discovery views: delegate to the resolved terminal, or **fail open** — return an empty context / empty array (NOT revert) when no terminal resolves (no default set for the project's cohort). Callers such as `JBDirectory.primaryTerminalOf` read an empty context as "not accepted" and fall through, so a cold-start registry never bricks the caller's originating operation. The transactional paths (`pay`, `addToBalanceOf`, `lockTerminalFor`) still revert `JBRouterTerminalRegistry_TerminalNotSet` in that case.
 - **`currentSurplusOf(...) → 0`** — `:182-198`. Always zero.
 - **`defaultTerminalFor(projectId) → IJBTerminal`** — `:204-206`. Public view over `_defaultTerminalFor`.
 - **`defaultTerminalHistoryAt(index) → DefaultTerminalSegment`** — `:211-218`.
