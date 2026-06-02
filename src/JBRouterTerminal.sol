@@ -1161,6 +1161,8 @@ contract JBRouterTerminal is
     /// @param token The current token to process.
     /// @param amount The amount of the current token.
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `cashOut` reclaim floor).
+    /// @param refundTo The address that should receive any unsold source project tokens returned by a partial
+    /// buyback-hook cash-out fill (otherwise they would strand in this router).
     /// @return destTerminal The terminal that accepts the final token (address(0) if no direct acceptance found).
     /// @return finalToken The token after all cashouts.
     /// @return finalAmount The amount of the final token.
@@ -1169,7 +1171,8 @@ contract JBRouterTerminal is
         address token,
         uint256 amount,
         bytes calldata metadata,
-        address preferredToken
+        address preferredToken,
+        address payable refundTo
     )
         internal
         returns (IJBTerminal destTerminal, address finalToken, uint256 finalAmount)
@@ -1209,6 +1212,10 @@ contract JBRouterTerminal is
             uint256 cashOutCount = amount;
             uint256 balanceBefore = _balanceOf({token: tokenToReclaim, account: address(this)});
 
+            // Snapshot the source project-token balance so the unsold residue a partial buyback fill returns to this
+            // router can be measured precisely below (only this hop's residue, never pre-existing balances).
+            uint256 sourceBalanceBefore = _balanceOf({token: token, account: address(this)});
+
             // Cash out the source project's tokens.
             // Don't rely on the terminal return value here. Buyback-hook sell-side execution returns 0 reclaimAmount
             // from nana-core, then transfers the real proceeds during the hook callback.
@@ -1242,6 +1249,16 @@ contract JBRouterTerminal is
             // Enforce the caller's first-hop reclaim floor against the actual balance delta received.
             if (amount < minTokensReclaimed) {
                 revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
+            }
+
+            // Refund any unsold source project tokens the buyback hook returned on a partial fill. The terminal burned
+            // `cashOutCount` source tokens before the hook ran, so the post-cash-out source balance is
+            // `sourceBalanceBefore - cashOutCount + unsold`; recovering `unsold` refunds exactly this hop's residue to
+            // the route's refund recipient instead of stranding it, without sweeping any pre-existing balance.
+            uint256 sourceResidue =
+                _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+            if (sourceResidue != 0) {
+                _transferFrom({from: address(this), to: refundTo, token: token, amount: sourceResidue});
             }
 
             // Clear the reclaim minimum after the first hop.
@@ -1545,7 +1562,8 @@ contract JBRouterTerminal is
             tokenIn: tokenIn,
             amount: amount,
             metadata: metadata,
-            preferredToken: address(0)
+            preferredToken: address(0),
+            refundTo: refundTo
         });
 
         // If the cashout loop found a destination terminal, the route is already complete.
@@ -1605,7 +1623,12 @@ contract JBRouterTerminal is
 
         // First route through any source-project cashout path so project-token inputs are converted before swap logic.
         (cashOutResolvedTerminal, tokenIn, amount) = _routeInputFromSource({
-            destProjectId: destProjectId, tokenIn: tokenIn, amount: amount, metadata: metadata, preferredToken: tokenOut
+            destProjectId: destProjectId,
+            tokenIn: tokenIn,
+            amount: amount,
+            metadata: metadata,
+            preferredToken: tokenOut,
+            refundTo: refundTo
         });
 
         // Return early when the source cashout path already reached the final destination terminal.
@@ -1629,6 +1652,7 @@ contract JBRouterTerminal is
     /// @param amount The current route input amount.
     /// @param metadata Metadata that may include a `cashOut` reclaim floor.
     /// @param preferredToken The preferred token to target during any cashout loop.
+    /// @param refundTo The address that should receive any unsold source project tokens from a partial buyback fill.
     /// @return resolvedTerminal The terminal found by the cashout loop, or address(0) if conversion should continue.
     /// @return routedTokenIn The token that remains to be routed after the cashout step.
     /// @return routedAmountIn The amount of `routedTokenIn` that remains to be routed.
@@ -1637,7 +1661,8 @@ contract JBRouterTerminal is
         address tokenIn,
         uint256 amount,
         bytes calldata metadata,
-        address preferredToken
+        address preferredToken,
+        address payable refundTo
     )
         internal
         returns (IJBTerminal resolvedTerminal, address routedTokenIn, uint256 routedAmountIn)
@@ -1651,7 +1676,8 @@ contract JBRouterTerminal is
             token: tokenIn,
             amount: amount,
             metadata: metadata,
-            preferredToken: preferredToken
+            preferredToken: preferredToken,
+            refundTo: refundTo
         });
     }
 

@@ -153,8 +153,15 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext memory context)
     {
-        // Get the terminal for the project (falls back to the threshold-resolved default).
-        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
+        // Discovery view, fail-open: resolve the project's effective terminal WITHOUT reverting. When no terminal can
+        // be resolved (e.g. no default terminal has been set on this chain yet), return an empty context
+        // (`token == address(0)`) rather than reverting. Callers such as `JBDirectory.primaryTerminalOf` read this to
+        // decide whether the registry accepts the token; an empty context means "not accepted", letting them fall
+        // through to `address(0)` instead of propagating a revert that would brick the originating operation (e.g. a
+        // protocol-fee cash out/payout routed to project #1). Transactional paths keep `_requireResolvedTerminalOf`
+        // and still revert before accepting funds or forwarding into `address(0)`.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        if (terminal == IJBTerminal(address(0))) return context;
 
         // Get the accounting context for the token.
         return terminal.accountingContextForTokenOf({projectId: projectId, token: token});
@@ -169,8 +176,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         override
         returns (JBAccountingContext[] memory contexts)
     {
-        // Get the terminal for the project (falls back to the threshold-resolved default).
-        IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
+        // Discovery view, fail-open: resolve WITHOUT reverting and return an empty array when no terminal can be
+        // resolved on this chain (see `accountingContextForTokenOf`). Transactional paths keep
+        // `_requireResolvedTerminalOf` and still revert.
+        IJBTerminal terminal = _resolvedTerminalOf(projectId);
+        if (terminal == IJBTerminal(address(0))) return contexts;
 
         // Get the accounting contexts.
         return terminal.accountingContextsOf(projectId);
