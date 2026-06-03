@@ -49,8 +49,7 @@ contract PartialFillLikeCashOutTerminal {
         address tokenToReclaim,
         uint256,
         address payable beneficiary,
-        bytes calldata,
-        uint256
+        bytes calldata
     )
         external
         returns (uint256)

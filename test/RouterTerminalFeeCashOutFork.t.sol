@@ -223,8 +223,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
             token: address(project2Token),
             amount: payoutAmount,
             currency: uint32(uint160(address(project2Token))),
-            minTokensPaidOut: 0,
-            referralProjectId: 0
+            minTokensPaidOut: 0
         });
 
         // ── Assertions ──
