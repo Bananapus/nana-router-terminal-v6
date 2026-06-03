@@ -1,6 +1,6 @@
 # Administration
 
-## At A Glance
+## At a glance
 
 | Item | Details |
 | --- | --- |
@@ -13,7 +13,7 @@
 
 `nana-router-terminal-v6` splits administration between a global registry and project-local terminal selection. The router logic itself is mostly immutable. The mutable control plane lives in `JBRouterTerminalRegistry`.
 
-## Control Model
+## Control model
 
 - `JBRouterTerminalRegistry` is globally `Ownable`
 - project owners or delegates choose and can lock their router terminal
@@ -28,7 +28,7 @@
 | Terminal delegate | `JBPermissions` grant | Per project | Usually `SET_ROUTER_TERMINAL` |
 | Payer | Per transaction | Per payment | No special permissions needed for standard ERC-20 routing |
 
-## Privileged Surfaces
+## Privileged surfaces
 
 | Contract | Function | Who Can Call | Effect |
 | --- | --- | --- | --- |
@@ -36,13 +36,13 @@
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
 
-## Immutable And One-Way
+## Immutable and one-way
 
 - `lockTerminalFor(...)` is irreversible
 - constructor dependencies on the router are immutable, and the chain-specific dependencies wired in via the one-shot `setChainSpecificConstants` setter are write-once (re-call reverts `JBRouterTerminal_AlreadyConfigured`)
 - the current default terminal must move before the old default can be disallowed
 
-## Operational Notes
+## Operational notes
 
 - keep the terminal allowlist small and explicit
 - the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that already exists at that moment (including the canonical fee project, ID 1) plus every later project with no override; pick it carefully because it propagates to all early projects
@@ -51,7 +51,7 @@
 - encourage projects to lock only after validating the resolved terminal and routing behavior
 - distinguish configuration risk from quote-quality risk
 
-## Machine Notes
+## Machine notes
 
 - do not treat registry ownership as authority to override a locked project choice
 - inspect `src/JBRouterTerminalRegistry.sol` and `src/JBRouterTerminal.sol` separately; they govern different control boundaries
@@ -65,7 +65,7 @@
 - bad immutable router behavior means replacement infrastructure, not in-place edits
 - quote-path weakness is usually mitigated operationally with better pool choice, external quoting, or replacement routing infrastructure
 
-## Admin Boundaries
+## Admin boundaries
 
 - the registry owner cannot unlock or override a locked project terminal
 - the registry owner cannot reroute an existing project's fall-through default; `setDefaultTerminal` only addresses projects created after the call (see `defaultTerminalProjectIdThreshold` and the `_defaultTerminalHistory` snapshot semantics)
@@ -73,7 +73,7 @@
 - router maintainers cannot tune routing heuristics or constructor immutables post-deploy
 - there is no pause surface in the registry or router
 
-## Source Map
+## Source map
 
 - `src/JBRouterTerminalRegistry.sol`
 - `src/JBRouterTerminal.sol`
