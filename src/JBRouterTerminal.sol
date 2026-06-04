@@ -1790,8 +1790,7 @@ contract JBRouterTerminal is
         if (Currency.unwrap(currency) == address(0)) _wrapNativeToken(amount);
     }
 
-    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
-    /// fallback.
+    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
     /// @param token The address of the token to transfer.
@@ -2403,8 +2402,7 @@ contract JBRouterTerminal is
     ///   1. Users SHOULD provide a `pay` swap quote in the payment metadata (obtained from an off-chain
     ///      quoter or RPC simulation). The quote must encode the output token and minimum output amount. When present,
     ///      this function is bypassed entirely — see `_pickPoolAndQuote`.
-    ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this function uses that oracle-derived tick instead
-    ///      of spot.
+    ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this uses its oracle-derived tick, not spot price.
     ///   3. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
     ///      (pool fee + 1%, with a hard floor of 2%), which bounds the worst-case loss even if the spot price is
     ///      manipulated. For small swaps in deep pools the tolerance stays near this floor; for larger swaps it
