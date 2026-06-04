@@ -32,7 +32,7 @@ Use this repo when UX requires "pay with many tokens, settle into the right one.
 
 This repo is best understood as an execution router attached to Juicebox, not as a new accounting model.
 
-## Key Contracts
+## Key contracts
 
 | Contract | Role |
 | --- | --- |
@@ -40,7 +40,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
-## Mental Model
+## Mental model
 
 There are three separate decisions on the payment path:
 
@@ -56,21 +56,21 @@ The shortest useful reading order is:
 2. `JBRouterTerminalRegistry`
 3. the downstream terminal selected through `JBDirectory`
 
-## Read These Files First
+## Read these files first
 
 1. `src/JBRouterTerminal.sol`
 2. `src/JBRouterTerminalRegistry.sol`
 3. `src/libraries/JBSwapLib.sol`
 4. the downstream terminal implementation in `nana-core-v6`
 
-## Integration Traps
+## Integration traps
 
 - projects that expose a router terminal still settle into ordinary Juicebox terminals underneath
 - route discovery and route execution are related but not identical, especially when liquidity or caller-supplied quote data moves
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 
-## Where State Lives
+## Where state lives
 
 - route-selection logic: `JBRouterTerminal`
 - per-project router choice and lock status: `JBRouterTerminalRegistry`
@@ -78,7 +78,7 @@ The shortest useful reading order is:
 
 That separation is why a successful route can still end in downstream terminal behavior you did not expect.
 
-## High-Signal Tests
+## High-signal tests
 
 1. `test/RouterTerminal.t.sol`
 2. `test/RouterTerminalPreviewFork.t.sol`
@@ -105,11 +105,11 @@ Useful scripts:
 - `npm run deploy:mainnets`
 - `npm run deploy:testnets`
 
-## Deployment Notes
+## Deployment notes
 
 This package depends on core, address-registry, and permission-ID packages plus Uniswap V3, V4, and Permit2 integrations. It is meant to sit in front of canonical Juicebox terminals, not replace them.
 
-## Repository Layout
+## Repository layout
 
 ```text
 src/
@@ -125,7 +125,7 @@ script/
   helpers/
 ```
 
-## Risks And Notes
+## Risks and notes
 
 - the router synthesizes accounting context for discovery and should not be treated as an accounting-truth surface
 - swap previews are best-effort estimates and depend on current pool state plus caller-supplied quote data
@@ -135,7 +135,7 @@ script/
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
 
-## For AI Agents
+## For AI agents
 
 - Do not claim the router is the accounting source of truth after forwarding.
 - Read the preview, recursive cash-out, and registry tests before summarizing path selection behavior.

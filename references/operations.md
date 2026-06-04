@@ -1,12 +1,12 @@
 # Router Terminal Operations
 
-## Configuration Surface
+## Configuration surface
 
 - [`src/JBRouterTerminalRegistry.sol`](../src/JBRouterTerminalRegistry.sol) is the first stop for per-project terminal choice, default terminal behavior, allowlisting, and locking.
 - [`src/JBRouterTerminal.sol`](../src/JBRouterTerminal.sol) owns the metadata-driven route selection and execution logic.
 - [`script/Deploy.s.sol`](../script/Deploy.s.sol) is the deployment entry point when the task is about current deployment wiring rather than core routing logic.
 
-## Change Checklist
+## Change checklist
 
 - If you edit route discovery, verify both direct acceptance and swap-based routes.
 - If you edit the cash-out loop, check project-token cash-out flows and fork tests, not only simple payments.
@@ -15,7 +15,7 @@
 - If you edit refund or partial-fill handling, verify baseline snapshots and destination-terminal receipt enforcement together.
 - If you touch Permit2 or metadata parsing, verify the corresponding interfaces and structs in `src/interfaces/` and `src/structs/` together with the fork tests.
 
-## Common Failure Modes
+## Common failure modes
 
 - Router behavior looks wrong, but the real issue is the downstream terminal's accepted-token or accounting behavior.
 - Preview output drifts from execution because quote and execution paths were edited independently.
@@ -23,7 +23,7 @@
 - Metadata overrides force an output token or cash-out source that the caller did not intend.
 - On `addToBalanceOf` paths, a terminal-facing ERC-20 receipt mismatch indicates a non-standard final-hop token path.
 
-## Useful Proof Points
+## Useful proof points
 
 - [`test/RouterTerminalRegistry.t.sol`](../test/RouterTerminalRegistry.t.sol) for registry rules.
 - [`test/RouterTerminalERC2771.t.sol`](../test/RouterTerminalERC2771.t.sol) for trusted-forwarder behavior.

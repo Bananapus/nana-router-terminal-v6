@@ -72,25 +72,62 @@ contract JBRouterTerminal is
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    /// @notice Thrown when the chain-specific constants have already been set and cannot be reconfigured.
     error JBRouterTerminal_AlreadyConfigured();
+
+    /// @notice Thrown when an amount exceeds the maximum width a swap quote or pool call can represent.
     error JBRouterTerminal_AmountOverflow(uint256 amount);
+
+    /// @notice Thrown when a Uniswap V3 swap callback caller is not the expected pool for the swapped token pair.
     error JBRouterTerminal_CallerNotPool(address caller);
+
+    /// @notice Thrown when an unlock callback caller is not the Uniswap V4 pool manager.
     error JBRouterTerminal_CallerNotPoolManager(address caller);
+
+    /// @notice Thrown when a non-zero cash-out hop reclaims no tokens, so the route cannot safely continue.
     error JBRouterTerminal_CashOutDidNotDeliver(address sourceToken, address tokenToReclaim, uint256 cashOutCount);
+
+    /// @notice Thrown when a cash-out route exceeds the maximum number of hops allowed.
     error JBRouterTerminal_CashOutLoopLimit(uint256 maxIterations);
+
+    /// @notice Thrown when a pool's TWAP history is shorter than the minimum window required to resist manipulation.
     error JBRouterTerminal_InsufficientTwapHistory(address pool, uint256 twapWindow, uint256 minTwapWindow);
+
+    /// @notice Thrown when a leg with no downstream slippage backstop has no manipulation-resistant TWAP and the
+    /// caller did not supply a `pay` quote.
     error JBRouterTerminal_ManipulationResistantQuoteRequired(PoolId poolId);
+
+    /// @notice Thrown when no terminal exposes a reclaimable token that can advance a cash-out route.
     error JBRouterTerminal_NoCashOutPath(uint256 sourceProjectId, uint256 destProjectId);
+
+    /// @notice Thrown when the chosen pool has no in-range liquidity to swap against.
     error JBRouterTerminal_NoLiquidity(address pool, PoolId poolId);
+
+    /// @notice Thrown when native tokens are sent on a call that does not accept them.
     error JBRouterTerminal_NoMsgValueAllowed(uint256 value);
+
+    /// @notice Thrown when a pool has no oracle observation history, so no TWAP can be formed.
     error JBRouterTerminal_NoObservationHistory(address pool);
+
+    /// @notice Thrown when no Uniswap V3 or V4 pool exists for the requested token pair.
     error JBRouterTerminal_NoPoolFound(address tokenIn, address tokenOut);
+
+    /// @notice Thrown when the amount a terminal actually received differs from the amount the router routed to it,
+    /// indicating a lossy or non-standard token path.
     error JBRouterTerminal_NonStandardTerminalToken(
         address terminal, address token, uint256 expectedAmount, uint256 actualAmount
     );
+
+    /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in the metadata.
     error JBRouterTerminal_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
+
+    /// @notice Thrown when the token a `pay` quote was bound to does not match the route's resolved output token.
     error JBRouterTerminal_QuoteTokenMismatch(address quotedTokenOut, address expectedTokenOut);
+
+    /// @notice Thrown when a swap or cash-out output falls below the caller's minimum acceptable amount.
     error JBRouterTerminal_SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+
+    /// @notice Thrown when the caller is not the deployer authorized to set chain-specific constants.
     error JBRouterTerminal_Unauthorized(address caller);
 
     //*********************************************************************//

@@ -1,23 +1,23 @@
 # User Journeys
 
-## Repo Purpose
+## Repo purpose
 
 This repo is the project-facing payment router for "user has X, project wants Y." It owns route discovery, preview behavior, registry-level router choice, and special handling for project-token sources (recursive cash-out). It does not replace the downstream terminal that finally receives and accounts for value. Note: unclaimed Juicebox credits are not a supported input — credit holders must `JBTokens.claimFor` to an ERC-20 first and then route as a normal ERC-20 payment.
 
-## Primary Actors
+## Primary actors
 
 - projects that want broad input-token UX while preserving canonical terminal settlement
 - frontends and aggregators previewing payment routes
 - operators choosing and locking a router per project
 - auditors reviewing route discovery, refund behavior, and downstream terminal interactions
 
-## Key Surfaces
+## Key surfaces
 
 - `JBRouterTerminal`: route discovery and execution
 - `JBRouterTerminalRegistry`: router selection, locking, forwarding, and registry-held balance migration
 - `JBPayRouteResolver`: preview and route-resolution helper logic
 
-## Journey 1: Put A Router In Front Of A Project's Canonical Terminal
+## Journey 1: Put a router in front of a project's canonical terminal
 
 **Actor:** project operator.
 
@@ -40,7 +40,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the project has a router terminal configured in the registry and users can rely on it as the approved entrypoint
 
-## Journey 2: Pay With Whatever Token The User Already Has
+## Journey 2: Pay with whatever token the user already has
 
 **Actor:** payer.
 
@@ -63,7 +63,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the router converts the user's asset into the terminal's accepted asset and forwards the payment
 
-## Journey 3: Pay With A Juicebox Project Token
+## Journey 3: Pay with a Juicebox project token
 
 **Actor:** payer holding a project token.
 
@@ -84,7 +84,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the router handles the recursive path correctly instead of assuming the input is a normal ERC-20
 
-## Journey 4: Preview Routes And Protect The User Against Bad Settlement
+## Journey 4: Preview routes and protect the user against bad settlement
 
 **Actor:** frontend or aggregator.
 
@@ -105,7 +105,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the quote is useful, and execution either lands close to it or fails clearly when conditions changed too much
 
-## Journey 5: Lock Down Which Router A Project Uses
+## Journey 5: Lock down which router a project uses
 
 **Actor:** authorized operator.
 
@@ -126,7 +126,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the registry records the chosen router terminal and locks the decision
 
-## Journey 6: Migrate Registry-Held Balance Or Router Responsibility Safely
+## Journey 6: Migrate registry-held balance or router responsibility safely
 
 **Actor:** operator or migration responder.
 
@@ -147,13 +147,13 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind
 
-## Trust Boundaries
+## Trust boundaries
 
 - this repo is trusted for route discovery and forwarding decisions, not final accounting truth
 - downstream terminals remain the source of actual settlement semantics and balances
 - quote quality depends on the swap and oracle surfaces the chosen route relies on
 
-## Hand-Offs
+## Hand-offs
 
 - Use [nana-core-v6](../nana-core-v6/USER_JOURNEYS.md) for the downstream terminal and accounting model the router settles into.
 - Use [univ4-router-v6](../univ4-router-v6/USER_JOURNEYS.md) when the question is about the UniV4 hook-level swap primitive rather than project-facing routing.

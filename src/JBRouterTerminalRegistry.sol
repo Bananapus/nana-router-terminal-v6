@@ -40,19 +40,38 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    /// @notice Thrown when an amount exceeds the maximum width a forwarded terminal call can represent.
     error JBRouterTerminalRegistry_AmountOverflow(uint256 amount);
+
+    /// @notice Thrown when attempting to disallow the terminal that is currently set as the default.
     error JBRouterTerminalRegistry_CannotDisallowDefaultTerminal(IJBTerminal terminal);
+
+    /// @notice Thrown when a terminal would forward a project back into this registry, directly or transitively.
     error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
+
+    /// @notice Thrown when native tokens are sent on a call that does not accept them.
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
+
+    /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in the metadata.
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
+
+    /// @notice Thrown when changing a project's terminal after its terminal choice has been permanently locked.
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
+
+    /// @notice Thrown when the project's resolved terminal does not match the terminal the caller expected to lock.
     error JBRouterTerminalRegistry_TerminalMismatch(IJBTerminal currentTerminal, IJBTerminal expectedTerminal);
+
+    /// @notice Thrown when selecting a terminal that is not on the registry allowlist.
     error JBRouterTerminalRegistry_TerminalNotAllowed(IJBTerminal terminal);
+
+    /// @notice Thrown when a project has no explicit terminal and no default terminal has ever been set.
     error JBRouterTerminalRegistry_TerminalNotSet(uint256 projectId);
+
+    /// @notice Thrown when setting the default terminal to the zero address.
     error JBRouterTerminalRegistry_ZeroAddress(address terminal);
 
     //*********************************************************************//
-    // -------------------- public immutable properties ------------------ //
+    // ---------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
     /// @notice The Juicebox project registry used to verify project existence and ownership.
@@ -108,7 +127,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // -------------------- transient stored properties ------------------ //
     //*********************************************************************//
 
-    /// @inheritdoc IJBPayerTracker
+    /// @notice The original payer of the current transaction.
     address public transient override originalPayer;
 
     //*********************************************************************//
@@ -275,7 +294,9 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         });
     }
 
-    /// @inheritdoc IJBForwardingTerminal
+    /// @notice The concrete terminal this forwarding layer would route a project's payment into.
+    /// @param projectId The project whose downstream terminal should be resolved.
+    /// @return terminal The concrete terminal the forwarder would call for `projectId`.
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
         return _resolvedTerminalOf(projectId);
     }

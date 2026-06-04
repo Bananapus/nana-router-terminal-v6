@@ -1,11 +1,11 @@
 # Juicebox Router Terminal
 
-## Use This File For
+## Use this file for
 
 - Use this file when the task involves routed payments or cash outs, swap-path metadata, dynamic accepted-token discovery, registry selection, or router slippage and refund behavior.
 - Start here, then decide whether the problem is route discovery, swap execution, cash-out recursion, or registry selection.
 
-## Read This Next
+## Read this next
 
 | If you need... | Open this next |
 |---|---|
@@ -17,7 +17,7 @@
 | Preview, cash-out, and buyback composition | [`test/RouterTerminalPreviewFork.t.sol`](./test/RouterTerminalPreviewFork.t.sol), [`test/RouterTerminalCashOutFork.t.sol`](./test/RouterTerminalCashOutFork.t.sol), [`test/RouterTerminalBuybackHookFork.t.sol`](./test/RouterTerminalBuybackHookFork.t.sol), [`test/RouterTerminalFeeCashOutFork.t.sol`](./test/RouterTerminalFeeCashOutFork.t.sol) |
 | Registry, multihop, and adversarial coverage | [`test/RouterTerminalRegistry.t.sol`](./test/RouterTerminalRegistry.t.sol), [`test/RouterTerminalMultihopFork.t.sol`](./test/RouterTerminalMultihopFork.t.sol), [`test/RouterTerminalReentrancy.t.sol`](./test/RouterTerminalReentrancy.t.sol), [`test/RouterTerminalSandwichFork.t.sol`](./test/RouterTerminalSandwichFork.t.sol), [`test/TestRegressionGaps.sol`](./test/TestRegressionGaps.sol) |
 
-## Repo Map
+## Repo map
 
 | Area | Where to look |
 |---|---|
@@ -30,12 +30,12 @@
 
 Universal routing terminal for Juicebox V6. This repo accepts many input tokens, discovers what token a destination project actually accepts, converts through the best available path, and forwards settlement to the canonical downstream terminal.
 
-## Reference Files
+## Reference files
 
 - Open [`references/runtime.md`](./references/runtime.md) when you need route-selection flow, cash-out loop behavior, callback and swap semantics, or main invariants.
 - Open [`references/operations.md`](./references/operations.md) when you need registry and permission behavior, metadata keys, test breadcrumbs, or common stale assumptions.
 
-## Working Rules
+## Working rules
 
 - Start in [`src/JBRouterTerminal.sol`](./src/JBRouterTerminal.sol) for execution behavior, but verify downstream semantics in the destination terminal before treating the router as the source of truth.
 - The router intentionally synthesizes accounting contexts instead of storing a static accepted-token list.

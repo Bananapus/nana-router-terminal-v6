@@ -2,7 +2,7 @@
 
 Documented risks that were reviewed and accepted.
 
-## Oracle & Slippage Risks
+## Oracle and slippage risks
 
 **Pool-local V3 TWAP trusted as swap floor for permissionless pools.** *(Medium)*
 An attacker could deploy a manipulable pool with higher liquidity to become the selected candidate. Users should provide `pay` swap-quote metadata from off-chain sources. Mitigated by 120s minimum TWAP window and sigmoid slippage formula.
@@ -24,7 +24,7 @@ Why the practical impact is bounded rather than catastrophic:
 Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `pay` swap-quote rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
 
 **`pay` swap-quote output token binding.** *(Mitigated)*
-`pay` swap-quote metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must use the two-field payload; old `abi.encode(minAmountOut)` payloads no longer decode successfully.
+`pay` swap-quote metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must encode the two-field payload `abi.encode(tokenOut, minAmountOut)`; a single-field `abi.encode(minAmountOut)` payload does not decode and the swap protection does not apply.
 
 **Multi-hop cashout slippage cleared after first hop.** *(Minor)*
 `cashOut` applies to the first cash-out hop only. The router forwards the original metadata to that hop so
@@ -35,9 +35,9 @@ recursive cashout iterations are allowed (`_MAX_CASHOUT_ITERATIONS`); beyond tha
 **Zero oracle quote disables swap protection.** *(Minor)*
 When the oracle returns zero (no liquidity), slippage tolerance becomes zero. The swap would fail anyway due to lack of liquidity, so this has no practical impact.
 
-> **Status:** The V4 TWAP window is 120s. The former 30s-window concern is historical and is not an accepted risk.
+> **Status:** The V4 TWAP window is 120s, long enough that a single-block tick push cannot move the priced quote. A shorter window is not used.
 
-## Registry & Forwarding Risks
+## Registry and forwarding risks
 
 **Credit cash-outs are not supported.** *(Documented limitation)*
 The router does not accept project-token credits as an input. Holders of unclaimed Juicebox credits must first call `JBTokens.claimFor` (or equivalent) to materialize the credits as ERC-20 tokens, then route through the router as a normal ERC-20 payment. This was an intentional simplification: supporting credit inputs required pulling credits via `IJBController.transferCreditsFrom` and carrying a `cashOutSource` metadata override through the cashout loop, which added attack surface (the holder had to be sourced from `msg.sender` rather than `originalPayer()` to prevent spoofing) and ~580 bytes of runtime size. Removing it leaves credit holders with a two-tx flow (`claimFor` → `router.pay`) but keeps the router's contract size below the EIP-170 24,576 B limit with room for future features.
@@ -58,12 +58,12 @@ Forwarding terminals registered by project owners are trusted to handle receipts
 
 *Mitigation guidance:* Project owners installing chained forwarding terminals should run a manual `JBForwardingCheck.isCircularTerminal({target: registry, projectId: …, terminal: candidate})` simulation before approving the candidate.
 
-## Token Compatibility Risks
+## Token compatibility risks
 
 **Fee-on-transfer (FOT) tokens not supported for routed payments.** *(Medium)*
 The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validation) on the destination terminal. This was intentionally removed because pay hooks attached to the destination terminal can legitimately consume tokens during `pay()`, making a balance-delta check produce false reverts for any project with active pay hooks. As a consequence, fee-on-transfer tokens will silently lose value during routing — the terminal receives fewer tokens than `amount` but the router cannot detect this. Projects using FOT tokens should route payments directly to the terminal, bypassing the router. The `addToBalanceOf()` flow retains receipt enforcement since it has no hooks.
 
-## Minor Configuration Risks
+## Minor configuration risks
 
 **Unbounded quadratic candidate enumeration.** *(Minor)*
 `_candidatePayRouteTokens` can enumerate O(n^2) candidates in theory. Bounded in practice to ~5-10 terminals per project, keeping gas costs manageable.
@@ -71,12 +71,12 @@ The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validat
 **Permit2 try/catch falls through to ERC-20 allowance.** *(Minor)*
 Standard Permit2 fallback pattern. If Permit2 signature verification fails, the contract falls back to standard ERC-20 `transferFrom` using existing allowance.
 
-## Pool Discovery Risks
+## Pool discovery risks
 
 **Fresh high-liquidity V3 pool without TWAP history can block auto-quoting.** *(Minor)*
 `_discoverPool` selects the highest-liquidity V3 pool, but `_getV3TwapQuote` requires sufficient observation history. A freshly deployed pool with high liquidity wins discovery but fails the TWAP check, reverting the routing flow while lower-liquidity pools with adequate TWAP are ignored. Accepted because: (1) this is self-correcting — the pool accumulates observations over time, (2) the griefing cost is high — attacker must deploy real liquidity, (3) callers can bypass auto-quoting entirely by providing `pay` swap-quote metadata, and (4) the condition is temporary and resolves within the TWAP observation window (default 10 minutes).
 
-## Multi-Chain Native Token Assumption
+## Multi-chain native token assumption
 
 **Router assumes the chain has a native token with a WETH9-compatible wrapper.** *(Informational)*
 The `WRAPPED_NATIVE_TOKEN` constructor parameter must be a WETH9-compatible contract (`deposit()` / `withdraw()` interface). On Ethereum this is WETH, on Celo it would be WCELO, etc. On chains without a native token (e.g. Tempo), the router's native-token swap and refund paths are not applicable — the router should either not be deployed, or the `WRAPPED_NATIVE_TOKEN` should be set to a no-op wrapper. All native-token routing logic (`_wrapNativeToken`, `_unwrapNativeToken`, `receive()`, V4 settlement with `msg.value`) depends on this assumption.

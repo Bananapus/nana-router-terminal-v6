@@ -2,7 +2,7 @@
 
 This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
 
-## Audit Objective
+## Audit objective
 
 There is a billion dollars of well-meaning projects' money in the Juicebox Money Engine, growing exponentially. Your job is to hack it before anyone else. Whoever hacks it first saves/steals the money, and you are obsessed with being this winner, while also being a steward of the protocol and wanting it to keep growing safely.
 
@@ -30,13 +30,13 @@ Key dependencies:
 - `nana-core-v6`
 - Uniswap V3 and V4 integration surfaces
 
-## Start Here
+## Start here
 
 1. `src/JBRouterTerminal.sol`
 2. `src/JBRouterTerminalRegistry.sol`
 3. `src/libraries/JBSwapLib.sol`
 
-## Security Model
+## Security model
 
 The router terminal:
 
@@ -47,7 +47,7 @@ The router terminal:
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
 
-## Roles And Privileges
+## Roles and privileges
 
 | Role | Powers | How constrained |
 |------|--------|-----------------|
@@ -55,7 +55,7 @@ The registry chooses which router terminal instance a project uses and whether t
 | Registry controller | Set default or allowed router terminals | Must not redirect projects unexpectedly |
 | Router terminal | Hold funds only transiently during routing | Must not retain leftovers across flows |
 
-## Integration Assumptions
+## Integration assumptions
 
 | Dependency | Assumption | What breaks if wrong |
 |------------|------------|----------------------|
@@ -63,7 +63,7 @@ The registry chooses which router terminal instance a project uses and whether t
 | Uniswap V3 and V4 | Callback settlement and pool discovery are authentic | Slippage and final forwarded amount diverge |
 | Permit2 | Allowances and deadlines reflect user intent | Unauthorized transfer or stuck routing behavior |
 
-## Critical Invariants
+## Critical invariants
 
 1. User intent is preserved.  
    The actual destination project, beneficiary, minimum output semantics, and refund recipient must match the request and metadata.
@@ -74,7 +74,7 @@ The registry chooses which router terminal instance a project uses and whether t
 4. Registry controls stay narrow.  
    Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
 
-## Attack Surfaces
+## Attack surfaces
 
 - payment entrypoints and refund logic
 - V3 callback verification
