@@ -13,7 +13,7 @@
 - [AUDIT_INSTRUCTIONS.md](./AUDIT_INSTRUCTIONS.md) — scope, attack surfaces, and verification steps for auditors.
 - [SKILLS.md](./SKILLS.md) — agent-oriented index pointing at the right file or contract for a given task.
 - [STYLE_GUIDE.md](./STYLE_GUIDE.md) — Solidity and repo-layout conventions used across the V6 ecosystem.
-- [CHANGELOG.md](./CHANGELOG.md) — v5 → v6 migration notes and in-v6 behavior changes for integrators.
+- [CHANGELOG.md](./CHANGELOG.md) - V5 swap-terminal to V6 router-terminal migration changelog.
 
 ## Overview
 
