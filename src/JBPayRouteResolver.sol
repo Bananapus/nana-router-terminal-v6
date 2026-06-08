@@ -282,10 +282,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             // Decode the buyback hook's routing metadata. When the hook mints in `afterPayRecordedWith`, the terminal
             // preview returns zero token counts and the router must score the route from the hook's commitments.
             (
-                ,
+                bool projectTokenIs0,
                 uint256 amountToMintWith,
-                uint256 minimumSwapAmountOut,,,
-                uint256 tokenCountWithoutHook,,,,,
+                uint256 minimumSwapAmountOut,
+                bool hasExplicitMinimumSwapAmountOut,
+                address controller,
+                uint256 tokenCountWithoutHook,
+                uint256 weightRatio,
+                uint256 quotedAmountToSwapWith,
+                int24 twapTick,
+                uint128 twapLiquidity,
+                bytes32 poolId,
                 uint256 minimumBeneficiaryTokenCount,
                 uint256 minimumReservedTokenCount,
                 uint256 rawSwapQuote
@@ -299,6 +306,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     address,
                     uint256,
                     uint256,
+                    uint256,
                     int24,
                     uint128,
                     bytes32,
@@ -307,6 +315,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     uint256
                 )
             );
+            projectTokenIs0;
+            hasExplicitMinimumSwapAmountOut;
+            controller;
+            weightRatio;
+            quotedAmountToSwapWith;
+            twapTick;
+            twapLiquidity;
+            poolId;
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
             // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
