@@ -317,6 +317,7 @@ contract JBRouterTerminal is
         payable
         override
     {
+        // Preserve the caller's quote mode while this entrypoint scopes its own routing rules.
         bool previousStrictSwapQuote = _strictSwapQuote;
 
         // This leg settles via `addToBalanceOf`, which has no `minReturnedTokens` (or any downstream) backstop, so a
@@ -366,6 +367,7 @@ contract JBRouterTerminal is
             isForwarding: isForwarding
         });
 
+        // Restore the caller's quote mode for any nested routing scope that continues after this call.
         _strictSwapQuote = previousStrictSwapQuote;
     }
 
@@ -415,6 +417,7 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
+        // Preserve the caller's quote mode while this entrypoint scopes its own routing rules.
         bool previousStrictSwapQuote = _strictSwapQuote;
 
         // The top-level `minReturnedTokens` guards the entire routed result end-to-end (a bad intermediate swap
@@ -458,6 +461,7 @@ contract JBRouterTerminal is
         // pay(), making a balance-delta check produce false reverts. Fee-on-transfer (FOT) tokens
         // are therefore NOT supported for routed payments — the terminal will receive fewer tokens
         // than `amount` but the router cannot detect or prevent this. See RISKS.md for details.
+        // Restore the caller's quote mode for any nested routing scope that continues after this call.
         _strictSwapQuote = previousStrictSwapQuote;
     }
 
