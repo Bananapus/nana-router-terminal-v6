@@ -757,6 +757,23 @@ contract RouterTerminalHarness is JBRouterTerminal {
         _strictSwapQuote = strict;
         (minAmountOut,) = _pickPoolAndQuote(metadata, normalizedTokenIn, amount, normalizedTokenOut);
     }
+
+    /// @dev Models an outer strict leg that is interrupted by a successful `pay` call.
+    function exposedStrictThenPay(uint256 projectId) external returns (bool strictAfterPay) {
+        _strictSwapQuote = true;
+
+        this.pay({
+            projectId: projectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: 0,
+            beneficiary: msg.sender,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        strictAfterPay = _strictSwapQuote;
+    }
 }
 
 contract RouterTerminalTest is Test {
@@ -2683,6 +2700,21 @@ contract RouterTerminalTest is Test {
         );
         uint256 strictQuoted = routerTerminal.exposedPickPoolAndQuote(metadata, tokenIn, amount, tokenOut, true);
         assertEq(strictQuoted, 123, "strict leg with a caller quote uses it");
+    }
+
+    function test_strictSwapQuote_successfulPayRestoresOuterStrictQuoteMode() public {
+        uint256 projectId = 1;
+
+        MockPreviewDestTerminal destTerminal = new MockPreviewDestTerminal(JBConstants.NATIVE_TOKEN, 1);
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, JBConstants.NATIVE_TOKEN)),
+            abi.encode(address(destTerminal))
+        );
+
+        bool strictAfterPay = routerTerminal.exposedStrictThenPay(projectId);
+
+        assertTrue(strictAfterPay, "successful nested pay should restore the outer strict quote mode");
     }
 
     function test_discoverPool_noPoolManager() public {
