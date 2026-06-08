@@ -317,6 +317,8 @@ contract JBRouterTerminal is
         payable
         override
     {
+        bool previousStrictSwapQuote = _strictSwapQuote;
+
         // This leg settles via `addToBalanceOf`, which has no `minReturnedTokens` (or any downstream) backstop, so a
         // quote-less swap must not silently price against a manipulable spot. Require a manipulation-resistant source
         // (a canonical-hook V4 oracle, a V3 TWAP) or an explicit `pay` quote — see `_getV4SpotQuote`.
@@ -363,6 +365,8 @@ contract JBRouterTerminal is
             receiptBaseline: terminalReceiptBaseline,
             isForwarding: isForwarding
         });
+
+        _strictSwapQuote = previousStrictSwapQuote;
     }
 
     /// @notice Empty implementation to satisfy the interface. This terminal has no balance to migrate.
@@ -411,6 +415,8 @@ contract JBRouterTerminal is
         override
         returns (uint256 beneficiaryTokenCount)
     {
+        bool previousStrictSwapQuote = _strictSwapQuote;
+
         // The top-level `minReturnedTokens` guards the entire routed result end-to-end (a bad intermediate swap
         // yields fewer final tokens and reverts here), so this leg may use the bounded spot-quote convenience path.
         _strictSwapQuote = false;
@@ -452,6 +458,7 @@ contract JBRouterTerminal is
         // pay(), making a balance-delta check produce false reverts. Fee-on-transfer (FOT) tokens
         // are therefore NOT supported for routed payments — the terminal will receive fewer tokens
         // than `amount` but the router cannot detect or prevent this. See RISKS.md for details.
+        _strictSwapQuote = previousStrictSwapQuote;
     }
 
     /// @notice One-shot setter for the chain-specific Uniswap and wrapped-native addresses.
