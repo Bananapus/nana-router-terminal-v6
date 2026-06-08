@@ -66,9 +66,7 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @return length The number of entries in the default-terminal history.
     function defaultTerminalHistoryLength() external view returns (uint256 length);
 
-    /// @notice The `PROJECTS.count()` snapshot at the moment of the most recent `setDefaultTerminal`. Projects with
-    /// ID <= this threshold do NOT fall through to `defaultTerminal`; they fall through to the historical entry that
-    /// covers their ID range.
+    /// @notice The `PROJECTS.count()` snapshot at the latest `setDefaultTerminal`, used for historical fall-through.
     /// @return threshold The project-ID threshold beyond which `defaultTerminal` applies on fall-through.
     function defaultTerminalProjectIdThreshold() external view returns (uint256 threshold);
 

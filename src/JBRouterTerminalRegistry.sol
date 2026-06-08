@@ -800,8 +800,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return 0;
     }
 
-    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 as a
-    /// fallback.
+    /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 fallback.
     /// @param from The address to transfer tokens from.
     /// @param to The address to transfer tokens to.
     /// @param token The address of the token to transfer.
