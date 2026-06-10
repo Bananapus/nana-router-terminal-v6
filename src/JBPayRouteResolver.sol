@@ -28,29 +28,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
 
     //*********************************************************************//
-    // ----------------------------- structs ----------------------------- //
-    //*********************************************************************//
-
-    /// @notice Canonical buyback-hook pay metadata.
-    struct BuybackPayMetadata {
-        bool projectTokenIs0;
-        uint256 amountToMintWith;
-        uint256 minimumSwapAmountOut;
-        bool hasUserSpecifiedQuote;
-        address controller;
-        uint256 tokenCountWithoutHook;
-        uint256 weightRatio;
-        uint256 quotedAmountToSwapWith;
-        int24 twapTick;
-        uint128 twapLiquidity;
-        bytes32 poolId;
-        uint256 minimumBeneficiaryTokenCount;
-        uint256 minimumReservedTokenCount;
-        uint256 rawSwapQuote;
-        bool oracleUnseeded;
-    }
-
-    //*********************************************************************//
     // --------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
@@ -160,17 +137,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 ++i;
             }
         }
-    }
-
-    /// @notice Decode canonical buyback-hook pay metadata fields used by route scoring.
-    /// @param metadata The metadata returned by the buyback hook's pay hook specification.
-    /// @return decoded The decoded canonical metadata.
-    function _decodeBuybackPayMetadata(bytes memory metadata)
-        internal
-        pure
-        returns (BuybackPayMetadata memory decoded)
-    {
-        decoded = abi.decode(metadata, (BuybackPayMetadata));
     }
 
     /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with `tokenIn`.
@@ -305,29 +271,48 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            BuybackPayMetadata memory buybackMetadata = _decodeBuybackPayMetadata(specification.metadata);
+            // Read the canonical 15-word static pay metadata tuple emitted by the published buyback hook.
+            bytes memory hookMetadata = specification.metadata;
+            if (hookMetadata.length < 15 * 32) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
+            uint256 amountToMintWith;
+            uint256 minimumSwapAmountOut;
+            uint256 tokenCountWithoutHook;
+            uint256 minimumBeneficiaryTokenCount;
+            uint256 minimumReservedTokenCount;
+            uint256 rawSwapQuote;
+            uint256 oracleUnseededWord;
+            assembly ("memory-safe") {
+                amountToMintWith := mload(add(hookMetadata, 0x40))
+                minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
+                tokenCountWithoutHook := mload(add(hookMetadata, 0xc0))
+                minimumBeneficiaryTokenCount := mload(add(hookMetadata, 0x180))
+                minimumReservedTokenCount := mload(add(hookMetadata, 0x1a0))
+                rawSwapQuote := mload(add(hookMetadata, 0x1c0))
+                oracleUnseededWord := mload(add(hookMetadata, 0x1e0))
+            }
+            bool oracleUnseeded = oracleUnseededWord != 0;
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
             // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
             // amount so the router compares a whole-route token count against ordinary terminal previews.
             uint256 directMintTokenCount;
-            if (
-                buybackMetadata.amountToMintWith != 0 && specification.amount != 0
-                    && buybackMetadata.tokenCountWithoutHook != 0
-            ) {
-                directMintTokenCount = mulDiv({
-                    x: buybackMetadata.amountToMintWith,
-                    y: buybackMetadata.tokenCountWithoutHook,
-                    denominator: specification.amount
-                });
+            if (amountToMintWith != 0 && specification.amount != 0 && tokenCountWithoutHook != 0) {
+                directMintTokenCount =
+                    mulDiv({x: amountToMintWith, y: tokenCountWithoutHook, denominator: specification.amount});
             }
 
             // Score the executable floor first. This supports callers that only provide a minimum and no live quote.
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                tokenCount: buybackMetadata.minimumSwapAmountOut + directMintTokenCount,
-                referenceTokenCount: buybackMetadata.minimumSwapAmountOut,
-                referenceBeneficiaryTokenCount: buybackMetadata.minimumBeneficiaryTokenCount,
-                referenceReservedTokenCount: buybackMetadata.minimumReservedTokenCount
+                tokenCount: minimumSwapAmountOut + directMintTokenCount,
+                referenceTokenCount: minimumSwapAmountOut,
+                referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
+                referenceReservedTokenCount: minimumReservedTokenCount
             });
             (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
                 currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
@@ -338,14 +323,13 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
             // If the hook also surfaced a stronger TWAP-backed live quote, score it too. When the buyback hook reports
             // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the executable floor is trusted.
-            bool hasTrustedRawQuote =
-                !buybackMetadata.oracleUnseeded && buybackMetadata.rawSwapQuote > buybackMetadata.minimumSwapAmountOut;
+            bool hasTrustedRawQuote = !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut;
             if (hasTrustedRawQuote) {
                 (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                    tokenCount: buybackMetadata.rawSwapQuote + directMintTokenCount,
-                    referenceTokenCount: buybackMetadata.minimumSwapAmountOut,
-                    referenceBeneficiaryTokenCount: buybackMetadata.minimumBeneficiaryTokenCount,
-                    referenceReservedTokenCount: buybackMetadata.minimumReservedTokenCount
+                    tokenCount: rawSwapQuote + directMintTokenCount,
+                    referenceTokenCount: minimumSwapAmountOut,
+                    referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
+                    referenceReservedTokenCount: minimumReservedTokenCount
                 });
                 (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
                     currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
