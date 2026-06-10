@@ -100,7 +100,7 @@ contract ConservativeBuybackPreviewTerminal {
             metadata: abi.encode(
                 false,
                 uint256(0),
-                uint256(0),
+                MINIMUM_BENEFICIARY_TOKEN_COUNT,
                 false,
                 address(0),
                 uint256(0),
@@ -111,7 +111,8 @@ contract ConservativeBuybackPreviewTerminal {
                 PoolId.wrap(bytes32(0)),
                 MINIMUM_BENEFICIARY_TOKEN_COUNT,
                 uint256(0),
-                RAW_SWAP_QUOTE
+                RAW_SWAP_QUOTE,
+                false
             )
         });
     }

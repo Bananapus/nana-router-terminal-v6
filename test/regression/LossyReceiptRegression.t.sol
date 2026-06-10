@@ -43,12 +43,27 @@ contract FeeOnTransferToken is ERC20 {
     }
 }
 
+/// @notice A standard ERC-20 used to prove surplus terminal receipts are not lossy.
+contract StandardReceiptToken is ERC20 {
+    constructor() ERC20("Standard Receipt", "STD") {}
+
+    function mint(address account, uint256 amount) external {
+        _mint(account, amount);
+    }
+}
+
+interface IMintableReceiptToken {
+    function mint(address account, uint256 amount) external;
+}
+
 /// @notice A minimal terminal that pulls ERC-20 via transferFrom in both pay() and addToBalanceOf().
 contract PullingTerminal is IJBTerminal {
     IERC20 public immutable TOKEN;
+    uint256 public immutable SURPLUS_AMOUNT;
 
-    constructor(IERC20 token_) {
+    constructor(IERC20 token_, uint256 surplusAmount_) {
         TOKEN = token_;
+        SURPLUS_AMOUNT = surplusAmount_;
     }
 
     function accountingContextForTokenOf(uint256, address token_) external pure returns (JBAccountingContext memory) {
@@ -69,6 +84,7 @@ contract PullingTerminal is IJBTerminal {
     function addToBalanceOf(uint256, address, uint256 amount, bool, string calldata, bytes calldata) external payable {
         // Pull tokens from the router.
         require(TOKEN.transferFrom(msg.sender, address(this), amount));
+        if (SURPLUS_AMOUNT != 0) IMintableReceiptToken(address(TOKEN)).mint(address(this), SURPLUS_AMOUNT);
     }
 
     function previewPayFor(
@@ -112,6 +128,7 @@ contract PullingTerminal is IJBTerminal {
     {
         // Pull tokens from the router.
         require(TOKEN.transferFrom(msg.sender, address(this), amount));
+        if (SURPLUS_AMOUNT != 0) IMintableReceiptToken(address(TOKEN)).mint(address(this), SURPLUS_AMOUNT);
         return 1;
     }
 
@@ -132,7 +149,7 @@ contract LossyReceiptRegressionTest is Test {
 
     function setUp() public {
         token = new FeeOnTransferToken();
-        terminal = new PullingTerminal(IERC20(address(token)));
+        terminal = new PullingTerminal({token_: IERC20(address(token)), surplusAmount_: 0});
 
         address directory = address(0xD1);
         address tokens = address(0x70);
@@ -193,6 +210,40 @@ contract LossyReceiptRegressionTest is Test {
             metadata: ""
         });
         vm.stopPrank();
+    }
+
+    /// @notice addToBalanceOf permits benign surplus receipts while still rejecting shortfalls.
+    function test_addToBalanceOf_allowsTerminalReceiptSurplus() external {
+        StandardReceiptToken standardToken = new StandardReceiptToken();
+        PullingTerminal surplusTerminal =
+            new PullingTerminal({token_: IERC20(address(standardToken)), surplusAmount_: 1});
+
+        vm.mockCall(
+            address(router.DIRECTORY()),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(standardToken))),
+            abi.encode(address(surplusTerminal))
+        );
+        vm.mockCall(
+            address(router.TOKENS()),
+            abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(address(standardToken)))),
+            abi.encode(uint256(0))
+        );
+
+        standardToken.mint(payer, AMOUNT);
+
+        vm.startPrank(payer);
+        standardToken.approve(address(router), AMOUNT);
+        router.addToBalanceOf({
+            projectId: PROJECT_ID,
+            token: address(standardToken),
+            amount: AMOUNT,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+        vm.stopPrank();
+
+        assertEq(standardToken.balanceOf(address(surplusTerminal)), AMOUNT + 1, "surplus receipt should remain");
     }
 
     /// @notice pay() does not revert for lossy tokens because the pay path skips receipt enforcement.

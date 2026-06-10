@@ -1158,7 +1158,7 @@ contract RouterTerminalTest is Test {
     // ----------------------- callback tests --------------------------- //
     //*********************************************************************//
 
-    function test_callback_factoryVerified() public {
+    function test_callback_rejectsFactoryVerifiedPoolOutsideRouterSwap() public {
         address tokenIn = makeAddr("tokenIn");
         address tokenOut = makeAddr("tokenOut");
         address realPool = makeAddr("realPool");
@@ -1180,8 +1180,8 @@ contract RouterTerminalTest is Test {
 
         bytes memory data = abi.encode(uint256(1), tokenIn, tokenOut);
 
-        // Call from the real pool — should succeed.
         vm.prank(realPool);
+        vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, realPool));
         routerTerminal.uniswapV3SwapCallback(int256(-200), int256(100), data);
     }
 
@@ -1950,6 +1950,71 @@ contract RouterTerminalTest is Test {
         assertEq(reservedTokenCount, 7);
         assertEq(returnedSpecs.length, 1);
         assertEq(address(returnedSpecs[0].hook), buybackHook);
+    }
+
+    function test_previewPayFor_ignoresRawBuybackQuoteWhenOracleUnseeded() public {
+        uint256 projectId = 1;
+        address tokenIn = makeAddr("coldStartBuybackTokenIn");
+        address beneficiary = makeAddr("coldStartBuybackBeneficiary");
+        address destTerminal = makeAddr("coldStartBuybackDestTerminal");
+        vm.etch(destTerminal, hex"00");
+        vm.etch(buybackHook, hex"00");
+
+        vm.mockCall(
+            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(tokenIn))), abi.encode(uint256(0))
+        );
+
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(destTerminal);
+        vm.mockCall(
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
+            abi.encode(destTerminal)
+        );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
+        JBPayHookSpecification[] memory hookSpecifications = _buybackPayHookSpecificationsWithDiagnostics({
+            hook: buybackHook,
+            minimumSwapAmountOut: 80,
+            minimumBeneficiaryTokenCount: 80,
+            minimumReservedTokenCount: 0,
+            rawSwapQuote: 200,
+            oracleUnseeded: true
+        });
+
+        vm.mockCall(
+            destTerminal,
+            abi.encodeCall(IJBTerminal.previewPayFor, (projectId, tokenIn, 100, beneficiary, bytes(""))),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 112,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(0),
+                uint256(0),
+                hookSpecifications
+            )
+        );
+
+        (, uint256 beneficiaryTokenCount, uint256 reservedTokenCount,) =
+            routerTerminal.previewPayFor(projectId, tokenIn, 100, beneficiary, "");
+
+        assertEq(beneficiaryTokenCount, 80, "unseeded raw quote should not score the route");
+        assertEq(reservedTokenCount, 0);
     }
 
     function test_previewPayFor_prefersRouteWithHigherBuybackHookOutput() public {
@@ -2834,7 +2899,7 @@ contract RouterTerminalTest is Test {
             metadata: abi.encode(
                 false,
                 uint256(0),
-                uint256(0),
+                minimumBeneficiaryTokenCount + minimumReservedTokenCount,
                 false,
                 address(0),
                 uint256(0),
@@ -2845,7 +2910,45 @@ contract RouterTerminalTest is Test {
                 PoolId.wrap(bytes32(0)),
                 minimumBeneficiaryTokenCount,
                 minimumReservedTokenCount,
-                uint256(0)
+                uint256(0),
+                false
+            )
+        });
+    }
+
+    function _buybackPayHookSpecificationsWithDiagnostics(
+        address hook,
+        uint256 minimumSwapAmountOut,
+        uint256 minimumBeneficiaryTokenCount,
+        uint256 minimumReservedTokenCount,
+        uint256 rawSwapQuote,
+        bool oracleUnseeded
+    )
+        internal
+        pure
+        returns (JBPayHookSpecification[] memory specifications)
+    {
+        specifications = new JBPayHookSpecification[](1);
+        specifications[0] = JBPayHookSpecification({
+            hook: IJBPayHook(hook),
+            noop: false,
+            amount: 0,
+            metadata: abi.encode(
+                false,
+                uint256(0),
+                minimumSwapAmountOut,
+                false,
+                address(0),
+                uint256(0),
+                uint256(0),
+                uint256(0),
+                int24(0),
+                uint128(0),
+                PoolId.wrap(bytes32(0)),
+                minimumBeneficiaryTokenCount,
+                minimumReservedTokenCount,
+                rawSwapQuote,
+                oracleUnseeded
             )
         });
     }

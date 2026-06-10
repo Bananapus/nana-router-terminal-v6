@@ -391,7 +391,7 @@ contract DeployBuybackHookZeroTest is Test {
             metadata: abi.encode(
                 false,
                 uint256(0),
-                uint256(0),
+                minimumBeneficiaryTokenCount + minimumReservedTokenCount,
                 false,
                 address(0),
                 uint256(0),
@@ -402,7 +402,8 @@ contract DeployBuybackHookZeroTest is Test {
                 PoolId.wrap(bytes32(0)),
                 minimumBeneficiaryTokenCount,
                 minimumReservedTokenCount,
-                uint256(0)
+                uint256(0),
+                false
             )
         });
     }

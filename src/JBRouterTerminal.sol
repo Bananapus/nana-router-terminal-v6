@@ -242,6 +242,10 @@ contract JBRouterTerminal is
     /// Off-chain previews leave it at its default (false), so estimates still resolve. Transient, so it auto-clears.
     bool internal transient _strictSwapQuote;
 
+    /// @notice The V3 pool currently authorized to call `uniswapV3SwapCallback`.
+    /// @dev Set immediately before `pool.swap` and cleared after the synchronous callback completes.
+    address internal transient _v3ExpectedPool;
+
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
@@ -493,22 +497,18 @@ contract JBRouterTerminal is
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
-    /// @dev Verifies the caller is a legitimate pool via the factory using the encoded tokenIn/tokenOut pair.
+    /// @dev Only the pool synchronously entered by `_executeV3Swap` can call this callback.
     /// @param amount0Delta The amount of token 0 used for the swap.
     /// @param amount1Delta The amount of token 1 used for the swap.
     /// @param data Data passed in by the swap operation: abi.encode(projectId, tokenIn, tokenOut).
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
+        if (msg.sender != _v3ExpectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
+
         // Unpack the data from the original swap config.
-        (, address tokenIn, address tokenOut) = abi.decode(data, (uint256, address, address));
+        (, address tokenIn,) = abi.decode(data, (uint256, address, address));
 
         // Normalize tokens (wrap native token if needed).
         address normalizedTokenIn = _normalize(tokenIn);
-        address normalizedTokenOut = _normalize(tokenOut);
-
-        // Verify caller is a legitimate pool via the factory.
-        uint24 fee = IUniswapV3Pool(msg.sender).fee();
-        address expectedPool = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: fee});
-        if (msg.sender != expectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -1059,7 +1059,7 @@ contract JBRouterTerminal is
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
         uint256 actualAmount = IERC20(token).balanceOf(address(terminal)) - receiptBaseline;
-        if (actualAmount != expectedAmount) {
+        if (actualAmount < expectedAmount) {
             revert JBRouterTerminal_NonStandardTerminalToken({
                 terminal: address(terminal), token: token, expectedAmount: expectedAmount, actualAmount: actualAmount
             });
@@ -1461,6 +1461,8 @@ contract JBRouterTerminal is
         // Use extreme sqrtPriceLimitX96 values to allow the swap to execute fully. Slippage is enforced
         // by the post-swap minAmountOut check below, which is more correct than deriving a price limit
         // from average execution rate.
+        // Authorize this pool for the synchronous callback window opened by `swap`.
+        _v3ExpectedPool = address(pool);
         (int256 amount0, int256 amount1) = pool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
@@ -1469,6 +1471,8 @@ contract JBRouterTerminal is
             sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             data: callbackData
         });
+        // Close the callback window before enforcing realized output.
+        _v3ExpectedPool = address(0);
 
         // Uniswap returns signed deltas for both sides of the swap. The output side is negative because the
         // pool sent tokens out to the router, so negate the selected leg to recover the positive amount received.
@@ -2200,7 +2204,15 @@ contract JBRouterTerminal is
             }
 
             IJBCashOutTerminal terminal = IJBCashOutTerminal(address(terminals[i]));
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(sourceProjectId);
+            JBAccountingContext[] memory contexts;
+            try terminals[i].accountingContextsOf(sourceProjectId) returns (JBAccountingContext[] memory ctx) {
+                contexts = ctx;
+            } catch {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             for (uint256 j; j < contexts.length;) {
                 address contextToken = contexts[j].token;

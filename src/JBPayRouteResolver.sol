@@ -28,6 +28,29 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     error JBRouterTerminal_NoRouteFound(uint256 projectId, address tokenIn);
 
     //*********************************************************************//
+    // ----------------------------- structs ----------------------------- //
+    //*********************************************************************//
+
+    /// @notice Canonical buyback-hook pay metadata.
+    struct BuybackPayMetadata {
+        bool projectTokenIs0;
+        uint256 amountToMintWith;
+        uint256 minimumSwapAmountOut;
+        bool hasUserSpecifiedQuote;
+        address controller;
+        uint256 tokenCountWithoutHook;
+        uint256 weightRatio;
+        uint256 quotedAmountToSwapWith;
+        int24 twapTick;
+        uint128 twapLiquidity;
+        bytes32 poolId;
+        uint256 minimumBeneficiaryTokenCount;
+        uint256 minimumReservedTokenCount;
+        uint256 rawSwapQuote;
+        bool oracleUnseeded;
+    }
+
+    //*********************************************************************//
     // --------------- public immutable stored properties --------------- //
     //*********************************************************************//
 
@@ -139,6 +162,17 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         }
     }
 
+    /// @notice Decode canonical buyback-hook pay metadata fields used by route scoring.
+    /// @param metadata The metadata returned by the buyback hook's pay hook specification.
+    /// @return decoded The decoded canonical metadata.
+    function _decodeBuybackPayMetadata(bytes memory metadata)
+        internal
+        pure
+        returns (BuybackPayMetadata memory decoded)
+    {
+        decoded = abi.decode(metadata, (BuybackPayMetadata));
+    }
+
     /// @notice Search a project's terminals for an accepted token that has a Uniswap pool with `tokenIn`.
     /// @dev Falls back to the first accepted token if no pool exists.
     /// @param router The router whose normalization and pool-discovery helpers should be used.
@@ -158,20 +192,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        // Use the constructor-cached directory so fallback candidates can be resolved back to their primary terminals.
-        IJBDirectory directory = DIRECTORY;
-
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
-        address normalizedTokenIn = _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenIn});
+        tokenIn = _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenIn});
 
         // Read the destination project's currently known terminals directly from the directory.
-        IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
+        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(projectId);
 
         // Track the best liquidity discovered so far across all accepted candidate tokens.
         uint128 bestLiquidity;
-
-        // Track whether any acceptable fallback token has been seen in case no pool exists at all.
-        bool hasFallback;
 
         for (uint256 i; i < terminals.length;) {
             // Read each terminal's accepted accounting contexts so the scorer can inspect every candidate token.
@@ -192,11 +220,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address candidateToken = contexts[j].token;
 
                 // Normalize the candidate so native-vs-wrapped comparisons behave the same as the router.
-                address normalizedCandidate =
-                    _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken});
-
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
-                if (normalizedCandidate == normalizedTokenIn) {
+                if (_normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken}) == tokenIn) {
                     unchecked {
                         ++j;
                     }
@@ -206,7 +231,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 // Resolve the candidate token back to its usable primary terminal so discovery agrees with
                 // preview/execution terminal selection.
                 IJBTerminal candidateTerminal = _usablePrimaryTerminalForCandidate({
-                    router: router, directory: directory, projectId: projectId, candidateToken: candidateToken
+                    router: router, directory: DIRECTORY, projectId: projectId, candidateToken: candidateToken
                 });
                 if (address(candidateTerminal) == address(0)) {
                     unchecked {
@@ -216,15 +241,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 }
 
                 // Keep the first viable candidate as a fallback in case no pool-backed route exists.
-                if (!hasFallback) {
+                if (address(destTerminal) == address(0)) {
                     tokenOut = candidateToken;
                     destTerminal = candidateTerminal;
-                    hasFallback = true;
                 }
 
                 // Compare candidate pools by the router's discovered-liquidity heuristic.
-                uint128 candidateLiquidity =
-                    router.bestPoolLiquidityOf({tokenA: normalizedTokenIn, tokenB: normalizedCandidate});
+                uint128 candidateLiquidity = router.bestPoolLiquidityOf({
+                    tokenA: tokenIn,
+                    tokenB: _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken})
+                });
                 if (candidateLiquidity > bestLiquidity) {
                     // Replace the fallback with the candidate backed by the deepest discovered pool so far.
                     bestLiquidity = candidateLiquidity;
@@ -279,66 +305,29 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Decode the buyback hook's routing metadata. When the hook mints in `afterPayRecordedWith`, the terminal
-            // preview returns zero token counts and the router must score the route from the hook's commitments.
-            (
-                bool projectTokenIs0,
-                uint256 amountToMintWith,
-                uint256 minimumSwapAmountOut,
-                bool hasExplicitMinimumSwapAmountOut,
-                address controller,
-                uint256 tokenCountWithoutHook,
-                uint256 weightRatio,
-                uint256 quotedAmountToSwapWith,
-                int24 twapTick,
-                uint128 twapLiquidity,
-                bytes32 poolId,
-                uint256 minimumBeneficiaryTokenCount,
-                uint256 minimumReservedTokenCount,
-                uint256 rawSwapQuote
-            ) = abi.decode(
-                specification.metadata,
-                (
-                    bool,
-                    uint256,
-                    uint256,
-                    bool,
-                    address,
-                    uint256,
-                    uint256,
-                    uint256,
-                    int24,
-                    uint128,
-                    bytes32,
-                    uint256,
-                    uint256,
-                    uint256
-                )
-            );
-            projectTokenIs0;
-            hasExplicitMinimumSwapAmountOut;
-            controller;
-            weightRatio;
-            quotedAmountToSwapWith;
-            twapTick;
-            twapLiquidity;
-            poolId;
+            BuybackPayMetadata memory buybackMetadata = _decodeBuybackPayMetadata(specification.metadata);
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
             // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
             // amount so the router compares a whole-route token count against ordinary terminal previews.
             uint256 directMintTokenCount;
-            if (amountToMintWith != 0 && specification.amount != 0 && tokenCountWithoutHook != 0) {
-                directMintTokenCount =
-                    mulDiv({x: amountToMintWith, y: tokenCountWithoutHook, denominator: specification.amount});
+            if (
+                buybackMetadata.amountToMintWith != 0 && specification.amount != 0
+                    && buybackMetadata.tokenCountWithoutHook != 0
+            ) {
+                directMintTokenCount = mulDiv({
+                    x: buybackMetadata.amountToMintWith,
+                    y: buybackMetadata.tokenCountWithoutHook,
+                    denominator: specification.amount
+                });
             }
 
             // Score the executable floor first. This supports callers that only provide a minimum and no live quote.
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                tokenCount: minimumSwapAmountOut + directMintTokenCount,
-                referenceTokenCount: minimumSwapAmountOut,
-                referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
-                referenceReservedTokenCount: minimumReservedTokenCount
+                tokenCount: buybackMetadata.minimumSwapAmountOut + directMintTokenCount,
+                referenceTokenCount: buybackMetadata.minimumSwapAmountOut,
+                referenceBeneficiaryTokenCount: buybackMetadata.minimumBeneficiaryTokenCount,
+                referenceReservedTokenCount: buybackMetadata.minimumReservedTokenCount
             });
             (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
                 currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
@@ -347,14 +336,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 candidateReservedTokenCount: candidateReservedTokenCount
             });
 
-            // If the hook also surfaced a stronger live quote, score it too. This lets programmatic buyback routes win
-            // when the expected executable output is better than the conservative minimum.
-            if (rawSwapQuote > minimumSwapAmountOut) {
+            // If the hook also surfaced a stronger TWAP-backed live quote, score it too. When the buyback hook reports
+            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the executable floor is trusted.
+            bool hasTrustedRawQuote =
+                !buybackMetadata.oracleUnseeded && buybackMetadata.rawSwapQuote > buybackMetadata.minimumSwapAmountOut;
+            if (hasTrustedRawQuote) {
                 (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                    tokenCount: rawSwapQuote + directMintTokenCount,
-                    referenceTokenCount: minimumSwapAmountOut,
-                    referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
-                    referenceReservedTokenCount: minimumReservedTokenCount
+                    tokenCount: buybackMetadata.rawSwapQuote + directMintTokenCount,
+                    referenceTokenCount: buybackMetadata.minimumSwapAmountOut,
+                    referenceBeneficiaryTokenCount: buybackMetadata.minimumBeneficiaryTokenCount,
+                    referenceReservedTokenCount: buybackMetadata.minimumReservedTokenCount
                 });
                 (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
                     currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
