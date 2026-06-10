@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
+import {JBUniswapV4HookData} from "@bananapus/univ4-router-v6/src/libraries/JBUniswapV4HookData.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -93,7 +94,8 @@ contract HookDataEncodingTest is Test {
         );
     }
 
-    /// @notice When a hooked V4 pool is used, hookData must contain abi.encode(minAmountOut).
+    /// @notice When a hooked V4 pool is used, hookData must be the tagged minimum the hook reads:
+    /// `JBUniswapV4HookData.TAG ++ abi.encode(minAmountOut)`.
     function test_hookData_containsMinAmountOut_whenHooksConfigured() public {
         // Build a pool key with hooks.
         PoolKey memory key = PoolKey({
@@ -121,9 +123,11 @@ contract HookDataEncodingTest is Test {
         // Verify swap was called.
         assertTrue(poolManager.swapCalled(), "swap should have been called");
 
-        // The key assertion: hookData should contain abi.encode(minAmountOut), not be empty.
-        bytes memory expectedHookData = abi.encode(minAmountOut);
-        assertEq(poolManager.capturedHookData(), expectedHookData, "hookData must encode minAmountOut for hooked pools");
+        // The key assertion: hookData is the tagged minimum the hook reads, not empty and not bare.
+        bytes memory expectedHookData = abi.encodePacked(JBUniswapV4HookData.TAG, abi.encode(minAmountOut));
+        assertEq(
+            poolManager.capturedHookData(), expectedHookData, "hookData must be tagged minAmountOut for hooked pools"
+        );
     }
 
     /// @notice When a pool has no hooks (address(0)), hookData should remain empty.
