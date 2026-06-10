@@ -131,7 +131,7 @@ script/
 - swap previews are best-effort estimates and depend on current pool state plus caller-supplied quote data
 - recursive cash-out routing increases complexity when the input token is itself a Juicebox project token
 - slippage and sandwich resistance depend on the quality of the chosen quote path
-- `addToBalanceOf` rejects lossy terminal pulls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
+- `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
 

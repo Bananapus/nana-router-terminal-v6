@@ -71,6 +71,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         JBAccountingContext[][] memory allContexts = new JBAccountingContext[][](terminals.length);
         uint256 totalContexts;
         for (uint256 i; i < terminals.length;) {
+            // Codeless terminal entries return empty data, whose decode failure is not caught by try/catch.
+            if (address(terminals[i]).code.length == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
             // Wrap in try/catch so a single reverting terminal does not DoS the entire route enumeration.
             try terminals[i].accountingContextsOf(projectId) returns (JBAccountingContext[] memory ctx) {
                 allContexts[i] = ctx;
@@ -117,7 +125,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 }
 
                 // Skip tokens that no longer resolve to a primary terminal for this project.
-                if (address(directory.primaryTerminalOf({projectId: projectId, token: candidateToken})) == address(0)) {
+                if (
+                    address(_safePrimaryTerminalOf({directory: directory, projectId: projectId, token: candidateToken}))
+                        == address(0)
+                ) {
                     unchecked {
                         ++j;
                     }
@@ -158,22 +169,24 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         view
         returns (address tokenOut, IJBTerminal destTerminal)
     {
-        // Use the constructor-cached directory so fallback candidates can be resolved back to their primary terminals.
-        IJBDirectory directory = DIRECTORY;
-
         // Normalize the input token once so liquidity comparisons use the router's canonical token form.
-        address normalizedTokenIn = _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenIn});
+        tokenIn = _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenIn});
 
         // Read the destination project's currently known terminals directly from the directory.
-        IJBTerminal[] memory terminals = directory.terminalsOf(projectId);
+        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(projectId);
 
         // Track the best liquidity discovered so far across all accepted candidate tokens.
         uint128 bestLiquidity;
 
-        // Track whether any acceptable fallback token has been seen in case no pool exists at all.
-        bool hasFallback;
-
         for (uint256 i; i < terminals.length;) {
+            // Codeless terminal entries return empty data, whose decode failure is not caught by try/catch.
+            if (address(terminals[i]).code.length == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
             // Read each terminal's accepted accounting contexts so the scorer can inspect every candidate token.
             // Wrap in try/catch so a single reverting terminal does not DoS the entire route discovery.
             JBAccountingContext[] memory contexts;
@@ -192,11 +205,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 address candidateToken = contexts[j].token;
 
                 // Normalize the candidate so native-vs-wrapped comparisons behave the same as the router.
-                address normalizedCandidate =
-                    _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken});
-
                 // Skip tokens that are equivalent to the input token because they do not require route discovery.
-                if (normalizedCandidate == normalizedTokenIn) {
+                address normalizedCandidateToken =
+                    _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: candidateToken});
+                if (normalizedCandidateToken == tokenIn) {
                     unchecked {
                         ++j;
                     }
@@ -206,7 +218,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 // Resolve the candidate token back to its usable primary terminal so discovery agrees with
                 // preview/execution terminal selection.
                 IJBTerminal candidateTerminal = _usablePrimaryTerminalForCandidate({
-                    router: router, directory: directory, projectId: projectId, candidateToken: candidateToken
+                    router: router, directory: DIRECTORY, projectId: projectId, candidateToken: candidateToken
                 });
                 if (address(candidateTerminal) == address(0)) {
                     unchecked {
@@ -216,15 +228,14 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 }
 
                 // Keep the first viable candidate as a fallback in case no pool-backed route exists.
-                if (!hasFallback) {
+                if (address(destTerminal) == address(0)) {
                     tokenOut = candidateToken;
                     destTerminal = candidateTerminal;
-                    hasFallback = true;
                 }
 
                 // Compare candidate pools by the router's discovered-liquidity heuristic.
                 uint128 candidateLiquidity =
-                    router.bestPoolLiquidityOf({tokenA: normalizedTokenIn, tokenB: normalizedCandidate});
+                    router.bestPoolLiquidityOf({tokenA: tokenIn, tokenB: normalizedCandidateToken});
                 if (candidateLiquidity > bestLiquidity) {
                     // Replace the fallback with the candidate backed by the deepest discovered pool so far.
                     bestLiquidity = candidateLiquidity;
@@ -279,50 +290,32 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Decode the buyback hook's routing metadata. When the hook mints in `afterPayRecordedWith`, the terminal
-            // preview returns zero token counts and the router must score the route from the hook's commitments.
-            (
-                bool projectTokenIs0,
-                uint256 amountToMintWith,
-                uint256 minimumSwapAmountOut,
-                bool hasExplicitMinimumSwapAmountOut,
-                address controller,
-                uint256 tokenCountWithoutHook,
-                uint256 weightRatio,
-                uint256 quotedAmountToSwapWith,
-                int24 twapTick,
-                uint128 twapLiquidity,
-                bytes32 poolId,
-                uint256 minimumBeneficiaryTokenCount,
-                uint256 minimumReservedTokenCount,
-                uint256 rawSwapQuote
-            ) = abi.decode(
-                specification.metadata,
-                (
-                    bool,
-                    uint256,
-                    uint256,
-                    bool,
-                    address,
-                    uint256,
-                    uint256,
-                    uint256,
-                    int24,
-                    uint128,
-                    bytes32,
-                    uint256,
-                    uint256,
-                    uint256
-                )
-            );
-            projectTokenIs0;
-            hasExplicitMinimumSwapAmountOut;
-            controller;
-            weightRatio;
-            quotedAmountToSwapWith;
-            twapTick;
-            twapLiquidity;
-            poolId;
+            // Read the canonical 15-word static pay metadata tuple emitted by the published buyback hook.
+            bytes memory hookMetadata = specification.metadata;
+            if (hookMetadata.length < 15 * 32) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
+            uint256 amountToMintWith;
+            uint256 minimumSwapAmountOut;
+            uint256 tokenCountWithoutHook;
+            uint256 minimumBeneficiaryTokenCount;
+            uint256 minimumReservedTokenCount;
+            uint256 rawSwapQuote;
+            uint256 oracleUnseededWord;
+            assembly ("memory-safe") {
+                amountToMintWith := mload(add(hookMetadata, 0x40))
+                minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
+                tokenCountWithoutHook := mload(add(hookMetadata, 0xc0))
+                minimumBeneficiaryTokenCount := mload(add(hookMetadata, 0x180))
+                minimumReservedTokenCount := mload(add(hookMetadata, 0x1a0))
+                rawSwapQuote := mload(add(hookMetadata, 0x1c0))
+                oracleUnseededWord := mload(add(hookMetadata, 0x1e0))
+            }
+            bool oracleUnseeded = oracleUnseededWord != 0;
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
             // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
@@ -347,9 +340,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 candidateReservedTokenCount: candidateReservedTokenCount
             });
 
-            // If the hook also surfaced a stronger live quote, score it too. This lets programmatic buyback routes win
-            // when the expected executable output is better than the conservative minimum.
-            if (rawSwapQuote > minimumSwapAmountOut) {
+            // If the hook also surfaced a stronger TWAP-backed live quote, score it too. When the buyback hook reports
+            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the executable floor is trusted.
+            bool hasTrustedRawQuote = !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut;
+            if (hasTrustedRawQuote) {
                 (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
                     tokenCount: rawSwapQuote + directMintTokenCount,
                     referenceTokenCount: minimumSwapAmountOut,
@@ -686,7 +680,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             tokenOut = abi.decode(routeData, (address));
 
             // Resolve the primary terminal for the requested destination token.
-            destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            destTerminal = _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: tokenOut});
 
             // Reject missing or circular terminals so execution cannot preview an impossible route.
             if (
@@ -700,7 +694,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Next prefer a direct-acceptance route for the input token whenever the project already has a non-circular
         // terminal.
-        destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenIn});
+        destTerminal = _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: tokenIn});
         if (
             address(destTerminal) != address(0)
                 && !_isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
@@ -711,7 +705,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Then try the native-token and wrapped-native-token equivalent form before falling back to pool discovery.
         if (tokenIn == JBConstants.NATIVE_TOKEN || tokenIn == wrappedNativeToken) {
             tokenOut = tokenIn == JBConstants.NATIVE_TOKEN ? wrappedNativeToken : JBConstants.NATIVE_TOKEN;
-            destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            destTerminal = _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) != address(0)
                     && !_isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
@@ -731,6 +725,29 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
         ) {
             revert JBRouterTerminal_NoRouteFound({projectId: projectId, tokenIn: tokenIn});
+        }
+    }
+
+    /// @notice Best-effort primary-terminal lookup that degrades to address(0) if directory lookup reverts.
+    /// @param directory The directory storing project terminal relationships.
+    /// @param projectId The project whose primary terminal should be resolved.
+    /// @param token The token the primary terminal should accept.
+    /// @return terminal The primary terminal, or address(0) if lookup failed.
+    function _safePrimaryTerminalOf(
+        IJBDirectory directory,
+        uint256 projectId,
+        address token
+    )
+        internal
+        view
+        returns (IJBTerminal terminal)
+    {
+        // A directory primary lookup can inspect every registered terminal. If one of those probes reverts, treat the
+        // candidate as unavailable instead of letting one broken terminal brick route discovery.
+        try directory.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal resolvedTerminal) {
+            terminal = resolvedTerminal;
+        } catch {
+            terminal = IJBTerminal(address(0));
         }
     }
 
@@ -846,7 +863,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         returns (IJBTerminal candidateTerminal)
     {
         // Resolve the primary terminal for the candidate token so fallback discovery agrees with preview/execution.
-        candidateTerminal = directory.primaryTerminalOf({projectId: projectId, token: candidateToken});
+        candidateTerminal = _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: candidateToken});
 
         // Drop candidates whose primary terminal disappeared or would route straight back into the router.
         if (
@@ -912,7 +929,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             tokenOut = abi.decode(routeData, (address));
 
             // Resolve the primary terminal for the requested token-out candidate.
-            destTerminal = directory.primaryTerminalOf({projectId: projectId, token: tokenOut});
+            destTerminal = _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: tokenOut});
             if (
                 address(destTerminal) == address(0)
                     || _isCircularTerminal({router: router, projectId: projectId, terminal: destTerminal})
@@ -947,7 +964,10 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         for (uint256 i; i < candidateCount; i++) {
             // Resolve the current candidate token back into the terminal that would receive it.
             IJBTerminal candidateTerminal =
-                directory.primaryTerminalOf({projectId: projectId, token: candidateTokens[i]});
+                _safePrimaryTerminalOf({directory: directory, projectId: projectId, token: candidateTokens[i]});
+
+            // Skip candidates whose primary-terminal lookup failed.
+            if (address(candidateTerminal) == address(0)) continue;
 
             // Skip candidates that would obviously bounce straight back into the router.
             if (_isCircularTerminal({router: router, projectId: projectId, terminal: candidateTerminal})) continue;

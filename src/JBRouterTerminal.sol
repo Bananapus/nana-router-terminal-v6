@@ -15,6 +15,7 @@ import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashO
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {JBUniswapV4HookData} from "@bananapus/univ4-router-v6/src/libraries/JBUniswapV4HookData.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -241,6 +242,10 @@ contract JBRouterTerminal is
     /// which is synchronous and always precedes the swap's pool callbacks, so it reflects the originating entrypoint.
     /// Off-chain previews leave it at its default (false), so estimates still resolve. Transient, so it auto-clears.
     bool internal transient _strictSwapQuote;
+
+    /// @notice The V3 pool currently authorized to call `uniswapV3SwapCallback`.
+    /// @dev Set immediately before `pool.swap` and cleared after the synchronous callback completes.
+    address internal transient _v3ExpectedPool;
 
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
@@ -493,22 +498,18 @@ contract JBRouterTerminal is
     }
 
     /// @notice The Uniswap v3 pool callback where the token transfer is expected to happen.
-    /// @dev Verifies the caller is a legitimate pool via the factory using the encoded tokenIn/tokenOut pair.
+    /// @dev Only the pool synchronously entered by `_executeV3Swap` can call this callback.
     /// @param amount0Delta The amount of token 0 used for the swap.
     /// @param amount1Delta The amount of token 1 used for the swap.
-    /// @param data Data passed in by the swap operation: abi.encode(projectId, tokenIn, tokenOut).
+    /// @param data Data passed in by the swap operation: abi.encode(tokenIn).
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
-        // Unpack the data from the original swap config.
-        (, address tokenIn, address tokenOut) = abi.decode(data, (uint256, address, address));
+        if (msg.sender != _v3ExpectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
+
+        // Unpack the input token from the original swap config.
+        address tokenIn = abi.decode(data, (address));
 
         // Normalize tokens (wrap native token if needed).
         address normalizedTokenIn = _normalize(tokenIn);
-        address normalizedTokenOut = _normalize(tokenOut);
-
-        // Verify caller is a legitimate pool via the factory.
-        uint24 fee = IUniswapV3Pool(msg.sender).fee();
-        address expectedPool = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: fee});
-        if (msg.sender != expectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
         // Calculate the amount of tokens to send to the pool (the positive delta).
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -538,12 +539,16 @@ contract JBRouterTerminal is
         ) = abi.decode(data, (PoolKey, bool, int256, uint160, uint256, bool));
 
         // Execute the swap.
+        // Tag the minimum so a JBUniswapV4Hook pool reads and enforces it (the router also self-enforces below). The
+        // tag prevents the hook from mis-decoding a non-JB hook's payload as a minimum; a hookless pool gets no data.
         BalanceDelta delta = poolManager.swap({
             key: key,
             params: SwapParams({
                 zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
             }),
-            hookData: address(key.hooks) != address(0) ? abi.encode(minAmountOut) : bytes("")
+            hookData: address(key.hooks) != address(0)
+                ? abi.encodePacked(JBUniswapV4HookData.TAG, abi.encode(minAmountOut))
+                : bytes("")
         });
 
         // Determine input/output amounts from the delta.
@@ -1059,7 +1064,7 @@ contract JBRouterTerminal is
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
         uint256 actualAmount = IERC20(token).balanceOf(address(terminal)) - receiptBaseline;
-        if (actualAmount != expectedAmount) {
+        if (actualAmount < expectedAmount) {
             revert JBRouterTerminal_NonStandardTerminalToken({
                 terminal: address(terminal), token: token, expectedAmount: expectedAmount, actualAmount: actualAmount
             });
@@ -1087,7 +1092,13 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
+        // Primary-terminal discovery can call into every registered destination terminal. Treat a broken terminal in
+        // that list as "no usable terminal" for this candidate so one bad terminal cannot DoS route discovery.
+        try DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal resolvedTerminal) {
+            terminal = resolvedTerminal;
+        } catch {
+            return IJBTerminal(address(0));
+        }
 
         // Drop terminals that would route straight back into the router (circular).
         if (
@@ -1343,7 +1354,6 @@ contract JBRouterTerminal is
     /// @param tokenIn The token to convert from.
     /// @param tokenOut The token to convert into.
     /// @param amount The amount to convert.
-    /// @param projectId The project ID (passed through to swap callback data).
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `pay` swap quote).
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return The amount of tokenOut produced.
@@ -1351,7 +1361,6 @@ contract JBRouterTerminal is
         address tokenIn,
         address tokenOut,
         uint256 amount,
-        uint256 projectId,
         bytes calldata metadata,
         address payable refundTo,
         uint256 refundBalanceBaseline
@@ -1374,7 +1383,6 @@ contract JBRouterTerminal is
 
         // Different tokens — swap via Uniswap (V3 or V4).
         return _handleSwap({
-            projectId: projectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1461,6 +1469,8 @@ contract JBRouterTerminal is
         // Use extreme sqrtPriceLimitX96 values to allow the swap to execute fully. Slippage is enforced
         // by the post-swap minAmountOut check below, which is more correct than deriving a price limit
         // from average execution rate.
+        // Authorize this pool for the synchronous callback window opened by `swap`.
+        _v3ExpectedPool = address(pool);
         (int256 amount0, int256 amount1) = pool.swap({
             recipient: address(this),
             zeroForOne: zeroForOne,
@@ -1469,6 +1479,8 @@ contract JBRouterTerminal is
             sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             data: callbackData
         });
+        // Close the callback window before enforcing realized output.
+        _v3ExpectedPool = address(0);
 
         // Uniswap returns signed deltas for both sides of the swap. The output side is negative because the
         // pool sent tokens out to the router, so negate the selected leg to recover the positive amount received.
@@ -1522,7 +1534,6 @@ contract JBRouterTerminal is
     }
 
     /// @notice Execute a Uniswap swap from tokenIn to tokenOut (V3 or V4).
-    /// @param projectId The project ID (included in callback data).
     /// @param tokenIn The token to swap from.
     /// @param tokenOut The token to swap into.
     /// @param amount The amount of tokenIn to swap.
@@ -1530,7 +1541,6 @@ contract JBRouterTerminal is
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return amountOut The amount of tokenOut received.
     function _handleSwap(
-        uint256 projectId,
         address tokenIn,
         address tokenOut,
         uint256 amount,
@@ -1552,7 +1562,7 @@ contract JBRouterTerminal is
             canUseExistingNativeBalance: tokenIn == JBConstants.NATIVE_TOKEN,
             amount: amount,
             metadata: metadata,
-            callbackData: abi.encode(projectId, tokenIn, tokenOut)
+            callbackData: abi.encode(tokenIn)
         });
 
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
@@ -1627,7 +1637,6 @@ contract JBRouterTerminal is
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.
         amountOut = _finalizeResolvedRoute({
-            destProjectId: destProjectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1683,7 +1692,6 @@ contract JBRouterTerminal is
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.
         amountOut = _finalizeResolvedRoute({
-            destProjectId: destProjectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1729,7 +1737,6 @@ contract JBRouterTerminal is
     }
 
     /// @notice Convert a route whose destination token is already resolved into that destination token.
-    /// @param destProjectId The project receiving the routed payment.
     /// @param tokenIn The post-cashout route input token.
     /// @param tokenOut The resolved destination token to convert into.
     /// @param amount The amount of `tokenIn` available to convert.
@@ -1738,7 +1745,6 @@ contract JBRouterTerminal is
     /// @param refundBalanceBaseline The normalized input-token balance baseline for partial-fill refunds.
     /// @return amountOut The amount of `tokenOut` produced for the destination terminal.
     function _finalizeResolvedRoute(
-        uint256 destProjectId,
         address tokenIn,
         address tokenOut,
         uint256 amount,
@@ -1754,7 +1760,6 @@ contract JBRouterTerminal is
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
-            projectId: destProjectId,
             metadata: metadata,
             refundTo: refundTo,
             refundBalanceBaseline: refundBalanceBaseline
@@ -2182,6 +2187,15 @@ contract JBRouterTerminal is
         IJBTerminal[] memory terminals = _terminalsOf({projectId: sourceProjectId, shouldIgnoreFailure: false});
 
         for (uint256 i; i < terminals.length;) {
+            // External calls to codeless entries return empty data and can fail in the caller's decode frame, outside
+            // try/catch. Skip them before probing terminal capabilities.
+            if (address(terminals[i]).code.length == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
             // Check if this terminal supports the IJBCashOutTerminal interface.
             try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                 bool supported
@@ -2200,7 +2214,15 @@ contract JBRouterTerminal is
             }
 
             IJBCashOutTerminal terminal = IJBCashOutTerminal(address(terminals[i]));
-            JBAccountingContext[] memory contexts = terminals[i].accountingContextsOf(sourceProjectId);
+            JBAccountingContext[] memory contexts;
+            try terminals[i].accountingContextsOf(sourceProjectId) returns (JBAccountingContext[] memory ctx) {
+                contexts = ctx;
+            } catch {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             for (uint256 j; j < contexts.length;) {
                 address contextToken = contexts[j].token;

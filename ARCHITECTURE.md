@@ -16,9 +16,10 @@ Final accounting still happens in the downstream terminal selected through `nana
 
 - the router's own accounting context is synthetic and must not be treated as the project ledger
 - preview route discovery and live execution must stay aligned
+- buyback-hook preview scoring must distinguish executable floors from diagnostics
 - refund behavior is part of correctness, not only UX
 - registry locking prevents silent migration to untrusted router implementations
-- `addToBalanceOf` final hops reject lossy ERC-20 terminal pulls; `pay` cannot rely on terminal balance deltas because pay hooks can consume tokens during settlement
+- `addToBalanceOf` final hops reject ERC-20 receipt shortfalls; `pay` cannot rely on terminal balance deltas because pay hooks can consume tokens during settlement
 - recursive project-token cashout routing is intentionally bounded
 - caller reclaim minima only apply to the first cashout hop, because later hops may change token units
 - circular `router -> registry -> same router` forwarding remains blocked in the registry
@@ -63,6 +64,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 
 - native-asset handling and refunds are the most failure-prone paths
 - V3 and V4 discovery must stay synchronized between preview and live execution
+- V3 callbacks are valid only during the router-initiated pool swap that set the transient expected pool
 - V4 discovery intentionally considers both vanilla pools and pools using the canonical `UNIV4_HOOK`
 - the router's "best route" claim is only as strong as its bounded discovery set and external-terminal safety checks
 - recursive cashout behavior, preferred-token handling, and one-shot source overrides are tightly coupled
@@ -83,6 +85,12 @@ Preview and execution share the same conceptual route shape: optional recursive 
   `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 - router-wide route and refund invariants:
   `test/invariant/RouterTerminalInvariant.t.sol`
+- V3 callback authorization:
+  `test/RouterTerminal.t.sol`
+- cash-out terminal enumeration failures:
+  `test/regression/CashOutFallbackPrefersRecursiveLoop.t.sol`
+- final-hop ERC-20 receipt shortfalls:
+  `test/regression/LossyReceiptRegression.t.sol`
 
 ## Source map
 

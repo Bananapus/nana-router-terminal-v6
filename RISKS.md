@@ -61,7 +61,7 @@ Forwarding terminals registered by project owners are trusted to handle receipts
 ## Token compatibility risks
 
 **Fee-on-transfer (FOT) tokens not supported for routed payments.** *(Medium)*
-The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validation) on the destination terminal. This was intentionally removed because pay hooks attached to the destination terminal can legitimately consume tokens during `pay()`, making a balance-delta check produce false reverts for any project with active pay hooks. As a consequence, fee-on-transfer tokens will silently lose value during routing — the terminal receives fewer tokens than `amount` but the router cannot detect this. Projects using FOT tokens should route payments directly to the terminal, bypassing the router. The `addToBalanceOf()` flow retains receipt enforcement since it has no hooks.
+The `pay()` flow does not enforce an ERC-20 receipt check (balance-delta validation) on the destination terminal. This was intentionally removed because pay hooks attached to the destination terminal can legitimately consume tokens during `pay()`, making a balance-delta check produce false reverts for any project with active pay hooks. As a consequence, fee-on-transfer tokens will silently lose value during routing — the terminal receives fewer tokens than `amount` but the router cannot detect this. Projects using FOT tokens should route payments directly to the terminal, bypassing the router. The `addToBalanceOf()` flow retains shortfall enforcement since it has no hooks: the terminal must receive at least the forwarded ERC-20 amount, while benign surplus balance deltas are allowed.
 
 ## Minor configuration risks
 
