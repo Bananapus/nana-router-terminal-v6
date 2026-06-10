@@ -15,6 +15,7 @@ import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashO
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {JBUniswapV4HookData} from "@bananapus/univ4-router-v6/src/libraries/JBUniswapV4HookData.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -538,12 +539,16 @@ contract JBRouterTerminal is
         ) = abi.decode(data, (PoolKey, bool, int256, uint160, uint256, bool));
 
         // Execute the swap.
+        // Tag the minimum so a JBUniswapV4Hook pool reads and enforces it (the router also self-enforces below). The
+        // tag prevents the hook from mis-decoding a non-JB hook's payload as a minimum; a hookless pool gets no data.
         BalanceDelta delta = poolManager.swap({
             key: key,
             params: SwapParams({
                 zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
             }),
-            hookData: address(key.hooks) != address(0) ? abi.encode(minAmountOut) : bytes("")
+            hookData: address(key.hooks) != address(0)
+                ? abi.encodePacked(JBUniswapV4HookData.TAG, abi.encode(minAmountOut))
+                : bytes("")
         });
 
         // Determine input/output amounts from the delta.
