@@ -318,7 +318,8 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
     function _mockRouteState(
         bool loopTokenIsJbToken,
         bool useMixedSourceContexts,
-        bool includeRevertingSourceTerminal
+        bool includeRevertingSourceTerminal,
+        bool includeCodelessSourceTerminal
     )
         internal
     {
@@ -349,11 +350,19 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
             abi.encode(address(destinationTerminal))
         );
 
-        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](includeRevertingSourceTerminal ? 2 : 1);
+        uint256 sourceTerminalCount = 1;
+        if (includeRevertingSourceTerminal) sourceTerminalCount++;
+        if (includeCodelessSourceTerminal) sourceTerminalCount++;
+
+        IJBTerminal[] memory sourceTerminals = new IJBTerminal[](sourceTerminalCount);
         uint256 sourceTerminalIndex;
+        if (includeCodelessSourceTerminal) {
+            sourceTerminals[sourceTerminalIndex] = IJBTerminal(makeAddr("codelessSourceTerminal"));
+            sourceTerminalIndex++;
+        }
         if (includeRevertingSourceTerminal) {
-            sourceTerminals[0] = IJBTerminal(address(revertingSourceTerminal));
-            sourceTerminalIndex = 1;
+            sourceTerminals[sourceTerminalIndex] = IJBTerminal(address(revertingSourceTerminal));
+            sourceTerminalIndex++;
         }
         sourceTerminals[sourceTerminalIndex] =
             IJBTerminal(address(useMixedSourceContexts ? sourceTerminal : nativeOnlySourceTerminal));
@@ -371,7 +380,12 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
     }
 
     function test_routePrefersUsableBaseExitOverRecursiveLoop() public {
-        _mockRouteState({loopTokenIsJbToken: true, useMixedSourceContexts: true, includeRevertingSourceTerminal: false});
+        _mockRouteState({
+            loopTokenIsJbToken: true,
+            useMixedSourceContexts: true,
+            includeRevertingSourceTerminal: false,
+            includeCodelessSourceTerminal: false
+        });
 
         vm.prank(payer);
         uint256 minted = router.pay(DEST_PROJECT_ID, address(sourceToken), AMOUNT, beneficiary, 0, "", "");
@@ -382,7 +396,10 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
 
     function test_routeSucceedsOnceRecursiveFallbackIsRemoved() public {
         _mockRouteState({
-            loopTokenIsJbToken: false, useMixedSourceContexts: false, includeRevertingSourceTerminal: false
+            loopTokenIsJbToken: false,
+            useMixedSourceContexts: false,
+            includeRevertingSourceTerminal: false,
+            includeCodelessSourceTerminal: false
         });
 
         vm.prank(payer);
@@ -394,7 +411,25 @@ contract CashOutFallbackPrefersRecursiveLoopTest is Test {
 
     function test_routeSkipsRevertingCashOutTerminal() public {
         _mockRouteState({
-            loopTokenIsJbToken: false, useMixedSourceContexts: false, includeRevertingSourceTerminal: true
+            loopTokenIsJbToken: false,
+            useMixedSourceContexts: false,
+            includeRevertingSourceTerminal: true,
+            includeCodelessSourceTerminal: false
+        });
+
+        vm.prank(payer);
+        uint256 minted = router.pay(DEST_PROJECT_ID, address(sourceToken), AMOUNT, beneficiary, 0, "", "");
+
+        assertEq(minted, RECLAIM, "native fallback should wrap into WETH and pay the destination");
+        assertEq(destinationTerminal.totalReceived(), RECLAIM, "destination should receive the base-token fallback");
+    }
+
+    function test_routeSkipsCodelessCashOutTerminal() public {
+        _mockRouteState({
+            loopTokenIsJbToken: false,
+            useMixedSourceContexts: false,
+            includeRevertingSourceTerminal: false,
+            includeCodelessSourceTerminal: true
         });
 
         vm.prank(payer);

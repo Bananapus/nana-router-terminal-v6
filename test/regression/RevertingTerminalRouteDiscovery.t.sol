@@ -212,12 +212,14 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_resolveTokenOut_revertingTerminalSkipped_otherTerminalDiscovered() public {
+        address codelessTerminal = makeAddr("codelessTerminal");
         RevertingTerminal revertingTerminal = new RevertingTerminal();
         GoodTerminal goodTerminal = new GoodTerminal(tokenA);
 
-        IJBTerminal[] memory terminals = new IJBTerminal[](2);
-        terminals[0] = IJBTerminal(address(revertingTerminal));
-        terminals[1] = IJBTerminal(address(goodTerminal));
+        IJBTerminal[] memory terminals = new IJBTerminal[](3);
+        terminals[0] = IJBTerminal(codelessTerminal);
+        terminals[1] = IJBTerminal(address(revertingTerminal));
+        terminals[2] = IJBTerminal(address(goodTerminal));
 
         // Mock directory.terminalsOf -> returns both terminals.
         vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
@@ -265,9 +267,74 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
             router: router, wrappedNativeToken: address(weth), projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""
         });
 
-        // The reverting terminal is skipped; the good terminal's token is discovered.
-        assertEq(resolvedTokenOut, tokenA, "should discover tokenA despite the reverting terminal");
+        // The codeless and reverting terminals are skipped; the good terminal's token is discovered.
+        assertEq(resolvedTokenOut, tokenA, "should discover tokenA despite broken terminal entries");
         assertEq(address(resolvedTerminal), address(goodTerminal), "should resolve to goodTerminal");
+    }
+
+    function test_resolveTokenOut_primaryTerminalLookupRevertSkipsCandidate() public {
+        GoodTerminal brokenCandidateTerminal = new GoodTerminal(tokenA);
+        GoodTerminal goodTerminal = new GoodTerminal(tokenB);
+
+        IJBTerminal[] memory terminals = new IJBTerminal[](2);
+        terminals[0] = IJBTerminal(address(brokenCandidateTerminal));
+        terminals[1] = IJBTerminal(address(goodTerminal));
+
+        // Mock directory.terminalsOf -> returns both terminals.
+        vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));
+
+        // Mock directory.primaryTerminalOf for tokenIn -> address(0) (not directly accepted).
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, tokenIn)),
+            abi.encode(address(0))
+        );
+
+        // A broken destination-terminal list can make the directory primary lookup revert for one candidate.
+        vm.mockCallRevert(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, tokenA)),
+            abi.encodeWithSignature("Error(string)", "broken primary lookup")
+        );
+
+        // The resolver should continue to the next accepted token.
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, tokenB)),
+            abi.encode(address(goodTerminal))
+        );
+
+        // Mock router.wrappedNativeToken().
+        vm.mockCall(
+            address(router), abi.encodeCall(IJBPayRoutePreviewer.wrappedNativeToken, ()), abi.encode(address(weth))
+        );
+
+        // Mock router.TOKENS().
+        address mockTokens = makeAddr("tokens");
+        vm.etch(address(mockTokens), hex"00");
+        vm.mockCall(address(router), abi.encodeCall(IJBPayRoutePreviewer.TOKENS, ()), abi.encode(mockTokens));
+        vm.mockCall(mockTokens, abi.encodeWithSelector(IJBTokens.projectIdOf.selector), abi.encode(uint256(0)));
+
+        // Mock router.bestPoolLiquidityOf for the working token.
+        vm.mockCall(
+            address(router),
+            abi.encodeCall(IJBPayRoutePreviewer.bestPoolLiquidityOf, (tokenIn, tokenB)),
+            abi.encode(uint128(500_000))
+        );
+
+        // Mock WETH for native token check.
+        vm.mockCall(
+            address(directory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (PROJECT_ID, address(weth))),
+            abi.encode(address(0))
+        );
+
+        (address resolvedTokenOut, IJBTerminal resolvedTerminal) = resolver.resolveTokenOut({
+            router: router, wrappedNativeToken: address(weth), projectId: PROJECT_ID, tokenIn: tokenIn, metadata: ""
+        });
+
+        assertEq(resolvedTokenOut, tokenB, "should skip candidate whose primary lookup reverts");
+        assertEq(address(resolvedTerminal), address(goodTerminal), "should resolve to the healthy candidate terminal");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -323,12 +390,14 @@ contract RevertingTerminalRouteDiscoveryTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_previewBestPayRoute_revertingTerminalSkipped() public {
+        address codelessTerminal = makeAddr("codelessPreviewTerminal");
         RevertingTerminal revertingTerminal = new RevertingTerminal();
         GoodTerminal goodTerminal = new GoodTerminal(tokenA);
 
-        IJBTerminal[] memory terminals = new IJBTerminal[](2);
-        terminals[0] = IJBTerminal(address(revertingTerminal));
-        terminals[1] = IJBTerminal(address(goodTerminal));
+        IJBTerminal[] memory terminals = new IJBTerminal[](3);
+        terminals[0] = IJBTerminal(codelessTerminal);
+        terminals[1] = IJBTerminal(address(revertingTerminal));
+        terminals[2] = IJBTerminal(address(goodTerminal));
 
         // Mock directory.terminalsOf.
         vm.mockCall(address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (PROJECT_ID)), abi.encode(terminals));

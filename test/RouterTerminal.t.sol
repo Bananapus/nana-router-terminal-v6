@@ -1158,27 +1158,12 @@ contract RouterTerminalTest is Test {
     // ----------------------- callback tests --------------------------- //
     //*********************************************************************//
 
-    function test_callback_rejectsFactoryVerifiedPoolOutsideRouterSwap() public {
+    function test_callback_rejectsPoolOutsideRouterSwap() public {
         address tokenIn = makeAddr("tokenIn");
-        address tokenOut = makeAddr("tokenOut");
         address realPool = makeAddr("realPool");
         vm.etch(realPool, hex"00");
-        vm.etch(tokenIn, hex"00");
 
-        // The pool reports fee 3000.
-        vm.mockCall(realPool, abi.encodeWithSignature("fee()"), abi.encode(uint24(3000)));
-
-        // Factory confirms this pool.
-        vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)),
-            abi.encode(realPool)
-        );
-
-        // Mock token transfer.
-        vm.mockCall(tokenIn, abi.encodeCall(IERC20.transfer, (realPool, 100)), abi.encode(true));
-
-        bytes memory data = abi.encode(uint256(1), tokenIn, tokenOut);
+        bytes memory data = abi.encode(tokenIn);
 
         vm.prank(realPool);
         vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, realPool));
@@ -1187,22 +1172,10 @@ contract RouterTerminalTest is Test {
 
     function test_callback_rejectsUnverified() public {
         address tokenIn = makeAddr("tokenIn");
-        address tokenOut = makeAddr("tokenOut");
         address fakePool = makeAddr("fakePool");
-        address realPool = makeAddr("realPool");
         vm.etch(fakePool, hex"00");
 
-        // Fake pool reports fee 3000.
-        vm.mockCall(fakePool, abi.encodeWithSignature("fee()"), abi.encode(uint24(3000)));
-
-        // Factory returns a different pool address.
-        vm.mockCall(
-            address(mockFactory),
-            abi.encodeCall(IUniswapV3Factory.getPool, (tokenIn, tokenOut, 3000)),
-            abi.encode(realPool)
-        );
-
-        bytes memory data = abi.encode(uint256(1), tokenIn, tokenOut);
+        bytes memory data = abi.encode(tokenIn);
 
         vm.prank(fakePool);
         vm.expectRevert(abi.encodeWithSelector(JBRouterTerminal.JBRouterTerminal_CallerNotPool.selector, fakePool));
@@ -2891,28 +2864,13 @@ contract RouterTerminalTest is Test {
         pure
         returns (JBPayHookSpecification[] memory specifications)
     {
-        specifications = new JBPayHookSpecification[](1);
-        specifications[0] = JBPayHookSpecification({
-            hook: IJBPayHook(hook),
-            noop: false,
-            amount: 0,
-            metadata: abi.encode(
-                false,
-                uint256(0),
-                minimumBeneficiaryTokenCount + minimumReservedTokenCount,
-                false,
-                address(0),
-                uint256(0),
-                uint256(0),
-                uint256(0),
-                int24(0),
-                uint128(0),
-                PoolId.wrap(bytes32(0)),
-                minimumBeneficiaryTokenCount,
-                minimumReservedTokenCount,
-                uint256(0),
-                false
-            )
+        return _buybackPayHookSpecificationsWithDiagnostics({
+            hook: hook,
+            minimumSwapAmountOut: minimumBeneficiaryTokenCount + minimumReservedTokenCount,
+            minimumBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
+            minimumReservedTokenCount: minimumReservedTokenCount,
+            rawSwapQuote: 0,
+            oracleUnseeded: false
         });
     }
 

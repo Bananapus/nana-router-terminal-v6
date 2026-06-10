@@ -501,12 +501,12 @@ contract JBRouterTerminal is
     /// @dev Only the pool synchronously entered by `_executeV3Swap` can call this callback.
     /// @param amount0Delta The amount of token 0 used for the swap.
     /// @param amount1Delta The amount of token 1 used for the swap.
-    /// @param data Data passed in by the swap operation: abi.encode(projectId, tokenIn, tokenOut).
+    /// @param data Data passed in by the swap operation: abi.encode(tokenIn).
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external override {
         if (msg.sender != _v3ExpectedPool) revert JBRouterTerminal_CallerNotPool(msg.sender);
 
-        // Unpack the data from the original swap config.
-        (, address tokenIn,) = abi.decode(data, (uint256, address, address));
+        // Unpack the input token from the original swap config.
+        address tokenIn = abi.decode(data, (address));
 
         // Normalize tokens (wrap native token if needed).
         address normalizedTokenIn = _normalize(tokenIn);
@@ -1092,7 +1092,13 @@ contract JBRouterTerminal is
     /// @param token The token that terminal should accept.
     /// @return terminal The usable primary terminal, or address(0) if none is usable.
     function _usablePrimaryTerminalOf(uint256 projectId, address token) internal view returns (IJBTerminal terminal) {
-        terminal = DIRECTORY.primaryTerminalOf({projectId: projectId, token: token});
+        // Primary-terminal discovery can call into every registered destination terminal. Treat a broken terminal in
+        // that list as "no usable terminal" for this candidate so one bad terminal cannot DoS route discovery.
+        try DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal resolvedTerminal) {
+            terminal = resolvedTerminal;
+        } catch {
+            return IJBTerminal(address(0));
+        }
 
         // Drop terminals that would route straight back into the router (circular).
         if (
@@ -1348,7 +1354,6 @@ contract JBRouterTerminal is
     /// @param tokenIn The token to convert from.
     /// @param tokenOut The token to convert into.
     /// @param amount The amount to convert.
-    /// @param projectId The project ID (passed through to swap callback data).
     /// @param metadata Bytes in `JBMetadataResolver`'s format (may contain a `pay` swap quote).
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return The amount of tokenOut produced.
@@ -1356,7 +1361,6 @@ contract JBRouterTerminal is
         address tokenIn,
         address tokenOut,
         uint256 amount,
-        uint256 projectId,
         bytes calldata metadata,
         address payable refundTo,
         uint256 refundBalanceBaseline
@@ -1379,7 +1383,6 @@ contract JBRouterTerminal is
 
         // Different tokens — swap via Uniswap (V3 or V4).
         return _handleSwap({
-            projectId: projectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1531,7 +1534,6 @@ contract JBRouterTerminal is
     }
 
     /// @notice Execute a Uniswap swap from tokenIn to tokenOut (V3 or V4).
-    /// @param projectId The project ID (included in callback data).
     /// @param tokenIn The token to swap from.
     /// @param tokenOut The token to swap into.
     /// @param amount The amount of tokenIn to swap.
@@ -1539,7 +1541,6 @@ contract JBRouterTerminal is
     /// @param refundTo The address to receive leftover input tokens from partial fills.
     /// @return amountOut The amount of tokenOut received.
     function _handleSwap(
-        uint256 projectId,
         address tokenIn,
         address tokenOut,
         uint256 amount,
@@ -1561,7 +1562,7 @@ contract JBRouterTerminal is
             canUseExistingNativeBalance: tokenIn == JBConstants.NATIVE_TOKEN,
             amount: amount,
             metadata: metadata,
-            callbackData: abi.encode(projectId, tokenIn, tokenOut)
+            callbackData: abi.encode(tokenIn)
         });
 
         // For native token inputs, wrap any raw ETH remaining from partial fills so the leftover check catches it.
@@ -1636,7 +1637,6 @@ contract JBRouterTerminal is
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.
         amountOut = _finalizeResolvedRoute({
-            destProjectId: destProjectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1692,7 +1692,6 @@ contract JBRouterTerminal is
 
         // Convert the post-cashout route input into the resolved destination token and refund any leftover input.
         amountOut = _finalizeResolvedRoute({
-            destProjectId: destProjectId,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
@@ -1738,7 +1737,6 @@ contract JBRouterTerminal is
     }
 
     /// @notice Convert a route whose destination token is already resolved into that destination token.
-    /// @param destProjectId The project receiving the routed payment.
     /// @param tokenIn The post-cashout route input token.
     /// @param tokenOut The resolved destination token to convert into.
     /// @param amount The amount of `tokenIn` available to convert.
@@ -1747,7 +1745,6 @@ contract JBRouterTerminal is
     /// @param refundBalanceBaseline The normalized input-token balance baseline for partial-fill refunds.
     /// @return amountOut The amount of `tokenOut` produced for the destination terminal.
     function _finalizeResolvedRoute(
-        uint256 destProjectId,
         address tokenIn,
         address tokenOut,
         uint256 amount,
@@ -1763,7 +1760,6 @@ contract JBRouterTerminal is
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amount: amount,
-            projectId: destProjectId,
             metadata: metadata,
             refundTo: refundTo,
             refundBalanceBaseline: refundBalanceBaseline
@@ -2191,6 +2187,15 @@ contract JBRouterTerminal is
         IJBTerminal[] memory terminals = _terminalsOf({projectId: sourceProjectId, shouldIgnoreFailure: false});
 
         for (uint256 i; i < terminals.length;) {
+            // External calls to codeless entries return empty data and can fail in the caller's decode frame, outside
+            // try/catch. Skip them before probing terminal capabilities.
+            if (address(terminals[i]).code.length == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+
             // Check if this terminal supports the IJBCashOutTerminal interface.
             try IERC165(address(terminals[i])).supportsInterface(type(IJBCashOutTerminal).interfaceId) returns (
                 bool supported
