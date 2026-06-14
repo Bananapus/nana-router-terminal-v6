@@ -67,7 +67,10 @@ The shortest useful reading order is:
 
 - projects that expose a router terminal still settle into ordinary Juicebox terminals underneath
 - route discovery and route execution are related but not identical, especially when liquidity or caller-supplied quote data moves
+- value-sensitive V4 routes should carry explicit quote metadata from an external quoter; pool price limits are not a
+  complete user slippage policy by themselves
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
+- fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 
 ## Where state lives
@@ -132,6 +135,8 @@ script/
 - recursive cash-out routing increases complexity when the input token is itself a Juicebox project token
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
+- the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
+  settlement paths
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
 
