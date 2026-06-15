@@ -17,7 +17,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
-import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 
 contract NestedRefundToken is ERC20 {

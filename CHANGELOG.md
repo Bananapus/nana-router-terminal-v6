@@ -74,7 +74,7 @@ Added V6 ABI artifacts:
 - `IJBForwardingTerminal` from `src/interfaces/IJBForwardingTerminal.sol`: `1` functions, `0` events, `0` errors.
 - `IJBPayRoutePreviewer` from `src/interfaces/IJBPayRoutePreviewer.sol`: `8` functions, `0` events, `0` errors.
 - `IJBPayRouteResolver` from `src/interfaces/IJBPayRouteResolver.sol`: `5` functions, `0` events, `0` errors.
-- `IJBPayerTracker` from `src/interfaces/IJBPayerTracker.sol`: `1` functions, `0` events, `0` errors.
+- `IJBPayerTracker`: consumed from `@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol` (the canonical definition; the local copy was de-duplicated). `1` functions, `0` events, `0` errors.
 - `IJBRouterTerminal` from `src/interfaces/IJBRouterTerminal.sol`: `11` functions, `6` events, `0` errors.
 - `IJBRouterTerminalRegistry` from `src/interfaces/IJBRouterTerminalRegistry.sol`: `25` functions, `11` events, `0` errors.
 - `JBForwardingCheck` from `src/libraries/JBForwardingCheck.sol`: `0` functions, `0` events, `0` errors.

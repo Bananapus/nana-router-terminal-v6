@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
-import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";

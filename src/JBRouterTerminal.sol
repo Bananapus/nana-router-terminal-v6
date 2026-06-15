@@ -40,7 +40,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
 import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
-import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
