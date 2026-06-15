@@ -6,7 +6,7 @@ import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
-import {IJBPayerTracker} from "./IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 
 import {DefaultTerminalSegment} from "../structs/DefaultTerminalSegment.sol";
 

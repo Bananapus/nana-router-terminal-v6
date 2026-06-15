@@ -23,7 +23,7 @@ import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTran
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
-import {IJBPayerTracker} from "./interfaces/IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";

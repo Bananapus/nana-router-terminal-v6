@@ -11,7 +11,7 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../../src/JBRouterTerminal.sol";
-import {IJBPayerTracker} from "../../src/interfaces/IJBPayerTracker.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IWETH9} from "../../src/interfaces/IWETH9.sol";
 
 // ---------------------------------------------------------------------------
