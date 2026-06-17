@@ -1,0 +1,1556 @@
+{
+	"format": "sphinx-sol-ct-artifact-1",
+	"address": "0xe0427f250fdb0379c8e98e884ee4570521208cbc",
+	"sourceName": "node_modules/@bananapus/router-terminal-v6/src/JBRouterTerminalRegistry.sol",
+	"contractName": "JBRouterTerminalRegistry",
+	"chainId": "0xaa37dc",
+	"abi": [
+		{
+			"type": "constructor",
+			"inputs": [
+				{
+					"name": "permissions",
+					"type": "address",
+					"internalType": "contract IJBPermissions"
+				},
+				{
+					"name": "projects",
+					"type": "address",
+					"internalType": "contract IJBProjects"
+				},
+				{
+					"name": "permit2",
+					"type": "address",
+					"internalType": "contract IPermit2"
+				},
+				{
+					"name": "owner",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "trustedForwarder",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "PERMISSIONS",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "contract IJBPermissions"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "PERMIT2",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "contract IPermit2"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "PROJECTS",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "contract IJBProjects"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "accountingContextForTokenOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"outputs": [
+				{
+					"name": "context",
+					"type": "tuple",
+					"internalType": "struct JBAccountingContext",
+					"components": [
+						{
+							"name": "token",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "decimals",
+							"type": "uint8",
+							"internalType": "uint8"
+						},
+						{
+							"name": "currency",
+							"type": "uint32",
+							"internalType": "uint32"
+						}
+					]
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "accountingContextsOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "contexts",
+					"type": "tuple[]",
+					"internalType": "struct JBAccountingContext[]",
+					"components": [
+						{
+							"name": "token",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "decimals",
+							"type": "uint8",
+							"internalType": "uint8"
+						},
+						{
+							"name": "currency",
+							"type": "uint32",
+							"internalType": "uint32"
+						}
+					]
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "addAccountingContextsFor",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "accountingContexts",
+					"type": "tuple[]",
+					"internalType": "struct JBAccountingContext[]",
+					"components": [
+						{
+							"name": "token",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "decimals",
+							"type": "uint8",
+							"internalType": "uint8"
+						},
+						{
+							"name": "currency",
+							"type": "uint32",
+							"internalType": "uint32"
+						}
+					]
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "addToBalanceOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "shouldReturnHeldFees",
+					"type": "bool",
+					"internalType": "bool"
+				},
+				{
+					"name": "memo",
+					"type": "string",
+					"internalType": "string"
+				},
+				{
+					"name": "metadata",
+					"type": "bytes",
+					"internalType": "bytes"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "payable"
+		},
+		{
+			"type": "function",
+			"name": "allowTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "currentSurplusOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "tokens",
+					"type": "address[]",
+					"internalType": "address[]"
+				},
+				{
+					"name": "decimals",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "currency",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"stateMutability": "pure"
+		},
+		{
+			"type": "function",
+			"name": "defaultTerminal",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "defaultTerminalFor",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "defaultTerminalHistoryAt",
+			"inputs": [
+				{
+					"name": "index",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "segment",
+					"type": "tuple",
+					"internalType": "struct DefaultTerminalSegment",
+					"components": [
+						{
+							"name": "minProjectIdExclusive",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "maxProjectId",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "terminal",
+							"type": "address",
+							"internalType": "contract IJBTerminal"
+						}
+					]
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "defaultTerminalHistoryLength",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "length",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "defaultTerminalProjectIdThreshold",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "disallowTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "hasLockedTerminal",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "",
+					"type": "bool",
+					"internalType": "bool"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "isTerminalAllowed",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [
+				{
+					"name": "",
+					"type": "bool",
+					"internalType": "bool"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "isTrustedForwarder",
+			"inputs": [
+				{
+					"name": "forwarder",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"outputs": [
+				{
+					"name": "",
+					"type": "bool",
+					"internalType": "bool"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "lockTerminalFor",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "expectedTerminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "migrateBalanceOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "to",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [
+				{
+					"name": "",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"stateMutability": "pure"
+		},
+		{
+			"type": "function",
+			"name": "originalPayer",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "owner",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "pay",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "beneficiary",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "minReturnedTokens",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "memo",
+					"type": "string",
+					"internalType": "string"
+				},
+				{
+					"name": "metadata",
+					"type": "bytes",
+					"internalType": "bytes"
+				}
+			],
+			"outputs": [
+				{
+					"name": "result",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"stateMutability": "payable"
+		},
+		{
+			"type": "function",
+			"name": "previewPayFor",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "beneficiary",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "metadata",
+					"type": "bytes",
+					"internalType": "bytes"
+				}
+			],
+			"outputs": [
+				{
+					"name": "ruleset",
+					"type": "tuple",
+					"internalType": "struct JBRuleset",
+					"components": [
+						{
+							"name": "cycleNumber",
+							"type": "uint48",
+							"internalType": "uint48"
+						},
+						{
+							"name": "id",
+							"type": "uint48",
+							"internalType": "uint48"
+						},
+						{
+							"name": "basedOnId",
+							"type": "uint48",
+							"internalType": "uint48"
+						},
+						{
+							"name": "start",
+							"type": "uint48",
+							"internalType": "uint48"
+						},
+						{
+							"name": "duration",
+							"type": "uint32",
+							"internalType": "uint32"
+						},
+						{
+							"name": "weight",
+							"type": "uint112",
+							"internalType": "uint112"
+						},
+						{
+							"name": "weightCutPercent",
+							"type": "uint32",
+							"internalType": "uint32"
+						},
+						{
+							"name": "approvalHook",
+							"type": "address",
+							"internalType": "contract IJBRulesetApprovalHook"
+						},
+						{
+							"name": "metadata",
+							"type": "uint256",
+							"internalType": "uint256"
+						}
+					]
+				},
+				{
+					"name": "beneficiaryTokenCount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "reservedTokenCount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "hookSpecifications",
+					"type": "tuple[]",
+					"internalType": "struct JBPayHookSpecification[]",
+					"components": [
+						{
+							"name": "hook",
+							"type": "address",
+							"internalType": "contract IJBPayHook"
+						},
+						{
+							"name": "noop",
+							"type": "bool",
+							"internalType": "bool"
+						},
+						{
+							"name": "amount",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "metadata",
+							"type": "bytes",
+							"internalType": "bytes"
+						}
+					]
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "renounceOwnership",
+			"inputs": [],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "setDefaultTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "setTerminalFor",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "supportsInterface",
+			"inputs": [
+				{
+					"name": "interfaceId",
+					"type": "bytes4",
+					"internalType": "bytes4"
+				}
+			],
+			"outputs": [
+				{
+					"name": "supported",
+					"type": "bool",
+					"internalType": "bool"
+				}
+			],
+			"stateMutability": "pure"
+		},
+		{
+			"type": "function",
+			"name": "terminalOf",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			],
+			"outputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "function",
+			"name": "transferOwnership",
+			"inputs": [
+				{
+					"name": "newOwner",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"outputs": [],
+			"stateMutability": "nonpayable"
+		},
+		{
+			"type": "function",
+			"name": "trustedForwarder",
+			"inputs": [],
+			"outputs": [
+				{
+					"name": "",
+					"type": "address",
+					"internalType": "address"
+				}
+			],
+			"stateMutability": "view"
+		},
+		{
+			"type": "event",
+			"name": "AddToBalance",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "returnedFees",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "memo",
+					"type": "string",
+					"indexed": false,
+					"internalType": "string"
+				},
+				{
+					"name": "metadata",
+					"type": "bytes",
+					"indexed": false,
+					"internalType": "bytes"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "HookAfterRecordPay",
+			"inputs": [
+				{
+					"name": "hook",
+					"type": "address",
+					"indexed": true,
+					"internalType": "contract IJBPayHook"
+				},
+				{
+					"name": "context",
+					"type": "tuple",
+					"indexed": false,
+					"internalType": "struct JBAfterPayRecordedContext",
+					"components": [
+						{
+							"name": "payer",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "projectId",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "rulesetId",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "amount",
+							"type": "tuple",
+							"internalType": "struct JBTokenAmount",
+							"components": [
+								{
+									"name": "token",
+									"type": "address",
+									"internalType": "address"
+								},
+								{
+									"name": "decimals",
+									"type": "uint8",
+									"internalType": "uint8"
+								},
+								{
+									"name": "currency",
+									"type": "uint32",
+									"internalType": "uint32"
+								},
+								{
+									"name": "value",
+									"type": "uint256",
+									"internalType": "uint256"
+								}
+							]
+						},
+						{
+							"name": "forwardedAmount",
+							"type": "tuple",
+							"internalType": "struct JBTokenAmount",
+							"components": [
+								{
+									"name": "token",
+									"type": "address",
+									"internalType": "address"
+								},
+								{
+									"name": "decimals",
+									"type": "uint8",
+									"internalType": "uint8"
+								},
+								{
+									"name": "currency",
+									"type": "uint32",
+									"internalType": "uint32"
+								},
+								{
+									"name": "value",
+									"type": "uint256",
+									"internalType": "uint256"
+								}
+							]
+						},
+						{
+							"name": "weight",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "newlyIssuedTokenCount",
+							"type": "uint256",
+							"internalType": "uint256"
+						},
+						{
+							"name": "beneficiary",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "hookMetadata",
+							"type": "bytes",
+							"internalType": "bytes"
+						},
+						{
+							"name": "payerMetadata",
+							"type": "bytes",
+							"internalType": "bytes"
+						}
+					]
+				},
+				{
+					"name": "specificationAmount",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "JBRouterTerminalRegistry_AllowTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"indexed": false,
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "JBRouterTerminalRegistry_DisallowTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"indexed": false,
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "JBRouterTerminalRegistry_LockTerminal",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "JBRouterTerminalRegistry_SetDefaultTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"indexed": false,
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "JBRouterTerminalRegistry_SetTerminal",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "terminal",
+					"type": "address",
+					"indexed": false,
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "MigrateTerminal",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "token",
+					"type": "address",
+					"indexed": true,
+					"internalType": "address"
+				},
+				{
+					"name": "to",
+					"type": "address",
+					"indexed": true,
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "OwnershipTransferred",
+			"inputs": [
+				{
+					"name": "previousOwner",
+					"type": "address",
+					"indexed": true,
+					"internalType": "address"
+				},
+				{
+					"name": "newOwner",
+					"type": "address",
+					"indexed": true,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "Pay",
+			"inputs": [
+				{
+					"name": "rulesetId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "rulesetCycleNumber",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "payer",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				},
+				{
+					"name": "beneficiary",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				},
+				{
+					"name": "amount",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "newlyIssuedTokenCount",
+					"type": "uint256",
+					"indexed": false,
+					"internalType": "uint256"
+				},
+				{
+					"name": "memo",
+					"type": "string",
+					"indexed": false,
+					"internalType": "string"
+				},
+				{
+					"name": "metadata",
+					"type": "bytes",
+					"indexed": false,
+					"internalType": "bytes"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "Permit2AllowanceFailed",
+			"inputs": [
+				{
+					"name": "token",
+					"type": "address",
+					"indexed": true,
+					"internalType": "address"
+				},
+				{
+					"name": "owner",
+					"type": "address",
+					"indexed": true,
+					"internalType": "address"
+				},
+				{
+					"name": "reason",
+					"type": "bytes",
+					"indexed": false,
+					"internalType": "bytes"
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "event",
+			"name": "SetAccountingContext",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"indexed": true,
+					"internalType": "uint256"
+				},
+				{
+					"name": "context",
+					"type": "tuple",
+					"indexed": false,
+					"internalType": "struct JBAccountingContext",
+					"components": [
+						{
+							"name": "token",
+							"type": "address",
+							"internalType": "address"
+						},
+						{
+							"name": "decimals",
+							"type": "uint8",
+							"internalType": "uint8"
+						},
+						{
+							"name": "currency",
+							"type": "uint32",
+							"internalType": "uint32"
+						}
+					]
+				},
+				{
+					"name": "caller",
+					"type": "address",
+					"indexed": false,
+					"internalType": "address"
+				}
+			],
+			"anonymous": false
+		},
+		{
+			"type": "error",
+			"name": "FailedCall",
+			"inputs": []
+		},
+		{
+			"type": "error",
+			"name": "InsufficientBalance",
+			"inputs": [
+				{
+					"name": "balance",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "needed",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBPermissioned_Unauthorized",
+			"inputs": [
+				{
+					"name": "account",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "sender",
+					"type": "address",
+					"internalType": "address"
+				},
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "permissionId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_AmountOverflow",
+			"inputs": [
+				{
+					"name": "amount",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_CannotDisallowDefaultTerminal",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_CircularForward",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_NoMsgValueAllowed",
+			"inputs": [
+				{
+					"name": "value",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_PermitAllowanceNotEnough",
+			"inputs": [
+				{
+					"name": "amount",
+					"type": "uint256",
+					"internalType": "uint256"
+				},
+				{
+					"name": "allowanceAmount",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_TerminalLocked",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_TerminalMismatch",
+			"inputs": [
+				{
+					"name": "currentTerminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				},
+				{
+					"name": "expectedTerminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_TerminalNotAllowed",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "contract IJBTerminal"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_TerminalNotSet",
+			"inputs": [
+				{
+					"name": "projectId",
+					"type": "uint256",
+					"internalType": "uint256"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "JBRouterTerminalRegistry_ZeroAddress",
+			"inputs": [
+				{
+					"name": "terminal",
+					"type": "address",
+					"internalType": "address"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "OwnableInvalidOwner",
+			"inputs": [
+				{
+					"name": "owner",
+					"type": "address",
+					"internalType": "address"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "OwnableUnauthorizedAccount",
+			"inputs": [
+				{
+					"name": "account",
+					"type": "address",
+					"internalType": "address"
+				}
+			]
+		},
+		{
+			"type": "error",
+			"name": "SafeERC20FailedOperation",
+			"inputs": [
+				{
+					"name": "token",
+					"type": "address",
+					"internalType": "address"
+				}
+			]
+		}
+	],
+	"args": [
+		"0xf92AC1aB5A00033E35a3975739124F61928C36B0",
+		"0x6017d1FBa9DC279BFA0B03fD931C22E242AB3691",
+		"0x000000000022D473030F116dDEE9F6B43aC78BA3",
+		"0x4dc161eF837fF1C4485b08DDFcDB182F2157bE18",
+		"0x3bA60b60933916a7C87D0860DcEE62a0CE34E3e2"
+	],
+	"solcInputHash": "a61b01f270d18333e9948f4b6d59aac5",
+	"receipt": {
+		"type": "0x2",
+		"status": "0x1",
+		"cumulativeGasUsed": "0x279e36",
+		"logs": [
+			{
+				"address": "0xa2ea7657440875bf916cbfc0cfa88f13e38ad463",
+				"topics": [
+					"0x572f161235911da04685a68c06adf558fc7e4a36909dca394650e0adc19cc93d",
+					"0x000000000000000000000000755ff2f75a0a586ecfa2b9a3c959cb662458a105",
+					"0x00000000000000000000000091f164e1300f13beaf77358e4d84ed78f8e99d38",
+					"0x8d25f707b49a7778eac1356c11de83da6a20e21a33cfde553390f93ae66af899"
+				],
+				"data": "0x0000000000000000000000000000000000000000000000000000000000000000",
+				"blockHash": "0x061c680a9cc901feafba7413d601e4a0e0620bdd079bb728f25d5218d7c18c20",
+				"blockNumber": "0x2acfffd",
+				"blockTimestamp": "0x6a30dba6",
+				"transactionHash": "0xd039d5b63ff843a350d346cc762bbb925c2f182e9035f5e3fc23e6bcfa264266",
+				"transactionIndex": "0x1",
+				"logIndex": "0x0",
+				"removed": false
+			},
+			{
+				"address": "0xe0427f250fdb0379c8e98e884ee4570521208cbc",
+				"topics": [
+					"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
+					"0x0000000000000000000000000000000000000000000000000000000000000000",
+					"0x0000000000000000000000004dc161ef837ff1c4485b08ddfcdb182f2157be18"
+				],
+				"data": "0x",
+				"blockHash": "0x061c680a9cc901feafba7413d601e4a0e0620bdd079bb728f25d5218d7c18c20",
+				"blockNumber": "0x2acfffd",
+				"blockTimestamp": "0x6a30dba6",
+				"transactionHash": "0xd039d5b63ff843a350d346cc762bbb925c2f182e9035f5e3fc23e6bcfa264266",
+				"transactionIndex": "0x1",
+				"logIndex": "0x1",
+				"removed": false
+			},
+			{
+				"address": "0x4dc161ef837ff1c4485b08ddfcdb182f2157be18",
+				"topics": [
+					"0x6895c13664aa4f67288b25d7a21d7aaa34916e355fb9b6fae0a139a9085becb8",
+					"0x00000000000000000000000091f164e1300f13beaf77358e4d84ed78f8e99d38"
+				],
+				"data": "0x",
+				"blockHash": "0x061c680a9cc901feafba7413d601e4a0e0620bdd079bb728f25d5218d7c18c20",
+				"blockNumber": "0x2acfffd",
+				"blockTimestamp": "0x6a30dba6",
+				"transactionHash": "0xd039d5b63ff843a350d346cc762bbb925c2f182e9035f5e3fc23e6bcfa264266",
+				"transactionIndex": "0x1",
+				"logIndex": "0x2",
+				"removed": false
+			},
+			{
+				"address": "0x91f164e1300f13beaf77358e4d84ed78f8e99d38",
+				"topics": [
+					"0xa65fb05c5808f5f389d72edeaf719ce38f4cc55c1f69ca3cbfb31c21501caa07",
+					"0xd5deab2e7deb1fc43c598724c179da0517b3ba8e35a6aa10843b370c51835520"
+				],
+				"data": "0x0000000000000000000000000000000000000000000000000000000000000023",
+				"blockHash": "0x061c680a9cc901feafba7413d601e4a0e0620bdd079bb728f25d5218d7c18c20",
+				"blockNumber": "0x2acfffd",
+				"blockTimestamp": "0x6a30dba6",
+				"transactionHash": "0xd039d5b63ff843a350d346cc762bbb925c2f182e9035f5e3fc23e6bcfa264266",
+				"transactionIndex": "0x1",
+				"logIndex": "0x3",
+				"removed": false
+			}
+		],
+		"logsBloom": "0x0000000000001000000000000008000000100000000000000080000000000000000020100000000000000000004000000000000000000000000000000000000000000000000020000000400000000000000100000000004010000000000000004000000002000400000000000000080000000000000000000000000008008040880008100000000000010400000000000000000000000000000000000000000080400004000000000000000000000000a200000000000000000000000004000000020002008000000100000000400000000000000000000000000000800020000000000000000100000000000000000200000000000080000000000000000000",
+		"transactionHash": "0xd039d5b63ff843a350d346cc762bbb925c2f182e9035f5e3fc23e6bcfa264266",
+		"transactionIndex": "0x1",
+		"blockHash": "0x061c680a9cc901feafba7413d601e4a0e0620bdd079bb728f25d5218d7c18c20",
+		"blockNumber": "0x2acfffd",
+		"gasUsed": "0x26bdec",
+		"effectiveGasPrice": "0x24a02c",
+		"blobGasUsed": "0x28e010",
+		"from": "0x755ff2f75a0a586ecfa2b9a3c959cb662458a105",
+		"to": "0xa2ea7657440875bf916cbfc0cfa88f13e38ad463",
+		"contractAddress": null,
+		"l1GasPrice": "0x3c70c1b3",
+		"l1GasUsed": "0x1a29e",
+		"l1Fee": "0x116f282e56f",
+		"l1BaseFeeScalar": "0x1db0",
+		"l1BlobBaseFee": "0x3d79d8d",
+		"l1BlobBaseFeeScalar": "0xd2730",
+		"daFootprintGasScalar": "0x190"
+	},
+	"bytecode": "0x6101003461017657601f612ad238819003918201601f19168301916001600160401b0383118484101761017a5780849260a094604052833981010312610176578051906001600160a01b03821682036101765760208101516001600160a01b0381168103610176576040820151916001600160a01b038316830361017657610095608061008e6060840161018e565b920161018e565b6080949094526001600160a01b0316928315610163575f80546001600160a01b031981168617825560405195916001600160a01b03909116907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09080a360a05260c05260e05261292f90816101a382396080518181816103620152611b99015260a051818181610b0001528181610cb001526122eb015260c05181818161040b0152818161094201528181610de101526110b5015260e051818181610c2401528181611fa1015261261f0152f35b631e4fbdf760e01b5f525f60045260245ffd5b5f80fd5b634e487b7160e01b5f52604160045260245ffd5b51906001600160a01b03821682036101765756fe6080806040526004361015610012575f80fd5b5f905f3560e01c90816301ffc9a71461157a575080630aff0c31146111535780631386053314611136578063253721c8146110e4578063293c4999146110a0578063296eee511461107b57806330c236e814610ff35780633a01714f14610f9f5780634e96e7af14610d925780634fe0eced14610d74578063515a929314610ce4578063572b6c0514610c9057806368f6ee6c14610c535780636afdd85014610c0f578063715018a614610bb857806377d4ad4f14610b2f5780637da0a87714610aeb5780638da5cb5b14610ac45780639855c76c1461090a5780639e6eec051461077c578063a01b19cb1461074b578063a887538714610722578063b4996ee3146106f3578063b5c104f314610693578063c68f82df14610675578063d519ee53146105fd578063e28b5411146105ce578063f2fde38b14610548578063f3e37d0114610391578063f434c9141461034c5763fef4325714610173575f80fd5b60e0366003190112610349576004359061018b6115fd565b90610194611613565b9160a4356001600160401b038111610347576101b490369060040161163f565b94909360c4356001600160401b038111610343576101d690369060040161163f565b9190956101e284611a1a565b946101f1848960443584611cb1565b6001600160a01b038716989095899590919061020e88858961212a565b6001600160a01b038b5c81169a919691906102276121a9565b166001600160a01b03198d5c16178c5d61024090612235565b6040519c8d978896879663fef4325760e01b88526004880152600160a01b60019003169a8b60248801526044870152600160a01b60019003166064860152608435608486015260a4850160e0905260e485019061029c926117c2565b906003198483030160c48501526102b2926117c2565b03915a94602095f19384156103385783946102ff575b6020955061eeee82036102ef575b5050815c6001600160a01b03191617905d604051908152f35b6102f891612248565b5f806102d6565b93506020853d602011610330575b8161031a602093836116f8565b8101031261032c5760209451936102c8565b5f80fd5b3d915061030d565b6040513d85823e3d90fd5b8480fd5b825b80fd5b50346103495780600319360112610349576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b5034610349576040366003190112610349576004356103ae6115fd565b818352600360205260ff604084205416610534576001600160a01b0381168084526004602052604084205490919060ff1615610520576103ee8184611abc565b6040516331a9108f60e11b815260048101849052916020836024817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa801561051557849386916104b3575b507faafd08517185362032409130d3ca4a9fc5b0f259dc591f258d4526471ca6559f9361047091611b06565b83855260066020526040852080546001600160a01b03191690911790556104956122c0565b604080516001600160a01b039384168152919092166020820152a280f35b9350506020833d60201161050d575b816104cf602093836116f8565b8101031261034357610470846105057faafd08517185362032409130d3ca4a9fc5b0f259dc591f258d4526471ca6559f95611800565b915093610444565b3d91506104c2565b6040513d87823e3d90fd5b6302c801b960e21b84526004829052602484fd5b631cc29c1560e11b83526004829052602483fd5b503461034957602036600319011261034957610562611629565b61056a611a49565b6001600160a01b031680156105ba5781546001600160a01b03198116821783556001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08380a380f35b631e4fbdf760e01b82526004829052602482fd5b5034610349576060366003190112610349576020906105eb6115fd565b506105f4611690565b50604051908152f35b5034610349576020366003190112610349576106176117e2565b506060610625600435611905565b50604051610632816116dd565b8154808252600183015460208084019182526002909401546001600160a01b03908116604094850190815284519384529151948301949094525190921690820152f35b50346103495780600319360112610349576020600254604051908152f35b5034610349576080366003190112610349576024356001600160401b0381116106ef57366023820112156106ef578060040135906001600160401b03821161034757602490369260051b01011161034957602090604051908152f35b5080fd5b50346103495760203660031901126103495760ff60406020926004358152600384522054166040519015158152f35b50346103495780600319360112610349576001546040516001600160a01b039091168152602090f35b503461034957602036600319011261034957602061076a600435611c12565b6040516001600160a01b039091168152f35b5060c036600319011261032c576004356107946115fd565b9060643580151580910361032c576084356001600160401b03811161032c576107c190369060040161163f565b909160a4356001600160401b03811161032c576107e290369060040161163f565b91906107ed86611a1a565b966107fc848360443584611cb1565b966001600160a01b0389169661081389848a61212a565b6001600160a01b035f5c81169b9195916108469161082f6121a9565b166001600160601b0360a01b5f5c16175f5d612235565b883b1561032c575f966108996108ab936040519a8b998a988998639e6eec0560e01b8a5260048a015260018060a01b03169e8f60248a01526044890152606488015260c0608488015260c48701916117c2565b8481036003190160a4860152916117c2565b0391865af180156108ff576108ea575b5061eeee82036108da575b5050815c6001600160a01b03191617815d80f35b6108e391612248565b5f806108c6565b6108f79194505f906116f8565b5f925f6108bb565b6040513d5f823e3d90fd5b3461032c57604036600319011261032c576004356109266115fd565b6040516331a9108f60e11b8152600481018390526020816024817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa80156108ff5783905f90610a87575b6109859250611b06565b5f828152600660205260409020546001600160a01b0316908115610a2e575b6001600160a01b03908116908216818103610a1957836109c48482611abc565b805f52600360205260405f20600160ff198254161790557f298cca49b7c582ed93d645e96d801db649fb46acc42a8a0983abbbdc6e5de8f26020610a066122c0565b6040516001600160a01b039091168152a2005b63b22dde5760e01b5f5260045260245260445ffd5b9050610a3982611c12565b906001600160a01b03821615610a74575f83815260066020526040902080546001600160a01b0319166001600160a01b0384161790556109a4565b826381a0149760e01b5f5260045260245ffd5b50506020813d602011610abc575b81610aa2602093836116f8565b8101031261032c5782610ab761098592611800565b61097b565b3d9150610a95565b3461032c575f36600319011261032c575f546040516001600160a01b039091168152602090f35b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57602036600319011261032c577fdbd0016f09d745a7de013fa9ff851060bcbe062f58cc945289c5a7e5a3a4f23d610b69611629565b610b71611a49565b6001600160a01b0381165f908152600460205260409020805460ff19166001179055610b9b6122c0565b604080516001600160a01b039384168152919092166020820152a1005b3461032c575f36600319011261032c57610bd0611a49565b5f80546001600160a01b0319811682556001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08280a3005b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57602036600319011261032c576001600160a01b03610c74611629565b165f526004602052602060ff60405f2054166040519015158152f35b3461032c57602036600319011261032c576020610cab611629565b6040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b039081169216919091148152f35b3461032c57602036600319011261032c57610d00600435611935565b6040518091602082016020835281518091526020604084019201905f5b818110610d2b575050500390f35b919350916020606082610d66600194885163ffffffff6040809260018060a01b03815116855260ff6020820151166020860152015116910152565b019401910191849392610d1d565b3461032c57602036600319011261032c57602061076a600435611a8f565b3461032c57602036600319011261032c57610dab611629565b610db3611a49565b6001600160a01b038116908115610f8c57308214610f79576040516306661abd60e01b8152916020836004817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa9283156108ff575f93610f45575b50610e248284611abc565b6002546001549093906001600160a01b03168015610f3e575b60405194610e4a866116dd565b85526020850194828652604081019160018060a01b0316825260055468010000000000000000811015610f2a57806001610e879201600555611905565b929092610f17577f292a1359f0b0a2015b79afaa9c1054e7680447806ca37d9726fdaf63d590cd719660029251845551600184015560018060a01b0390511691019060018060a01b03166001600160601b0360a01b825416179055816001600160601b0360a01b60015416176001556002555f52600460205260405f20600160ff19825416179055610b9b6122c0565b634e487b7160e01b5f525f60045260245ffd5b634e487b7160e01b5f52604160045260245ffd5b5082610e3d565b9092506020813d602011610f71575b81610f61602093836116f8565b8101031261032c57519183610e19565b3d9150610f54565b50631264c0ff60e01b5f5260045260245ffd5b5063707cb18360e11b5f5260045260245ffd5b3461032c57604036600319011261032c576060610fc5610fbd6115fd565b600435611861565b6040805182516001600160a01b0316815260208084015160ff16908201529181015163ffffffff1690820152f35b3461032c57602036600319011261032c5761100c611629565b611014611a49565b6001546001600160a01b038281169291168214611068577f8e4d443291f4cde63c724c33eda41133859c0d5eef1de6a4702fb8720f866d9d915f52600460205260405f2060ff198154169055610b9b6122c0565b50633b2030a160e11b5f5260045260245ffd5b3461032c575f36600319011261032c576040515f5c6001600160a01b03168152602090f35b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57604036600319011261032c576024356001600160401b03811161032c573660238201121561032c578060040135906001600160401b03821161032c57602490606036930201011161032c57005b3461032c575f36600319011261032c576020600554604051908152f35b3461032c5760a036600319011261032c5760043561116f6115fd565b90611178611613565b608435916001600160401b03831161032c576111995f93369060040161163f565b949091846101006040516111ac816116a6565b8281528260208201528260408201528260608201528260808201528260a08201528260c08201528260e0820152015261123c60018060a01b036111ee83611a1a565b169360405197889687958695630aff0c3160e01b8752600487015260018060a01b03166024860152604435604486015260018060a01b0316606485015260a0608485015260a48401916117c2565b03915afa80156108ff575f5f925f905f93611393575b5092919060405193849361010061018086019365ffffffffffff815116875265ffffffffffff602082015116602088015265ffffffffffff604082015116604088015265ffffffffffff606082015116606088015263ffffffff60808201511660808801526001600160701b0360a08201511660a088015263ffffffff60c08201511660c088015260018060a01b0360e08201511660e0880152015161010086015261012085015261014084015261018061016084015281518091526101a083019060206101a08260051b8601019301915f905b82821061133557505050500390f35b91936001919395506020611383819261019f198a8203018652608060608a51878060a01b0381511684528581015115158685015260408101516040850152015191816060820152019061166c565b9601920192018594939192611326565b93505050503d805f833e6113a781836116f8565b8101818103610180811261032c576101201361032c576040516113c9816116a6565b6113d283611719565b81526113e060208401611719565b60208201526113f160408401611719565b604082015261140260608401611719565b60608201526114136080840161172c565b608082015260a08301516001600160701b038116810361032c5760a082015261143e60c0840161172c565b60c082015260e08301516001600160a01b038116810361032c5760e08201526101008301516101008201526101208301519061014084015193610160810151906001600160401b03821161032c57019280601f8501121561032c578351936114a58561173d565b946114b360405196876116f8565b80865260208087019160051b8301019183831161032c5760208101915b8383106114e4575050505050909284611252565b82516001600160401b03811161032c578201906080828703601f19011261032c5760405190611512826116c2565b60208301516001600160a01b038116810361032c57825261153560408401611754565b6020830152606083015160408301526080830151916001600160401b03831161032c5761156a8860208096958196010161177c565b60608201528152019201916114d0565b3461032c57602036600319011261032c576004359063ffffffff60e01b821680920361032c57602091630f514f4d60e41b81149081156115ec575b81156115db575b81156115ca575b5015158152f35b6301ffc9a760e01b149050836115c3565b637343409560e01b811491506115bc565b634fe0eced60e01b811491506115b5565b602435906001600160a01b038216820361032c57565b606435906001600160a01b038216820361032c57565b600435906001600160a01b038216820361032c57565b9181601f8401121561032c578235916001600160401b03831161032c576020838186019501011161032c57565b805180835260209291819084018484015e5f828201840152601f01601f1916010190565b604435906001600160a01b038216820361032c57565b61012081019081106001600160401b03821117610f2a57604052565b608081019081106001600160401b03821117610f2a57604052565b606081019081106001600160401b03821117610f2a57604052565b90601f801991011681019081106001600160401b03821117610f2a57604052565b519065ffffffffffff8216820361032c57565b519063ffffffff8216820361032c57565b6001600160401b038111610f2a5760051b60200190565b5190811515820361032c57565b6001600160401b038111610f2a57601f01601f191660200190565b81601f8201121561032c5780519061179382611761565b926117a160405194856116f8565b8284526020838301011161032c57815f9260208093018386015e8301015290565b908060209392818452848401375f828201840152601f01601f1916010190565b604051906117ef826116dd565b5f6040838281528260208201520152565b51906001600160a01b038216820361032c57565b919082606091031261032c5760405161182c816116dd565b809261183781611800565b825260208101519060ff8216820361032c57604061185c91819360208601520161172c565b910152565b9061186a6117e2565b916001600160a01b0361187c82611a8f565b169283156118fe5750604051633a01714f60e01b815260048101919091526001600160a01b03909116602482015290606090829060449082905afa9081156108ff575f916118c8575090565b905060603d6060116118f7575b6118df81836116f8565b810160608282031261032c576118f491611814565b90565b503d6118d5565b9250505090565b6005548110156119215760055f52600360205f20910201905f90565b634e487b7160e01b5f52603260045260245ffd5b6001600160a01b0361194682611a8f565b16908115611a13575f9060246040518094819363515a929360e01b835260048301525afa9081156108ff575f9161197b575090565b90503d805f833e61198c81836116f8565b81019060208183031261032c578051906001600160401b03821161032c570181601f8201121561032c5780516119c18161173d565b926119cf60405194856116f8565b8184526020606081860193028401019281841161032c57602001915b8383106119f9575050505090565b6020606091611a088486611814565b8152019201916119eb565b5050606090565b90611a2482611a8f565b916001600160a01b03831615611a375750565b6381a0149760e01b5f5260045260245ffd5b5f546001600160a01b0390811690611a5f6122c0565b1603611a6757565b611a6f6122c0565b63118cdaa760e01b5f9081526001600160a01b0391909116600452602490fd5b5f818152600660205260409020546001600160a01b031691908215611ab15750565b6118f4919250611c12565b6001600160a01b0382169190308314611af35790611ada9130612319565b611ae15750565b631264c0ff60e01b5f5260045260245ffd5b82631264c0ff60e01b5f5260045260245ffd5b90611b0f6122c0565b6001600160a01b0392831692168083141580611b59575b611b2f57505050565b6084935060405192631326f75560e11b8452600484015260248301526044820152601f6064820152fd5b50604051631a45b42760e11b8152600481018290526024810184905260448101839052601f606482015260016084820181905260a482015260208160c4817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa9081156108ff575f91611bd8575b5015611b26565b90506020813d602011611c0a575b81611bf3602093836116f8565b8101031261032c57611c0490611754565b5f611bd1565b3d9150611be6565b6002548111611c7257600554905f5b828110611c2f575050505f90565b611c3881611905565b508054831180611c64575b611c505750600101611c21565b600201546001600160a01b03169392505050565b506001810154831115611c43565b506001546001600160a01b031690565b3d15611cac573d90611c9382611761565b91611ca160405193846116f8565b82523d5f602084013e565b606090565b5f9290916001600160a01b0383169161eeee8314612120573461210d5760409560208751611cdf89826116f8565b60078152663832b936b4ba1960c91b9101523060601b6bffffffffffffffffffffffff191673c16f881b3dd0a1bf52965fa8de2adc6199cef18360601b186001600160e01b031916611d3082611761565b91611d3d895193846116f8565b808352368185011161032c576020815f92611d5f9683870137840101526123e4565b90611e72575b5084516370a0823160e01b815230600482015292602084602481865afa938415611e68578594611e30575b5091611da960209260249430611da46122c0565b6125b7565b85516370a0823160e01b815230600482015292839182905afa938415611e2757508293611df3575b508203918211611ddf575090565b634e487b7160e01b81526011600452602490fd5b9092506020813d602011611e1f575b81611e0f602093836116f8565b8101031261032c5751915f611dd1565b3d9150611e02565b513d84823e3d90fd5b929093506020833d602011611e60575b81611e4d602093836116f8565b8101031261032c57915192611da9611d90565b3d9150611e40565b86513d87823e3d90fd5b805181019060208183031261032c576020810151906001600160401b03821161032c57019060a08282031261032c57865160a081018181106001600160401b03821117610f2a5788526020830151815282880151926001600160a01b038416840361032c5760208201938452611eea60608201611719565b92898301938452611efd60808301611719565b916060840192835260a0810151916001600160401b03831161032c57611f2a92602080920192010161177c565b6080830190815284519094906001600160a01b03168087116120f75750519251905189519365ffffffffffff91821692909116906001600160a01b0316611f70856116c2565b878552602085015289840152606083015251875191611f8e836116dd565b82523060208301908152888301918252917f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690611fd26122c0565b945192823b1561032c578a516302b67b5760e41b81526001600160a01b0396871660048201529151805187166024840152602081015187166044840152808c015165ffffffffffff9081166064850152606090910151166084830152935190941660a4850152915160c484015261010060e48401525f9183918290849082906120609061010483019061166c565b03925af190816120e2575b506120dd57612078611c82565b827f7e09272f9c04cd2a99107aa546ff6e4b501a0b2dd163864b2e255c5cc9f76fe86120c06120a56122c0565b936120ae6122c0565b948a519283928c84528c84019061166c565b6001600160a01b0396871660208401529516940390a35b5f611d65565b6120d7565b6120ef9195505f906116f8565b5f935f61206b565b86633a52178360e01b5f5260045260245260445ffd5b6307d0d44160e11b5f523460045260245ffd5b5050505050503490565b6001600160a01b03909116919061eeee83146121a35761214b8282856127d0565b15612158575b5050505f90565b612162818461281d565b1561219057906121729183612881565b1561217e578080612151565b635274afe760e01b5f5260045260245ffd5b82635274afe760e01b5f5260045260245ffd5b50905090565b6121b16122c0565b803b156118f4575f80604051602081019063296eee5160e01b8252600481526121db6024826116f8565b5190845afa6121e8611c82565b9015801561222a575b6122265760208180518101031261032c57602001516001600160a01b0381169081900361032c5780612221575090565b905090565b5090565b5060208151106121f1565b6001600160a01b0316338114611ae15750565b906122545f82846127d0565b1561225d575050565b612267818361281d565b1561229f575f6122779183612881565b1561227f5750565b635274afe760e01b5f9081526001600160a01b0391909116600452602490fd5b50635274afe760e01b5f9081526001600160a01b0391909116600452602490fd5b6014361015806122e7575b156122e357601319360136811161032c573560601c90565b3390565b50337f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316146122cb565b905f925b6005841061232e5750505050600190565b6001600160a01b0390811690831681146123ca575f80916040516020810190634fe0eced60e01b82528560248201526024815261236c6044826116f8565b51915afa612378611c82565b901580156123bf575b6123b75760208180518101031261032c57602001516001600160a01b03811680820361032c57156123b75760019093019261231d565b505050505f90565b506020815110612381565b50505050600190565b908151811015611921570160200190565b90915f91606060258551111561259c578451602410156119215760448501518060f81c9160205b60048101808211612509576001600160f81b0319612429828b6123d3565b511615158061257d575b156125735761244290896123d3565b516020828a01015160f882901c91906001600160e01b031988811691161461246e57505060050161240b565b955095965092905060098301809311918261250957611fe0809160f31c16169080820460201490151715612509578210801590612554575b1561251d575050611fe0808551925b60f31c16169180830460201490151715612509578190039060405193601f19603f8487010116604052828552015f5b8281106124f45750505060019190565b806020809284010151828288010152016124e4565b634e487b7160e01b5f52601160045260245ffd5b6125095761252b90856123d3565b51611fe0808260f81c9260f31c1616908082046020149015171561250957611fe08091926124b5565b505f90506001600160f81b031961256b83886123d3565b5116156124a6565b5050949550505050565b5060f384901c611fe01685156020878304141715612509578210612433565b50509150505f906040516125b16020826116f8565b5f815290565b6001600160a01b03169130831461275857604051636eb1769f60e11b8152600481018490523060248201526001600160a01b03919091169290602081604481875afa80156108ff5785915f91612723575b5010156126b9576001600160a01b0384116126a6577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690813b1561032c575f60849281956040519788968795631b63c28b60e11b8752600487015260018060a01b0316602486015260018060a01b0316604485015260648401525af180156108ff5761269a5750565b5f6126a4916116f8565b565b83636442752d60e01b5f5260045260245ffd5b919290604051926323b872dd60e01b5f5260045260018060a01b031660245260445260205f60648180865af19060015f5114821615612702575b6040525f6060521561217e5750565b90600181151661271a57823b15153d151616906126f3565b503d5f823e3d90fd5b9150506020813d602011612750575b8161273f602093836116f8565b8101031261032c578490515f612608565b3d9150612732565b6001600160a01b03169290915061eeee83146127c5576040519163a9059cbb60e01b5f5260018060a01b031660045260245260205f60448180865af19060015f51148216156127ad575b6040521561217e5750565b90600181151661271a57823b15153d151616906127a2565b906126a492506128bc565b92916040519163095ea7b360e01b5f5260018060a01b031660045260245260205f60448180875af19260015f511484161561280c575b50604052565b3d15903b151516909216915f612806565b60405163095ea7b360e01b5f9081526001600160a01b03909316600452602483905290929160209060448180875af19260015f511484161561285f5750604052565b60018492941516612878573b15153d151616915f612806565b833d5f823e3d90fd5b92916040519163095ea7b360e01b5f5260018060a01b031660045260245260205f60448180875af19260015f511484161561285f5750604052565b81471061290b575f8080938193826040516128d86020826116f8565b526001600160a01b03165af1156128eb57565b3d156128fc576040513d5f823e3d90fd5b63d6bda27560e01b5f5260045ffd5b504763cf47918160e01b5f5260045260245260445ffdfea164736f6c634300081c000a",
+	"deployedBytecode": "0x6080806040526004361015610012575f80fd5b5f905f3560e01c90816301ffc9a71461157a575080630aff0c31146111535780631386053314611136578063253721c8146110e4578063293c4999146110a0578063296eee511461107b57806330c236e814610ff35780633a01714f14610f9f5780634e96e7af14610d925780634fe0eced14610d74578063515a929314610ce4578063572b6c0514610c9057806368f6ee6c14610c535780636afdd85014610c0f578063715018a614610bb857806377d4ad4f14610b2f5780637da0a87714610aeb5780638da5cb5b14610ac45780639855c76c1461090a5780639e6eec051461077c578063a01b19cb1461074b578063a887538714610722578063b4996ee3146106f3578063b5c104f314610693578063c68f82df14610675578063d519ee53146105fd578063e28b5411146105ce578063f2fde38b14610548578063f3e37d0114610391578063f434c9141461034c5763fef4325714610173575f80fd5b60e0366003190112610349576004359061018b6115fd565b90610194611613565b9160a4356001600160401b038111610347576101b490369060040161163f565b94909360c4356001600160401b038111610343576101d690369060040161163f565b9190956101e284611a1a565b946101f1848960443584611cb1565b6001600160a01b038716989095899590919061020e88858961212a565b6001600160a01b038b5c81169a919691906102276121a9565b166001600160a01b03198d5c16178c5d61024090612235565b6040519c8d978896879663fef4325760e01b88526004880152600160a01b60019003169a8b60248801526044870152600160a01b60019003166064860152608435608486015260a4850160e0905260e485019061029c926117c2565b906003198483030160c48501526102b2926117c2565b03915a94602095f19384156103385783946102ff575b6020955061eeee82036102ef575b5050815c6001600160a01b03191617905d604051908152f35b6102f891612248565b5f806102d6565b93506020853d602011610330575b8161031a602093836116f8565b8101031261032c5760209451936102c8565b5f80fd5b3d915061030d565b6040513d85823e3d90fd5b8480fd5b825b80fd5b50346103495780600319360112610349576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b5034610349576040366003190112610349576004356103ae6115fd565b818352600360205260ff604084205416610534576001600160a01b0381168084526004602052604084205490919060ff1615610520576103ee8184611abc565b6040516331a9108f60e11b815260048101849052916020836024817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa801561051557849386916104b3575b507faafd08517185362032409130d3ca4a9fc5b0f259dc591f258d4526471ca6559f9361047091611b06565b83855260066020526040852080546001600160a01b03191690911790556104956122c0565b604080516001600160a01b039384168152919092166020820152a280f35b9350506020833d60201161050d575b816104cf602093836116f8565b8101031261034357610470846105057faafd08517185362032409130d3ca4a9fc5b0f259dc591f258d4526471ca6559f95611800565b915093610444565b3d91506104c2565b6040513d87823e3d90fd5b6302c801b960e21b84526004829052602484fd5b631cc29c1560e11b83526004829052602483fd5b503461034957602036600319011261034957610562611629565b61056a611a49565b6001600160a01b031680156105ba5781546001600160a01b03198116821783556001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08380a380f35b631e4fbdf760e01b82526004829052602482fd5b5034610349576060366003190112610349576020906105eb6115fd565b506105f4611690565b50604051908152f35b5034610349576020366003190112610349576106176117e2565b506060610625600435611905565b50604051610632816116dd565b8154808252600183015460208084019182526002909401546001600160a01b03908116604094850190815284519384529151948301949094525190921690820152f35b50346103495780600319360112610349576020600254604051908152f35b5034610349576080366003190112610349576024356001600160401b0381116106ef57366023820112156106ef578060040135906001600160401b03821161034757602490369260051b01011161034957602090604051908152f35b5080fd5b50346103495760203660031901126103495760ff60406020926004358152600384522054166040519015158152f35b50346103495780600319360112610349576001546040516001600160a01b039091168152602090f35b503461034957602036600319011261034957602061076a600435611c12565b6040516001600160a01b039091168152f35b5060c036600319011261032c576004356107946115fd565b9060643580151580910361032c576084356001600160401b03811161032c576107c190369060040161163f565b909160a4356001600160401b03811161032c576107e290369060040161163f565b91906107ed86611a1a565b966107fc848360443584611cb1565b966001600160a01b0389169661081389848a61212a565b6001600160a01b035f5c81169b9195916108469161082f6121a9565b166001600160601b0360a01b5f5c16175f5d612235565b883b1561032c575f966108996108ab936040519a8b998a988998639e6eec0560e01b8a5260048a015260018060a01b03169e8f60248a01526044890152606488015260c0608488015260c48701916117c2565b8481036003190160a4860152916117c2565b0391865af180156108ff576108ea575b5061eeee82036108da575b5050815c6001600160a01b03191617815d80f35b6108e391612248565b5f806108c6565b6108f79194505f906116f8565b5f925f6108bb565b6040513d5f823e3d90fd5b3461032c57604036600319011261032c576004356109266115fd565b6040516331a9108f60e11b8152600481018390526020816024817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa80156108ff5783905f90610a87575b6109859250611b06565b5f828152600660205260409020546001600160a01b0316908115610a2e575b6001600160a01b03908116908216818103610a1957836109c48482611abc565b805f52600360205260405f20600160ff198254161790557f298cca49b7c582ed93d645e96d801db649fb46acc42a8a0983abbbdc6e5de8f26020610a066122c0565b6040516001600160a01b039091168152a2005b63b22dde5760e01b5f5260045260245260445ffd5b9050610a3982611c12565b906001600160a01b03821615610a74575f83815260066020526040902080546001600160a01b0319166001600160a01b0384161790556109a4565b826381a0149760e01b5f5260045260245ffd5b50506020813d602011610abc575b81610aa2602093836116f8565b8101031261032c5782610ab761098592611800565b61097b565b3d9150610a95565b3461032c575f36600319011261032c575f546040516001600160a01b039091168152602090f35b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57602036600319011261032c577fdbd0016f09d745a7de013fa9ff851060bcbe062f58cc945289c5a7e5a3a4f23d610b69611629565b610b71611a49565b6001600160a01b0381165f908152600460205260409020805460ff19166001179055610b9b6122c0565b604080516001600160a01b039384168152919092166020820152a1005b3461032c575f36600319011261032c57610bd0611a49565b5f80546001600160a01b0319811682556001600160a01b03167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e08280a3005b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57602036600319011261032c576001600160a01b03610c74611629565b165f526004602052602060ff60405f2054166040519015158152f35b3461032c57602036600319011261032c576020610cab611629565b6040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b039081169216919091148152f35b3461032c57602036600319011261032c57610d00600435611935565b6040518091602082016020835281518091526020604084019201905f5b818110610d2b575050500390f35b919350916020606082610d66600194885163ffffffff6040809260018060a01b03815116855260ff6020820151166020860152015116910152565b019401910191849392610d1d565b3461032c57602036600319011261032c57602061076a600435611a8f565b3461032c57602036600319011261032c57610dab611629565b610db3611a49565b6001600160a01b038116908115610f8c57308214610f79576040516306661abd60e01b8152916020836004817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa9283156108ff575f93610f45575b50610e248284611abc565b6002546001549093906001600160a01b03168015610f3e575b60405194610e4a866116dd565b85526020850194828652604081019160018060a01b0316825260055468010000000000000000811015610f2a57806001610e879201600555611905565b929092610f17577f292a1359f0b0a2015b79afaa9c1054e7680447806ca37d9726fdaf63d590cd719660029251845551600184015560018060a01b0390511691019060018060a01b03166001600160601b0360a01b825416179055816001600160601b0360a01b60015416176001556002555f52600460205260405f20600160ff19825416179055610b9b6122c0565b634e487b7160e01b5f525f60045260245ffd5b634e487b7160e01b5f52604160045260245ffd5b5082610e3d565b9092506020813d602011610f71575b81610f61602093836116f8565b8101031261032c57519183610e19565b3d9150610f54565b50631264c0ff60e01b5f5260045260245ffd5b5063707cb18360e11b5f5260045260245ffd5b3461032c57604036600319011261032c576060610fc5610fbd6115fd565b600435611861565b6040805182516001600160a01b0316815260208084015160ff16908201529181015163ffffffff1690820152f35b3461032c57602036600319011261032c5761100c611629565b611014611a49565b6001546001600160a01b038281169291168214611068577f8e4d443291f4cde63c724c33eda41133859c0d5eef1de6a4702fb8720f866d9d915f52600460205260405f2060ff198154169055610b9b6122c0565b50633b2030a160e11b5f5260045260245ffd5b3461032c575f36600319011261032c576040515f5c6001600160a01b03168152602090f35b3461032c575f36600319011261032c576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461032c57604036600319011261032c576024356001600160401b03811161032c573660238201121561032c578060040135906001600160401b03821161032c57602490606036930201011161032c57005b3461032c575f36600319011261032c576020600554604051908152f35b3461032c5760a036600319011261032c5760043561116f6115fd565b90611178611613565b608435916001600160401b03831161032c576111995f93369060040161163f565b949091846101006040516111ac816116a6565b8281528260208201528260408201528260608201528260808201528260a08201528260c08201528260e0820152015261123c60018060a01b036111ee83611a1a565b169360405197889687958695630aff0c3160e01b8752600487015260018060a01b03166024860152604435604486015260018060a01b0316606485015260a0608485015260a48401916117c2565b03915afa80156108ff575f5f925f905f93611393575b5092919060405193849361010061018086019365ffffffffffff815116875265ffffffffffff602082015116602088015265ffffffffffff604082015116604088015265ffffffffffff606082015116606088015263ffffffff60808201511660808801526001600160701b0360a08201511660a088015263ffffffff60c08201511660c088015260018060a01b0360e08201511660e0880152015161010086015261012085015261014084015261018061016084015281518091526101a083019060206101a08260051b8601019301915f905b82821061133557505050500390f35b91936001919395506020611383819261019f198a8203018652608060608a51878060a01b0381511684528581015115158685015260408101516040850152015191816060820152019061166c565b9601920192018594939192611326565b93505050503d805f833e6113a781836116f8565b8101818103610180811261032c576101201361032c576040516113c9816116a6565b6113d283611719565b81526113e060208401611719565b60208201526113f160408401611719565b604082015261140260608401611719565b60608201526114136080840161172c565b608082015260a08301516001600160701b038116810361032c5760a082015261143e60c0840161172c565b60c082015260e08301516001600160a01b038116810361032c5760e08201526101008301516101008201526101208301519061014084015193610160810151906001600160401b03821161032c57019280601f8501121561032c578351936114a58561173d565b946114b360405196876116f8565b80865260208087019160051b8301019183831161032c5760208101915b8383106114e4575050505050909284611252565b82516001600160401b03811161032c578201906080828703601f19011261032c5760405190611512826116c2565b60208301516001600160a01b038116810361032c57825261153560408401611754565b6020830152606083015160408301526080830151916001600160401b03831161032c5761156a8860208096958196010161177c565b60608201528152019201916114d0565b3461032c57602036600319011261032c576004359063ffffffff60e01b821680920361032c57602091630f514f4d60e41b81149081156115ec575b81156115db575b81156115ca575b5015158152f35b6301ffc9a760e01b149050836115c3565b637343409560e01b811491506115bc565b634fe0eced60e01b811491506115b5565b602435906001600160a01b038216820361032c57565b606435906001600160a01b038216820361032c57565b600435906001600160a01b038216820361032c57565b9181601f8401121561032c578235916001600160401b03831161032c576020838186019501011161032c57565b805180835260209291819084018484015e5f828201840152601f01601f1916010190565b604435906001600160a01b038216820361032c57565b61012081019081106001600160401b03821117610f2a57604052565b608081019081106001600160401b03821117610f2a57604052565b606081019081106001600160401b03821117610f2a57604052565b90601f801991011681019081106001600160401b03821117610f2a57604052565b519065ffffffffffff8216820361032c57565b519063ffffffff8216820361032c57565b6001600160401b038111610f2a5760051b60200190565b5190811515820361032c57565b6001600160401b038111610f2a57601f01601f191660200190565b81601f8201121561032c5780519061179382611761565b926117a160405194856116f8565b8284526020838301011161032c57815f9260208093018386015e8301015290565b908060209392818452848401375f828201840152601f01601f1916010190565b604051906117ef826116dd565b5f6040838281528260208201520152565b51906001600160a01b038216820361032c57565b919082606091031261032c5760405161182c816116dd565b809261183781611800565b825260208101519060ff8216820361032c57604061185c91819360208601520161172c565b910152565b9061186a6117e2565b916001600160a01b0361187c82611a8f565b169283156118fe5750604051633a01714f60e01b815260048101919091526001600160a01b03909116602482015290606090829060449082905afa9081156108ff575f916118c8575090565b905060603d6060116118f7575b6118df81836116f8565b810160608282031261032c576118f491611814565b90565b503d6118d5565b9250505090565b6005548110156119215760055f52600360205f20910201905f90565b634e487b7160e01b5f52603260045260245ffd5b6001600160a01b0361194682611a8f565b16908115611a13575f9060246040518094819363515a929360e01b835260048301525afa9081156108ff575f9161197b575090565b90503d805f833e61198c81836116f8565b81019060208183031261032c578051906001600160401b03821161032c570181601f8201121561032c5780516119c18161173d565b926119cf60405194856116f8565b8184526020606081860193028401019281841161032c57602001915b8383106119f9575050505090565b6020606091611a088486611814565b8152019201916119eb565b5050606090565b90611a2482611a8f565b916001600160a01b03831615611a375750565b6381a0149760e01b5f5260045260245ffd5b5f546001600160a01b0390811690611a5f6122c0565b1603611a6757565b611a6f6122c0565b63118cdaa760e01b5f9081526001600160a01b0391909116600452602490fd5b5f818152600660205260409020546001600160a01b031691908215611ab15750565b6118f4919250611c12565b6001600160a01b0382169190308314611af35790611ada9130612319565b611ae15750565b631264c0ff60e01b5f5260045260245ffd5b82631264c0ff60e01b5f5260045260245ffd5b90611b0f6122c0565b6001600160a01b0392831692168083141580611b59575b611b2f57505050565b6084935060405192631326f75560e11b8452600484015260248301526044820152601f6064820152fd5b50604051631a45b42760e11b8152600481018290526024810184905260448101839052601f606482015260016084820181905260a482015260208160c4817f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03165afa9081156108ff575f91611bd8575b5015611b26565b90506020813d602011611c0a575b81611bf3602093836116f8565b8101031261032c57611c0490611754565b5f611bd1565b3d9150611be6565b6002548111611c7257600554905f5b828110611c2f575050505f90565b611c3881611905565b508054831180611c64575b611c505750600101611c21565b600201546001600160a01b03169392505050565b506001810154831115611c43565b506001546001600160a01b031690565b3d15611cac573d90611c9382611761565b91611ca160405193846116f8565b82523d5f602084013e565b606090565b5f9290916001600160a01b0383169161eeee8314612120573461210d5760409560208751611cdf89826116f8565b60078152663832b936b4ba1960c91b9101523060601b6bffffffffffffffffffffffff191673c16f881b3dd0a1bf52965fa8de2adc6199cef18360601b186001600160e01b031916611d3082611761565b91611d3d895193846116f8565b808352368185011161032c576020815f92611d5f9683870137840101526123e4565b90611e72575b5084516370a0823160e01b815230600482015292602084602481865afa938415611e68578594611e30575b5091611da960209260249430611da46122c0565b6125b7565b85516370a0823160e01b815230600482015292839182905afa938415611e2757508293611df3575b508203918211611ddf575090565b634e487b7160e01b81526011600452602490fd5b9092506020813d602011611e1f575b81611e0f602093836116f8565b8101031261032c5751915f611dd1565b3d9150611e02565b513d84823e3d90fd5b929093506020833d602011611e60575b81611e4d602093836116f8565b8101031261032c57915192611da9611d90565b3d9150611e40565b86513d87823e3d90fd5b805181019060208183031261032c576020810151906001600160401b03821161032c57019060a08282031261032c57865160a081018181106001600160401b03821117610f2a5788526020830151815282880151926001600160a01b038416840361032c5760208201938452611eea60608201611719565b92898301938452611efd60808301611719565b916060840192835260a0810151916001600160401b03831161032c57611f2a92602080920192010161177c565b6080830190815284519094906001600160a01b03168087116120f75750519251905189519365ffffffffffff91821692909116906001600160a01b0316611f70856116c2565b878552602085015289840152606083015251875191611f8e836116dd565b82523060208301908152888301918252917f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690611fd26122c0565b945192823b1561032c578a516302b67b5760e41b81526001600160a01b0396871660048201529151805187166024840152602081015187166044840152808c015165ffffffffffff9081166064850152606090910151166084830152935190941660a4850152915160c484015261010060e48401525f9183918290849082906120609061010483019061166c565b03925af190816120e2575b506120dd57612078611c82565b827f7e09272f9c04cd2a99107aa546ff6e4b501a0b2dd163864b2e255c5cc9f76fe86120c06120a56122c0565b936120ae6122c0565b948a519283928c84528c84019061166c565b6001600160a01b0396871660208401529516940390a35b5f611d65565b6120d7565b6120ef9195505f906116f8565b5f935f61206b565b86633a52178360e01b5f5260045260245260445ffd5b6307d0d44160e11b5f523460045260245ffd5b5050505050503490565b6001600160a01b03909116919061eeee83146121a35761214b8282856127d0565b15612158575b5050505f90565b612162818461281d565b1561219057906121729183612881565b1561217e578080612151565b635274afe760e01b5f5260045260245ffd5b82635274afe760e01b5f5260045260245ffd5b50905090565b6121b16122c0565b803b156118f4575f80604051602081019063296eee5160e01b8252600481526121db6024826116f8565b5190845afa6121e8611c82565b9015801561222a575b6122265760208180518101031261032c57602001516001600160a01b0381169081900361032c5780612221575090565b905090565b5090565b5060208151106121f1565b6001600160a01b0316338114611ae15750565b906122545f82846127d0565b1561225d575050565b612267818361281d565b1561229f575f6122779183612881565b1561227f5750565b635274afe760e01b5f9081526001600160a01b0391909116600452602490fd5b50635274afe760e01b5f9081526001600160a01b0391909116600452602490fd5b6014361015806122e7575b156122e357601319360136811161032c573560601c90565b3390565b50337f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316146122cb565b905f925b6005841061232e5750505050600190565b6001600160a01b0390811690831681146123ca575f80916040516020810190634fe0eced60e01b82528560248201526024815261236c6044826116f8565b51915afa612378611c82565b901580156123bf575b6123b75760208180518101031261032c57602001516001600160a01b03811680820361032c57156123b75760019093019261231d565b505050505f90565b506020815110612381565b50505050600190565b908151811015611921570160200190565b90915f91606060258551111561259c578451602410156119215760448501518060f81c9160205b60048101808211612509576001600160f81b0319612429828b6123d3565b511615158061257d575b156125735761244290896123d3565b516020828a01015160f882901c91906001600160e01b031988811691161461246e57505060050161240b565b955095965092905060098301809311918261250957611fe0809160f31c16169080820460201490151715612509578210801590612554575b1561251d575050611fe0808551925b60f31c16169180830460201490151715612509578190039060405193601f19603f8487010116604052828552015f5b8281106124f45750505060019190565b806020809284010151828288010152016124e4565b634e487b7160e01b5f52601160045260245ffd5b6125095761252b90856123d3565b51611fe0808260f81c9260f31c1616908082046020149015171561250957611fe08091926124b5565b505f90506001600160f81b031961256b83886123d3565b5116156124a6565b5050949550505050565b5060f384901c611fe01685156020878304141715612509578210612433565b50509150505f906040516125b16020826116f8565b5f815290565b6001600160a01b03169130831461275857604051636eb1769f60e11b8152600481018490523060248201526001600160a01b03919091169290602081604481875afa80156108ff5785915f91612723575b5010156126b9576001600160a01b0384116126a6577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690813b1561032c575f60849281956040519788968795631b63c28b60e11b8752600487015260018060a01b0316602486015260018060a01b0316604485015260648401525af180156108ff5761269a5750565b5f6126a4916116f8565b565b83636442752d60e01b5f5260045260245ffd5b919290604051926323b872dd60e01b5f5260045260018060a01b031660245260445260205f60648180865af19060015f5114821615612702575b6040525f6060521561217e5750565b90600181151661271a57823b15153d151616906126f3565b503d5f823e3d90fd5b9150506020813d602011612750575b8161273f602093836116f8565b8101031261032c578490515f612608565b3d9150612732565b6001600160a01b03169290915061eeee83146127c5576040519163a9059cbb60e01b5f5260018060a01b031660045260245260205f60448180865af19060015f51148216156127ad575b6040521561217e5750565b90600181151661271a57823b15153d151616906127a2565b906126a492506128bc565b92916040519163095ea7b360e01b5f5260018060a01b031660045260245260205f60448180875af19260015f511484161561280c575b50604052565b3d15903b151516909216915f612806565b60405163095ea7b360e01b5f9081526001600160a01b03909316600452602483905290929160209060448180875af19260015f511484161561285f5750604052565b60018492941516612878573b15153d151616915f612806565b833d5f823e3d90fd5b92916040519163095ea7b360e01b5f5260018060a01b031660045260245260205f60448180875af19260015f511484161561285f5750604052565b81471061290b575f8080938193826040516128d86020826116f8565b526001600160a01b03165af1156128eb57565b3d156128fc576040513d5f823e3d90fd5b63d6bda27560e01b5f5260045ffd5b504763cf47918160e01b5f5260045260245260445ffdfea164736f6c634300081c000a",
+	"metadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"contract IJBPermissions\",\"name\":\"permissions\",\"type\":\"address\"},{\"internalType\":\"contract IJBProjects\",\"name\":\"projects\",\"type\":\"address\"},{\"internalType\":\"contract IPermit2\",\"name\":\"permit2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"trustedForwarder\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"type\":\"error\",\"name\":\"FailedCall\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"balance\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"needed\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"InsufficientBalance\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"sender\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"permissionId\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBPermissioned_Unauthorized\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_AmountOverflow\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_CannotDisallowDefaultTerminal\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_CircularForward\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_NoMsgValueAllowed\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"allowanceAmount\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_PermitAllowanceNotEnough\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_TerminalLocked\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"currentTerminal\",\"type\":\"address\"},{\"internalType\":\"contract IJBTerminal\",\"name\":\"expectedTerminal\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_TerminalMismatch\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_TerminalNotAllowed\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_TerminalNotSet\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"terminal\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"JBRouterTerminalRegistry_ZeroAddress\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"OwnableInvalidOwner\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"OwnableUnauthorizedAccount\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"type\":\"error\",\"name\":\"SafeERC20FailedOperation\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"uint256\",\"name\":\"returnedFees\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"string\",\"name\":\"memo\",\"type\":\"string\",\"indexed\":false},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"AddToBalance\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"contract IJBPayHook\",\"name\":\"hook\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"struct JBAfterPayRecordedContext\",\"name\":\"context\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"address\",\"name\":\"payer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"rulesetId\",\"type\":\"uint256\"},{\"internalType\":\"struct JBTokenAmount\",\"name\":\"amount\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}]},{\"internalType\":\"struct JBTokenAmount\",\"name\":\"forwardedAmount\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}]},{\"internalType\":\"uint256\",\"name\":\"weight\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"newlyIssuedTokenCount\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"beneficiary\",\"type\":\"address\"},{\"internalType\":\"bytes\",\"name\":\"hookMetadata\",\"type\":\"bytes\"},{\"internalType\":\"bytes\",\"name\":\"payerMetadata\",\"type\":\"bytes\"}],\"indexed\":false},{\"internalType\":\"uint256\",\"name\":\"specificationAmount\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"HookAfterRecordPay\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"JBRouterTerminalRegistry_AllowTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"JBRouterTerminalRegistry_DisallowTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"JBRouterTerminalRegistry_LockTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"JBRouterTerminalRegistry_SetDefaultTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"JBRouterTerminalRegistry_SetTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"contract IJBTerminal\",\"name\":\"to\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"MigrateTerminal\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true}],\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"rulesetId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"uint256\",\"name\":\"rulesetCycleNumber\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"payer\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"beneficiary\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"uint256\",\"name\":\"newlyIssuedTokenCount\",\"type\":\"uint256\",\"indexed\":false},{\"internalType\":\"string\",\"name\":\"memo\",\"type\":\"string\",\"indexed\":false},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"Pay\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"bytes\",\"name\":\"reason\",\"type\":\"bytes\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"Permit2AllowanceFailed\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"struct JBAccountingContext\",\"name\":\"context\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"}],\"indexed\":false},{\"internalType\":\"address\",\"name\":\"caller\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"SetAccountingContext\",\"anonymous\":false},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"PERMISSIONS\",\"outputs\":[{\"internalType\":\"contract IJBPermissions\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"PERMIT2\",\"outputs\":[{\"internalType\":\"contract IPermit2\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"PROJECTS\",\"outputs\":[{\"internalType\":\"contract IJBProjects\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"accountingContextForTokenOf\",\"outputs\":[{\"internalType\":\"struct JBAccountingContext\",\"name\":\"context\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"}]}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"accountingContextsOf\",\"outputs\":[{\"internalType\":\"struct JBAccountingContext[]\",\"name\":\"contexts\",\"type\":\"tuple[]\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"}]}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"struct JBAccountingContext[]\",\"name\":\"accountingContexts\",\"type\":\"tuple[]\",\"components\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"decimals\",\"type\":\"uint8\"},{\"internalType\":\"uint32\",\"name\":\"currency\",\"type\":\"uint32\"}]}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"addAccountingContextsFor\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bool\",\"name\":\"shouldReturnHeldFees\",\"type\":\"bool\"},{\"internalType\":\"string\",\"name\":\"memo\",\"type\":\"string\"},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\"}],\"stateMutability\":\"payable\",\"type\":\"function\",\"name\":\"addToBalanceOf\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"allowTerminal\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address[]\",\"name\":\"tokens\",\"type\":\"address[]\"},{\"internalType\":\"uint256\",\"name\":\"decimals\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"currency\",\"type\":\"uint256\"}],\"stateMutability\":\"pure\",\"type\":\"function\",\"name\":\"currentSurplusOf\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"defaultTerminal\",\"outputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"defaultTerminalFor\",\"outputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"index\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"defaultTerminalHistoryAt\",\"outputs\":[{\"internalType\":\"struct DefaultTerminalSegment\",\"name\":\"segment\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"uint256\",\"name\":\"minProjectIdExclusive\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"maxProjectId\",\"type\":\"uint256\"},{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}]}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"defaultTerminalHistoryLength\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"length\",\"type\":\"uint256\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"defaultTerminalProjectIdThreshold\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}]},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"disallowTerminal\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"hasLockedTerminal\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}]},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"isTerminalAllowed\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}]},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"forwarder\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"isTrustedForwarder\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"contract IJBTerminal\",\"name\":\"expectedTerminal\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"lockTerminalFor\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"contract IJBTerminal\",\"name\":\"to\",\"type\":\"address\"}],\"stateMutability\":\"pure\",\"type\":\"function\",\"name\":\"migrateBalanceOf\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"originalPayer\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"beneficiary\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"minReturnedTokens\",\"type\":\"uint256\"},{\"internalType\":\"string\",\"name\":\"memo\",\"type\":\"string\"},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\"}],\"stateMutability\":\"payable\",\"type\":\"function\",\"name\":\"pay\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"result\",\"type\":\"uint256\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"beneficiary\",\"type\":\"address\"},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"previewPayFor\",\"outputs\":[{\"internalType\":\"struct JBRuleset\",\"name\":\"ruleset\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"uint48\",\"name\":\"cycleNumber\",\"type\":\"uint48\"},{\"internalType\":\"uint48\",\"name\":\"id\",\"type\":\"uint48\"},{\"internalType\":\"uint48\",\"name\":\"basedOnId\",\"type\":\"uint48\"},{\"internalType\":\"uint48\",\"name\":\"start\",\"type\":\"uint48\"},{\"internalType\":\"uint32\",\"name\":\"duration\",\"type\":\"uint32\"},{\"internalType\":\"uint112\",\"name\":\"weight\",\"type\":\"uint112\"},{\"internalType\":\"uint32\",\"name\":\"weightCutPercent\",\"type\":\"uint32\"},{\"internalType\":\"contract IJBRulesetApprovalHook\",\"name\":\"approvalHook\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"metadata\",\"type\":\"uint256\"}]},{\"internalType\":\"uint256\",\"name\":\"beneficiaryTokenCount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"reservedTokenCount\",\"type\":\"uint256\"},{\"internalType\":\"struct JBPayHookSpecification[]\",\"name\":\"hookSpecifications\",\"type\":\"tuple[]\",\"components\":[{\"internalType\":\"contract IJBPayHook\",\"name\":\"hook\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"noop\",\"type\":\"bool\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes\",\"name\":\"metadata\",\"type\":\"bytes\"}]}]},{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"renounceOwnership\"},{\"inputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"setDefaultTerminal\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"},{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"setTerminalFor\"},{\"inputs\":[{\"internalType\":\"bytes4\",\"name\":\"interfaceId\",\"type\":\"bytes4\"}],\"stateMutability\":\"pure\",\"type\":\"function\",\"name\":\"supportsInterface\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"supported\",\"type\":\"bool\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"projectId\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"terminalOf\",\"outputs\":[{\"internalType\":\"contract IJBTerminal\",\"name\":\"terminal\",\"type\":\"address\"}]},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"transferOwnership\"},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"trustedForwarder\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}]}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{\"accountingContextForTokenOf(uint256,address)\":{\"params\":{\"projectId\":\"The ID of the project to get the accounting context for.\",\"token\":\"The address of the token to get the accounting context for.\"},\"returns\":{\"context\":\"A `JBAccountingContext` containing the accounting context for the project ID and token.\"}},\"accountingContextsOf(uint256)\":{\"params\":{\"projectId\":\"The ID of the project to get the accounting contexts for.\"},\"returns\":{\"contexts\":\"An array of `JBAccountingContext` containing the accounting contexts for the project ID.\"}},\"addAccountingContextsFor(uint256,(address,uint8,uint32)[])\":{\"params\":{\"accountingContexts\":\"Ignored because the registry delegates accounting contexts to the resolved terminal.\",\"projectId\":\"The ID of the project whose contexts would otherwise be updated.\"}},\"addToBalanceOf(uint256,address,uint256,bool,string,bytes)\":{\"details\":\"Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.\",\"params\":{\"amount\":\"The amount of tokens to send.\",\"memo\":\"A memo to pass along to the emitted event.\",\"metadata\":\"Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).\",\"projectId\":\"The ID of the project to add balance to.\",\"shouldReturnHeldFees\":\"Whether held fees should be returned based on the amount added.\",\"token\":\"The address of the token to pay in.\"}},\"allowTerminal(address)\":{\"details\":\"Only the registry owner can call this.\",\"params\":{\"terminal\":\"The terminal to allow.\"}},\"constructor\":{\"params\":{\"owner\":\"The owner of the contract.\",\"permissions\":\"The permissions contract.\",\"permit2\":\"The permit2 utility.\",\"projects\":\"The project registry.\",\"trustedForwarder\":\"The trusted forwarder for the contract.\"}},\"currentSurplusOf(uint256,address[],uint256,uint256)\":{\"params\":{\"currency\":\"Unused.\",\"decimals\":\"Unused.\",\"projectId\":\"Unused.\",\"tokens\":\"Unused.\"},\"returns\":{\"_0\":\"currentSurplus Always 0.\"}},\"defaultTerminalFor(uint256)\":{\"params\":{\"projectId\":\"The ID of the project to resolve the default for.\"},\"returns\":{\"terminal\":\"The default terminal applicable to this project (zero if none).\"}},\"defaultTerminalHistoryAt(uint256)\":{\"params\":{\"index\":\"The history index (0 is the oldest captured snapshot).\"},\"returns\":{\"segment\":\"The `maxProjectId + terminal` pair for that history slot.\"}},\"defaultTerminalHistoryLength()\":{\"returns\":{\"length\":\"The number of entries in the default-terminal history.\"}},\"disallowTerminal(address)\":{\"details\":\"Only the registry owner can call this. Cannot disallow the current default terminal — call `setDefaultTerminal` to change the default first.\",\"params\":{\"terminal\":\"The terminal to disallow.\"}},\"isTrustedForwarder(address)\":{\"details\":\"Indicates whether any particular address is the trusted forwarder.\"},\"lockTerminalFor(uint256,address)\":{\"details\":\"Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can lock.Circular or self-referential terminals are rejected before the irreversible lock is written.\",\"params\":{\"expectedTerminal\":\"The terminal the caller expects to lock. Prevents race conditions where the default changes between transaction submission and execution.\",\"projectId\":\"The ID of the project to lock the terminal for.\"}},\"migrateBalanceOf(uint256,address,address)\":{\"params\":{\"projectId\":\"Unused.\",\"to\":\"Unused.\",\"token\":\"Unused.\"},\"returns\":{\"_0\":\"balance Always 0.\"}},\"owner()\":{\"details\":\"Returns the address of the current owner.\"},\"pay(uint256,address,uint256,address,uint256,string,bytes)\":{\"details\":\"Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.\",\"params\":{\"amount\":\"The amount of tokens to send.\",\"beneficiary\":\"The address that will receive any project tokens minted by the destination.\",\"memo\":\"A memo to pass along to the emitted event.\",\"metadata\":\"Bytes in `JBMetadataResolver`'s format (may include `permit2` allowance data).\",\"minReturnedTokens\":\"The minimum number of project tokens expected in return.\",\"projectId\":\"The ID of the project to pay.\",\"token\":\"The address of the token to pay with.\"},\"returns\":{\"result\":\"The number of project tokens minted for the beneficiary.\"}},\"previewPayFor(uint256,address,uint256,address,bytes)\":{\"details\":\"Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.\",\"params\":{\"amount\":\"The amount of the input token to preview.\",\"beneficiary\":\"The address that would receive any minted project tokens.\",\"metadata\":\"Extra data to forward unchanged to the resolved terminal preview.\",\"projectId\":\"The ID of the project to pay.\",\"token\":\"The token to pay into the resolved terminal.\"},\"returns\":{\"beneficiaryTokenCount\":\"The number of project tokens the beneficiary would receive.\",\"hookSpecifications\":\"Any pay hook specifications returned by the resolved terminal.\",\"reservedTokenCount\":\"The number of project tokens that would be reserved.\",\"ruleset\":\"The ruleset the resolved terminal would use for the preview.\"}},\"renounceOwnership()\":{\"details\":\"Leaves the contract without owner. It will not be possible to call `onlyOwner` functions. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby disabling any functionality that is only available to the owner.\"},\"setDefaultTerminal(address)\":{\"details\":\"Only the registry owner can call this. Automatically allowlists the new default. The very first call also maps every project that already existed onto the new default (via a history segment) so those pre-existing projects — including the canonical fee project (ID 1) — can route tokens through it. Existing projects (ID <= current `PROJECTS.count()` at call time) keep their historical default on later changes — the previous `defaultTerminal` is pushed onto `_defaultTerminalHistory` so fall-through resolution for those projects continues to return what was current when their cohort was last addressed. This means a later default change never silently reroutes payments for already-deployed projects that never set an explicit `_terminalOf` override.\",\"params\":{\"terminal\":\"The terminal to set as the default for future projects.\"}},\"setTerminalFor(uint256,address)\":{\"details\":\"Only the project's owner or an address with the `JBPermissionIds.SET_ROUTER_TERMINAL` permission can set.\",\"params\":{\"projectId\":\"The ID of the project to set the terminal for.\",\"terminal\":\"The terminal to set for the project.\"}},\"supportsInterface(bytes4)\":{\"params\":{\"interfaceId\":\"The interface ID to check.\"},\"returns\":{\"supported\":\"Whether `interfaceId` is implemented.\"}},\"terminalOf(uint256)\":{\"params\":{\"projectId\":\"The project whose downstream terminal should be resolved.\"},\"returns\":{\"terminal\":\"The concrete terminal the forwarder would call for `projectId`.\"}},\"transferOwnership(address)\":{\"details\":\"Transfers ownership of the contract to a new account (`newOwner`). Can only be called by the current owner.\"},\"trustedForwarder()\":{\"details\":\"Returns the address of the trusted forwarder.\"}},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"PERMISSIONS()\":{\"notice\":\"A contract storing permissions.\"},\"PERMIT2()\":{\"notice\":\"The Permit2 contract used for token approvals and transfers.\"},\"PROJECTS()\":{\"notice\":\"The Juicebox project registry used to verify project existence and ownership.\"},\"accountingContextForTokenOf(uint256,address)\":{\"notice\":\"Get the accounting context for the specified project ID and token.\"},\"accountingContextsOf(uint256)\":{\"notice\":\"Return all the accounting contexts for a specified project ID.\"},\"addAccountingContextsFor(uint256,(address,uint8,uint32)[])\":{\"notice\":\"Empty implementation to satisfy the interface.\"},\"addToBalanceOf(uint256,address,uint256,bool,string,bytes)\":{\"notice\":\"Add funds to a project's balance by forwarding them through the project's resolved router terminal.\"},\"allowTerminal(address)\":{\"notice\":\"Add a terminal to the allowlist so projects can select it as their router.\"},\"constructor\":{\"notice\":\"Construct a router-terminal registry.\"},\"currentSurplusOf(uint256,address[],uint256,uint256)\":{\"notice\":\"Always returns 0 because the registry only forwards funds and does not hold project balances.\"},\"defaultTerminal()\":{\"notice\":\"The current default terminal — applied to projects with ID strictly greater than `defaultTerminalProjectIdThreshold`. Existing projects (ID <= threshold) without an explicit terminal continue to resolve against the historical default that was current at the time their project ID range was active (see `_defaultTerminalHistory`).\"},\"defaultTerminalFor(uint256)\":{\"notice\":\"The default terminal that applies to a given project on fall-through, accounting for the threshold and the snapshot history. Returns zero if no default ever applied to the project's ID range.\"},\"defaultTerminalHistoryAt(uint256)\":{\"notice\":\"Read a default-terminal history entry. Exposes the internal append-only history.\"},\"defaultTerminalHistoryLength()\":{\"notice\":\"The total number of historical default-terminal snapshots captured (= number of `setDefaultTerminal` calls after the very first one).\"},\"defaultTerminalProjectIdThreshold()\":{\"notice\":\"The `PROJECTS.count()` snapshot at the moment of the last `setDefaultTerminal` call. Projects with `ID <= defaultTerminalProjectIdThreshold` (i.e. already existing when the most recent default was set) DO NOT pick up `defaultTerminal` on fall-through; instead they resolve against the historical entry in `_defaultTerminalHistory` that covers their ID. The first default's segment covers every project that already existed when it was set (so those projects route through it), while later segments pin each outgoing default to its own cohort. This prevents the registry owner from silently rerouting payments for already-deployed projects via a later default change.\"},\"disallowTerminal(address)\":{\"notice\":\"Remove a terminal from the allowlist so no new projects can select it.\"},\"hasLockedTerminal(uint256)\":{\"notice\":\"Whether the terminal for a given project has been locked against future updates.\"},\"isTerminalAllowed(address)\":{\"notice\":\"Whether a terminal is allowlisted for project-level selection.\"},\"lockTerminalFor(uint256,address)\":{\"notice\":\"Permanently lock a project's router terminal choice so it can never be changed again.\"},\"migrateBalanceOf(uint256,address,address)\":{\"notice\":\"Always returns 0 because the registry holds no project balances to migrate.\"},\"originalPayer()\":{\"notice\":\"The original payer of the current transaction.\"},\"pay(uint256,address,uint256,address,uint256,string,bytes)\":{\"notice\":\"Pay a project by accepting the caller's tokens and forwarding them to the project's resolved router terminal.\"},\"previewPayFor(uint256,address,uint256,address,bytes)\":{\"notice\":\"Preview a payment by forwarding the call to the terminal currently resolved for the project.\"},\"setDefaultTerminal(address)\":{\"notice\":\"Change the registry-wide default terminal for projects created AFTER this call.\"},\"setTerminalFor(uint256,address)\":{\"notice\":\"Choose which router terminal a project's payments are forwarded through.\"},\"supportsInterface(bytes4)\":{\"notice\":\"Check whether the registry supports a given interface ID.\"},\"terminalOf(uint256)\":{\"notice\":\"The concrete terminal this forwarding layer would route a project's payment into.\"}},\"version\":1}},\"settings\":{\"remappings\":[\"@arbitrum/=node_modules/@arbitrum/\",\"@ballkidz/=node_modules/@ballkidz/\",\"@bananapus/=node_modules/@bananapus/\",\"@bannynet/=node_modules/@bannynet/\",\"@chainlink/=node_modules/@chainlink/\",\"@croptop/=node_modules/@croptop/\",\"@ensdomains/=node_modules/@ensdomains/\",\"@eth-optimism/=node_modules/@eth-optimism/\",\"@offchainlabs/=node_modules/@offchainlabs/\",\"@openzeppelin/=node_modules/@openzeppelin/\",\"@prb/=node_modules/@prb/\",\"@rev-net/=node_modules/@rev-net/\",\"@scroll-tech/=node_modules/@scroll-tech/\",\"@sphinx-labs/=node_modules/@sphinx-labs/\",\"@uniswap/=node_modules/@uniswap/\",\"@unruggable/=node_modules/@unruggable/\",\"@zksync/=node_modules/@zksync/\",\"base64-sol/=node_modules/base64-sol/\",\"ds-test/=node_modules/@uniswap/v4-core/lib/solmate/lib/ds-test/\",\"erc4626-tests/=node_modules/@uniswap/v4-core/lib/openzeppelin-contracts/lib/erc4626-tests/\",\"forge-gas-snapshot/=node_modules/@uniswap/v4-periphery/lib/permit2/lib/forge-gas-snapshot/\",\"forge-std/=lib/forge-std/src/\",\"hardhat/=node_modules/hardhat/\",\"lib/base64/=node_modules/base64-sol/\",\"openzeppelin-contracts/=node_modules/@uniswap/v4-core/lib/openzeppelin-contracts/\",\"permit2/=node_modules/@uniswap/v4-periphery/lib/permit2/\",\"solady/=node_modules/solady/\",\"solmate/=node_modules/@sphinx-labs/contracts/node_modules/solmate/\",\"typeface/=lib/typeface/contracts/\",\"v4-core/=node_modules/@uniswap/v4-periphery/lib/v4-core/\"],\"optimizer\":{\"enabled\":true,\"runs\":200},\"metadata\":{\"bytecodeHash\":\"none\"},\"compilationTarget\":{\"node_modules/@bananapus/router-terminal-v6/src/JBRouterTerminalRegistry.sol\":\"JBRouterTerminalRegistry\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"viaIR\":true},\"sources\":{\"node_modules/@bananapus/core-v6/src/abstract/JBPermissioned.sol\":{\"keccak256\":\"0x16a1fa9f031564f9f3253d5e21327b228651269263bfbde10eb04862c65ed577\",\"urls\":[\"bzz-raw://4150d75d10f267953c0a42948ebd7bffe1568a5fb0dfe84befcda512ddf3a19c\",\"dweb:/ipfs/QmVMYXMRyiLySHCtoPke9AuVkhoVm9Gx1zoLMmSjXjFf2M\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/enums/JBApprovalStatus.sol\":{\"keccak256\":\"0x58f3eed8b6ecea6b640f4eb78a5a416ce8737f9155e350ef4077db422b3fca8f\",\"urls\":[\"bzz-raw://0b56bde97ef9d8ec2a3e464202c5d2fee9c39597485b3fb8baaeef971cc63bc8\",\"dweb:/ipfs/QmSdPaNfPm83yibuSvgLbaqgZw7LYkTLhacrxDagH3sprJ\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBPayHook.sol\":{\"keccak256\":\"0x08599d439d898566b311bc4bedf7f0050ce25c86e246c43f673f3ab4d2457f21\",\"urls\":[\"bzz-raw://db19e95707920262c79197be9296fe381782220bfaf00b71df3a4271da83832f\",\"dweb:/ipfs/QmYzdomQzXNSk46U5vkiEnDErJJdR17deL4S6hPundstZd\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol\":{\"keccak256\":\"0x3001bd8830eb6a679ad8da45228285c01781fa1b5aa69d2ce7c83b754319ebb1\",\"urls\":[\"bzz-raw://5b639f43468a408ad929a919aeb8bc90cfa9d0bcea57192b087659114056352e\",\"dweb:/ipfs/QmXWvVTGLNnubb8vvSPcaU3vjawVSPaRHjifsjeUu2kDJ9\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBPermissioned.sol\":{\"keccak256\":\"0xa43d05c9cc31cd768072e60d4f097d60dfe199469bfc96aa8df29346a15ee4dc\",\"urls\":[\"bzz-raw://de7caab7841a56b681140993557374edb54763a08b28aaaba35f1bc1a01f7937\",\"dweb:/ipfs/QmQKG6QNm7PNebRtKeLSzzXgp71Yw5Ja37nGPCvVa62Rzu\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBPermissions.sol\":{\"keccak256\":\"0xb32e13d512a7deb9ba1e47bbc0992817a63caa9e1f2913d6c55b637a57084037\",\"urls\":[\"bzz-raw://0d291ccc6edc581febf386779423001b0ed4d3b5b021ec444f7bef01cb2f9d28\",\"dweb:/ipfs/QmSUFhJpcpWYLEUzt4KrzyC4am39TNost8tWAtn5GdAUg2\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBProjects.sol\":{\"keccak256\":\"0x72c6cbda5a93593e3cc49ef6c4e0848a4b6daa88c188c4192776af86c49911dc\",\"urls\":[\"bzz-raw://448ed5d7a704b5f4dd759514dbcb78160b82732ac6bd7bc368a9f8822045e6de\",\"dweb:/ipfs/QmbnpCPxQLDvQx5ymEy1Ty3aks7bjonydops1CsjCACJBN\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol\":{\"keccak256\":\"0x11dd67effb025396bec1bb97d35a9ba162340e9a824c048e8286802a12acaa45\",\"urls\":[\"bzz-raw://bae11f483c66d98e7fad9bbf47249f6fa4434693e8bace78cbe6d4da9afee009\",\"dweb:/ipfs/QmWjrjPtr8dLGtXQBrz6idwcNqyx2yVSVVQtqo74yqUSZV\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBTerminal.sol\":{\"keccak256\":\"0xa3621c12f7c2e33ee38b5de626a5939190d8a12b1e5318a7cd8d398595480cec\",\"urls\":[\"bzz-raw://1341254389038383117d9b23ed2f9d1812fc30ef1c11cfd6c8423918894d7ba3\",\"dweb:/ipfs/QmV2WJ5a3NW12RnZAM3ySbEfGHNN6GfqqpsMHXorfoxiQo\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/interfaces/IJBTokenUriResolver.sol\":{\"keccak256\":\"0xcbdb1448260ebea5937411516957ef199099e34ff997e7f2a617c2898f921994\",\"urls\":[\"bzz-raw://d1cbf97e5684c987be6703c096e8230d870fab25a23eec8d209cd082e3f2637b\",\"dweb:/ipfs/QmNmzeuQoFiaUTQAcV1tyJyjUYEJ3t7386zTw4ofT7HoZM\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/libraries/JBConstants.sol\":{\"keccak256\":\"0x5d4b095f3b94c52f89b9cf8a8104de0242497e61f1b32ddc82e78a9ba71a6d0f\",\"urls\":[\"bzz-raw://3ac3340339e0b6a7aae881781b2830f59e3f44114955e2f770172a9bffddc104\",\"dweb:/ipfs/QmV9pFGNGcknqHLEuc6rmC1YPwuwtsokjzh1WX8H2jmVRp\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/libraries/JBMetadataResolver.sol\":{\"keccak256\":\"0x8f671604390274457e0d13806f9ca9aab44c784f4492612771bada213ed261bd\",\"urls\":[\"bzz-raw://e10babd77a88bb1e9c09d5a99b3f165ce46cca4b348e23add2dc4d53aefe07d7\",\"dweb:/ipfs/QmTLc2R1o5W3hkxX8avYrWPtf1oMLTtmve1sPujAbtoUtz\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBAccountingContext.sol\":{\"keccak256\":\"0xf53e975ce2632558a95d0a57679dbb8afff984d06daaa530cd4c442e467c3403\",\"urls\":[\"bzz-raw://519f7c466c8d90227afe2bd9108e7477412600fea8b4134889795a58a51b156c\",\"dweb:/ipfs/QmaSHMrNLfP8D9RRUaYbMWURdZYweUmt5ysgtTGMZiwnai\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBAfterPayRecordedContext.sol\":{\"keccak256\":\"0xcf1761f48e4cbd6eeeb64bb19e434eff50a7f666b2116657f88f63d19620c6de\",\"urls\":[\"bzz-raw://842fe47a4ad56c830040864b458de398efd0cf82eb0add9349e792d0c8b0c275\",\"dweb:/ipfs/QmXBj6EVnzvVX8ZYa2ndyjoSZDGjpXxaoy7dBuoGMaAmRX\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBPayHookSpecification.sol\":{\"keccak256\":\"0x28f565b626774c36a990ac999f268fbaf9d7f7861e862fab1fb8301f2534e8d1\",\"urls\":[\"bzz-raw://a5d7375934179178febd3b412099b1a5ff42a154ce8b949df2c11b5f3cb3b80e\",\"dweb:/ipfs/QmXP5vVq8Z6HntiuMcPWfQURCKejyiyHLKYuMmzCuUJJtV\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBPermissionsData.sol\":{\"keccak256\":\"0x9cb75b1171657be08950f9fc9f6c2bcb2496f618de4ab932141d424dec29d9df\",\"urls\":[\"bzz-raw://a8f578d6132c92048ae553a3c13260ecfa657f4a1bbe18f6c550d96988167590\",\"dweb:/ipfs/QmSYfGm2mcYfMm4wfnZMTjuUr1kBJoq4vZSCkwdgi9BRFk\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBRuleset.sol\":{\"keccak256\":\"0xd03f45345597fca43effe3bc593572c989f4294d909505e331cbd2640a801d23\",\"urls\":[\"bzz-raw://2cc09b335549f4982c16c1109f3078f09fb81c32370baff007633a38badb7a83\",\"dweb:/ipfs/QmYJHBvXscvokRqzdGdTCRQtHUpnePS2uaCDfgHLuuMo56\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBSingleAllowance.sol\":{\"keccak256\":\"0x8782e1148524829a4f154442744c25963d0faba623c8a9583eaa8bc2290a040d\",\"urls\":[\"bzz-raw://948696535a97640649fa3f44ea176c9d84066c28a303118d0440b6eac830b22f\",\"dweb:/ipfs/QmSGNC6W38F2XvLcqodgx792azsN8D1dt5LSUhS2vGhxZT\"],\"license\":\"MIT\"},\"node_modules/@bananapus/core-v6/src/structs/JBTokenAmount.sol\":{\"keccak256\":\"0xc61593d33d5ec30e695d382948a1b944d01e29a8f2bfd29f75ecebcdbc7816de\",\"urls\":[\"bzz-raw://8992c1e5fca0c2342ecc0e734dfba6a2a752e4c29184784931d0971e44305051\",\"dweb:/ipfs/QmYNcaW3qeCkgAExUaFTq238fgfJuoYCTwjCn7jm94U4dJ\"],\"license\":\"MIT\"},\"node_modules/@bananapus/permission-ids-v6/src/JBPermissionIds.sol\":{\"keccak256\":\"0x5105c29834e0dce4e395e262f23089a1077404f5317c591c89f3621cdfda9628\",\"urls\":[\"bzz-raw://54deca2c06d77f5d1087911e8035d244dde2b08a5dc0dff146b86e6a314419e8\",\"dweb:/ipfs/QmNdpTioAbk6bahJx4aT1WFUY9aV182JH1Dn4FqfuqC8QC\"],\"license\":\"MIT\"},\"node_modules/@bananapus/router-terminal-v6/src/JBRouterTerminalRegistry.sol\":{\"keccak256\":\"0x7538b8034f47e4b464d65e1b6bd521266f248342cf53ad4ee94abd977ac5a844\",\"urls\":[\"bzz-raw://3312a116d11647fffb2df536e184db39ab7506519296ac6cb89104401a6bc526\",\"dweb:/ipfs/QmPqL1hNDLPowg4ui371GUVfihX687BVyGhBbZqB2qaVtQ\"],\"license\":\"MIT\"},\"node_modules/@bananapus/router-terminal-v6/src/interfaces/IJBForwardingTerminal.sol\":{\"keccak256\":\"0x9e98461eacfc7727674f4678b64a85bec9a85c22aed20a6c9f0d7760b10b2921\",\"urls\":[\"bzz-raw://c563a9aacc355910afec981dc617fd5023293b0336dac5b197859d2c2f0ff38e\",\"dweb:/ipfs/QmUSc9DpvvAsRTJYyugn3M5317XVgKfzjMafit4nAcyW4n\"],\"license\":\"MIT\"},\"node_modules/@bananapus/router-terminal-v6/src/interfaces/IJBRouterTerminalRegistry.sol\":{\"keccak256\":\"0x24b142e1277cdd839e30b0a9a87ba66298820e8d34842e7420e22ce968193f2a\",\"urls\":[\"bzz-raw://92710c736dd1781bf01cfb27a6dd1d38a12b635af1331e86dd89f2960bd8ddb2\",\"dweb:/ipfs/QmY6isAK6B2tLCXvWdG2r3wEbjrwsDGNaTdaqChvBXZ58y\"],\"license\":\"MIT\"},\"node_modules/@bananapus/router-terminal-v6/src/libraries/JBForwardingCheck.sol\":{\"keccak256\":\"0xd1c1f318fa905d050434da28914162af8e57c855c069b87fc1a1eb6be0c4c1ea\",\"urls\":[\"bzz-raw://5da38bc76bfdaf7b0aaa2a307085a3094da1cb4af78747c98bf017e184eaaf8d\",\"dweb:/ipfs/QmQC2nVFLno9EDPVae6kyMMmRAZXbXe6X2seJ5qPJ7Cm2E\"],\"license\":\"MIT\"},\"node_modules/@bananapus/router-terminal-v6/src/structs/DefaultTerminalSegment.sol\":{\"keccak256\":\"0x27a61f596170a937348f68f7108511262b42d919c6388a22c388fe0621ef9004\",\"urls\":[\"bzz-raw://3c3e39205968badd01fc2c62cd9d95303ba9c6618b0228e1cddb066642a3c6fb\",\"dweb:/ipfs/QmUPK2UWNZcukXQPWgoass1BY7U7kibcQxGK3WTYMPeCoU\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/access/Ownable.sol\":{\"keccak256\":\"0xff6d0bb2e285473e5311d9d3caacb525ae3538a80758c10649a4d61029b017bb\",\"urls\":[\"bzz-raw://8ed324d3920bb545059d66ab97d43e43ee85fd3bd52e03e401f020afb0b120f6\",\"dweb:/ipfs/QmfEckWLmZkDDcoWrkEvMWhms66xwTLff9DDhegYpvHo1a\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/interfaces/IERC1363.sol\":{\"keccak256\":\"0xd5ea07362ab630a6a3dee4285a74cf2377044ca2e4be472755ad64d7c5d4b69d\",\"urls\":[\"bzz-raw://da5e832b40fc5c3145d3781e2e5fa60ac2052c9d08af7e300dc8ab80c4343100\",\"dweb:/ipfs/QmTzf7N5ZUdh5raqtzbM11yexiUoLC9z3Ws632MCuycq1d\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/interfaces/IERC165.sol\":{\"keccak256\":\"0x0afcb7e740d1537b252cb2676f600465ce6938398569f09ba1b9ca240dde2dfc\",\"urls\":[\"bzz-raw://1c299900ac4ec268d4570ecef0d697a3013cd11a6eb74e295ee3fbc945056037\",\"dweb:/ipfs/Qmab9owJoxcA7vJT5XNayCMaUR1qxqj1NDzzisduwaJMcZ\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/interfaces/IERC20.sol\":{\"keccak256\":\"0x1a6221315ce0307746c2c4827c125d821ee796c74a676787762f4778671d4f44\",\"urls\":[\"bzz-raw://1bb2332a7ee26dd0b0de9b7fe266749f54820c99ab6a3bcb6f7e6b751d47ee2d\",\"dweb:/ipfs/QmcRWpaBeCYkhy68PR3B4AgD7asuQk7PwkWxrvJbZcikLF\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/metatx/ERC2771Context.sol\":{\"keccak256\":\"0x9695d220b99dcf62910533bdf5d40d4cf6a4e04d5b106b6803a80586486dc7f7\",\"urls\":[\"bzz-raw://83b7aecd65882d8953643dce144efe91367082cc01830c9c4ed3c8a4837fb558\",\"dweb:/ipfs/QmQ5HxGavcCKjuhd8buv177qjG6A4kvxx4pZviceKdspdM\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol\":{\"keccak256\":\"0x74ed01eb66b923d0d0cfe3be84604ac04b76482a55f9dd655e1ef4d367f95bc2\",\"urls\":[\"bzz-raw://5282825a626cfe924e504274b864a652b0023591fa66f06a067b25b51ba9b303\",\"dweb:/ipfs/QmeCfPykghhMc81VJTrHTC7sF6CRvaA1FXVq2pJhwYp1dV\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol\":{\"keccak256\":\"0x304d732678032a9781ae85c8f204c8fba3d3a5e31c02616964e75cfdc5049098\",\"urls\":[\"bzz-raw://299ced486011781dc98f638059678323c03079fefae1482abaa2135b22fa92d0\",\"dweb:/ipfs/QmbZNbcPTBxNvwChavN2kkZZs7xHhYL7mv51KrxMhsMs3j\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/token/ERC721/IERC721.sol\":{\"keccak256\":\"0xf78f05f3b8c9f75570e85300d7b4600d7f6f6a198449273f31d44c1641adb46f\",\"urls\":[\"bzz-raw://e28b872613b45e0e801d4995aa4380be2531147bfe2d85c1d6275f1de514fba3\",\"dweb:/ipfs/QmeeFcfShHYaS3BdgVj78nxR28ZaVUwbvr66ud8bT6kzw9\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/utils/Address.sol\":{\"keccak256\":\"0x0fa9e0d3a859900b5a46f70a03c73adf259603d5e05027a37fe0b45529d85346\",\"urls\":[\"bzz-raw://c2add4da0240c9f2ce47649c8bb6b11b40e98cf6f88b8bdc76b2704e89391710\",\"dweb:/ipfs/QmNQTwF2uVzu4CRtNxr8bxyP9XuW6VsZuo2Nr4KR2bZr3d\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/utils/Context.sol\":{\"keccak256\":\"0x493033a8d1b176a037b2cc6a04dad01a5c157722049bbecf632ca876224dd4b2\",\"urls\":[\"bzz-raw://6a708e8a5bdb1011c2c381c9a5cfd8a9a956d7d0a9dc1bd8bcdaf52f76ef2f12\",\"dweb:/ipfs/Qmax9WHBnVsZP46ZxEMNRQpLQnrdE4dK8LehML1Py8FowF\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/utils/Errors.sol\":{\"keccak256\":\"0x6afa713bfd42cf0f7656efa91201007ac465e42049d7de1d50753a373648c123\",\"urls\":[\"bzz-raw://ba1d02f4847670a1b83dec9f7d37f0b0418d6043447b69f3a29a5f9efc547fcf\",\"dweb:/ipfs/QmQ7iH2keLNUKgq2xSWcRmuBE5eZ3F5whYAkAGzCNNoEWB\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/utils/LowLevelCall.sol\":{\"keccak256\":\"0x6ba3db1346fc75a832aa6cd075e12f6f1fa172fa2122a020f324c319fe5be75e\",\"urls\":[\"bzz-raw://ab92e9e1cb08144c43fa3a383a87c48f49a652d51156950b928c2a50bee6b3a5\",\"dweb:/ipfs/QmWeKkKZBgLDKgRFGKCzsKybYF7C8g9ysg5kU1b1p7QFBi\"],\"license\":\"MIT\"},\"node_modules/@openzeppelin/contracts/utils/introspection/IERC165.sol\":{\"keccak256\":\"0x8891738ffe910f0cf2da09566928589bf5d63f4524dd734fd9cedbac3274dd5c\",\"urls\":[\"bzz-raw://971f954442df5c2ef5b5ebf1eb245d7105d9fbacc7386ee5c796df1d45b21617\",\"dweb:/ipfs/QmadRjHbkicwqwwh61raUEapaVEtaLMcYbQZWs9gUkgj3u\"],\"license\":\"MIT\"},\"node_modules/@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol\":{\"keccak256\":\"0x37f0ac203b6ef605c9533e1a739477e8e9dcea90710b40e645a367f8a21ace29\",\"urls\":[\"bzz-raw://e0104d72aeaec1cd66cc232e7de7b7ead08608efcc179491b8a66387614670b0\",\"dweb:/ipfs/QmfAZDyuNC9FXXbnJUwqHNwmAK6uRrXxtWEytLsxjskPsN\"],\"license\":\"MIT\"},\"node_modules/@uniswap/permit2/src/interfaces/IEIP712.sol\":{\"keccak256\":\"0xfdccf2b9639070803cd0e4198427fb0df3cc452ca59bd3b8a0d957a9a4254138\",\"urls\":[\"bzz-raw://f7c936ac42ce89e827db905a1544397f8bdf46db34cdb6aa1b90dea42fdb4c72\",\"dweb:/ipfs/QmVgurxo1N31qZqkPBirw9Z7S9tLYmv6jSwQp8R8ur2cBk\"],\"license\":\"MIT\"},\"node_modules/@uniswap/permit2/src/interfaces/IPermit2.sol\":{\"keccak256\":\"0xaa631cc9f53e699301d94233007110a345e6779011def484e8dd97b8fe0af771\",\"urls\":[\"bzz-raw://fc0502cf19c9c18f320a3001201e89e350393b75837f6b7971de18b2de06f30d\",\"dweb:/ipfs/QmT9SfhdJ7VJNNrf94g4H5usyi7ShqWGx7Cqsz9jZTjX96\"],\"license\":\"MIT\"},\"node_modules/@uniswap/permit2/src/interfaces/ISignatureTransfer.sol\":{\"keccak256\":\"0xe6df9966f8841dc3958ee86169c89de97e7f614c81c28b9dc947b12d732df64e\",\"urls\":[\"bzz-raw://3d4eafdee7f48c3be8350a94eb6edd0bfb2af2c105df65787a77174f356c0317\",\"dweb:/ipfs/QmY1j2adeeAhNpn6cUuthemxGCdLXHTfyMh9yTKsY4mZ2d\"],\"license\":\"MIT\"}},\"version\":1}",
+	"gitCommit": "npm:@bananapus/router-terminal-v6@1.0.1",
+	"gitDirty": false,
+	"history": []
+}
