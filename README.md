@@ -134,6 +134,7 @@ script/
 - swap previews are best-effort estimates and depend on current pool state plus caller-supplied quote data
 - recursive cash-out routing increases complexity when the input token is itself a Juicebox project token
 - slippage and sandwich resistance depend on the quality of the chosen quote path
+- V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths
