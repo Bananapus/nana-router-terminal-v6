@@ -2436,10 +2436,8 @@ contract JBRouterTerminal is
     ///      quoter or RPC simulation). The quote must encode the output token and minimum output amount. When present,
     ///      this function is bypassed entirely — see `_pickPoolAndQuote`.
     ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this uses its oracle-derived tick, not spot price.
-    ///   3. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
-    ///      (pool fee + 1%, with a hard floor of 2%), which bounds the worst-case loss even if the spot price is
-    ///      manipulated. For small swaps in deep pools the tolerance stays near this floor; for larger swaps it
-    ///      scales up to the 88% ceiling via a continuous sigmoid curve.
+    ///   3. The spot fallback uses a fixed 15% haircut instead of the sigmoid formula, because both spot price and
+    ///      instantaneous liquidity can be JIT-manipulated. TWAP-backed quotes still use the sigmoid tolerance model.
     ///   4. Pool discovery (`_discoverPool`) may select a V3 pool with TWAP if it has more liquidity, avoiding
     ///      this V4 spot-price path altogether.
     ///   5. On legs with no downstream `minReturnedTokens` backstop (`addToBalanceOf`, and cash-out routes that
