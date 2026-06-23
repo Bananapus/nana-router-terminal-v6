@@ -2741,8 +2741,9 @@ contract RouterTerminalTest is Test {
         assertEq(strictQuoted, 123, "strict leg with a caller quote uses it");
     }
 
-    /// @notice Strict V4 quotes trust a hook oracle only when it proves the requested TWAP window is covered.
-    function test_strictSwapQuote_hookOracleRequiresObservationCoverage() public {
+    /// @notice Strict V4 quotes use the retained best-effort hook oracle window when the requested TWAP is
+    /// under-covered.
+    function test_strictSwapQuote_hookOracleUsesBestEffortObservationCoverage() public {
         address staleOracleHook = makeAddr("staleOracleHook");
         vm.etch(staleOracleHook, hex"00");
 
@@ -2816,26 +2817,22 @@ contract RouterTerminalTest is Test {
 
         int56[] memory tickCumulatives = new int56[](2);
         tickCumulatives[0] = 0;
-        tickCumulatives[1] = int56(120 * 1234);
+        tickCumulatives[1] = int56(60 * 1234);
         uint160[] memory secondsPerLiquidityCumulativeX128s = new uint160[](2);
 
+        vm.mockCall(
+            staleOracleHook,
+            abi.encodeWithSelector(IGeomeanOracle.observationCoverageOf.selector, hookedKey),
+            abi.encode(uint32(60))
+        );
         vm.mockCall(
             staleOracleHook,
             abi.encodeWithSelector(IGeomeanOracle.observe.selector),
             abi.encode(tickCumulatives, secondsPerLiquidityCumulativeX128s)
         );
 
-        vm.expectRevert();
-        hookedRouter.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
-
-        vm.mockCall(
-            staleOracleHook,
-            abi.encodeWithSelector(IGeomeanOracle.hasObservationCoverage.selector, hookedKey, uint32(120)),
-            abi.encode(true)
-        );
-
         uint256 strictQuote = hookedRouter.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
-        assertGt(strictQuote, 0, "strict leg accepted the covered oracle response as TWAP");
+        assertGt(strictQuote, 0, "strict leg accepted the retained best-effort oracle response as TWAP");
     }
 
     function test_strictSwapQuote_successfulPayRestoresOuterStrictQuoteMode() public {

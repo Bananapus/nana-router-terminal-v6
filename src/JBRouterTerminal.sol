@@ -2476,41 +2476,47 @@ contract JBRouterTerminal is
 
         // If the pool has a hook, try querying it as a geomean oracle (e.g., JBUniswapV4Hook implements this).
         if (address(key.hooks) != address(0)) {
-            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, current block time].
-            uint32[] memory secondsAgos = new uint32[](2);
-            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (120 seconds ago).
-            secondsAgos[1] = 0; // End of the window (current block).
+            IGeomeanOracle oracle = IGeomeanOracle(address(key.hooks));
+            uint32 quoteWindow = _TWAP_WINDOW;
+            bool shouldObserve = true;
 
-            // A successful `observe` response is trusted only when the hook first proves that retained observations
-            // cover the requested window. Oracle hooks are expected to implement this freshness interface; hooks that
-            // do not expose it are treated as unavailable for TWAP.
-            try IGeomeanOracle(address(key.hooks))
-                .hasObservationCoverage({key: key, secondsAgo: _TWAP_WINDOW}) returns (
-                bool hasCoverage
-            ) {
-                if (hasCoverage) {
-                    // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
-                    try IGeomeanOracle(address(key.hooks)).observe({key: key, secondsAgos: secondsAgos}) returns (
-                        int56[] memory tickCumulatives, uint160[] memory
-                    ) {
-                        // Guard against malicious/broken hooks returning fewer elements than requested.
-                        // An OOB access in the try-success block panics and is NOT caught by catch{}.
-                        if (tickCumulatives.length >= 2) {
-                            // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
-                            int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
-                            // The TWAP window is a small protocol constant that fits in int32 and int56.
-                            // forge-lint: disable-next-line(unsafe-typecast)
-                            int56 period = int56(int32(_TWAP_WINDOW));
-                            // Cumulative values come from Uniswap observations, whose average tick is int24-bounded.
-                            // forge-lint: disable-next-line(unsafe-typecast)
-                            tick = int24(tickDelta / period);
-                            // Round towards negative infinity for negative ticks (Uniswap convention).
-                            if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
-                            usedTwap = true;
-                        }
-                    } catch {}
+            // Prefer the full router window, but use the retained best-effort window when the hook reports partial
+            // coverage. Hooks that do not expose this newer interface keep the previous observe-only behavior.
+            try oracle.observationCoverageOf({key: key}) returns (uint32 oldestSecondsAgo) {
+                if (oldestSecondsAgo == 0) {
+                    shouldObserve = false;
+                } else if (oldestSecondsAgo < quoteWindow) {
+                    quoteWindow = oldestSecondsAgo;
                 }
             } catch {}
+
+            if (shouldObserve) {
+                // Build the two-element lookback array: [quoteWindow seconds ago, current block time].
+                uint32[] memory secondsAgos = new uint32[](2);
+                secondsAgos[0] = quoteWindow;
+                secondsAgos[1] = 0;
+
+                // Ask the hook for cumulative tick data over the retained window. Silently catch if unsupported.
+                try oracle.observe({key: key, secondsAgos: secondsAgos}) returns (
+                    int56[] memory tickCumulatives, uint160[] memory
+                ) {
+                    // Guard against malicious/broken hooks returning fewer elements than requested.
+                    // An OOB access in the try-success block panics and is NOT caught by catch{}.
+                    if (tickCumulatives.length >= 2) {
+                        // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
+                        int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+                        // quoteWindow is bounded by `_TWAP_WINDOW`, a small protocol constant.
+                        // forge-lint: disable-next-line(unsafe-typecast)
+                        int56 period = int56(int32(quoteWindow));
+                        // Cumulative values come from Uniswap observations, whose average tick is int24-bounded.
+                        // forge-lint: disable-next-line(unsafe-typecast)
+                        tick = int24(tickDelta / period);
+                        // Round towards negative infinity for negative ticks (Uniswap convention).
+                        if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
+                        usedTwap = true;
+                    }
+                } catch {}
+            }
         }
 
         // If no TWAP was available (no hook, or hook doesn't implement observe), there is no manipulation-resistant
