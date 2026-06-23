@@ -2741,9 +2741,8 @@ contract RouterTerminalTest is Test {
         assertEq(strictQuoted, 123, "strict leg with a caller quote uses it");
     }
 
-    /// @notice Documents the case-1 consumer gap: a successful hooked-pool oracle response is treated as TWAP even when
-    /// it may have been synthesized from a stale newest observation, so strict mode does not apply the no-spot guard.
-    function test_strictSwapQuote_successfulHookOracleResponseBypassesNoSpotGuard() public {
+    /// @notice Strict V4 quotes trust a hook oracle only when it proves the requested TWAP window is covered.
+    function test_strictSwapQuote_hookOracleRequiresObservationCoverage() public {
         address staleOracleHook = makeAddr("staleOracleHook");
         vm.etch(staleOracleHook, hex"00");
 
@@ -2826,8 +2825,17 @@ contract RouterTerminalTest is Test {
             abi.encode(tickCumulatives, secondsPerLiquidityCumulativeX128s)
         );
 
+        vm.expectRevert();
+        hookedRouter.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
+
+        vm.mockCall(
+            staleOracleHook,
+            abi.encodeWithSelector(IGeomeanOracle.hasObservationCoverage.selector, hookedKey, uint32(120)),
+            abi.encode(true)
+        );
+
         uint256 strictQuote = hookedRouter.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
-        assertGt(strictQuote, 0, "strict leg accepted the successful oracle response as TWAP");
+        assertGt(strictQuote, 0, "strict leg accepted the covered oracle response as TWAP");
     }
 
     function test_strictSwapQuote_successfulPayRestoresOuterStrictQuoteMode() public {
