@@ -30,12 +30,12 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
+import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {JBPayRouteResolver} from "../src/JBPayRouteResolver.sol";
 import {IJBPayRoutePreviewer} from "../src/interfaces/IJBPayRoutePreviewer.sol";
 import {IJBRouterTerminal} from "../src/interfaces/IJBRouterTerminal.sol";
-import {IGeomeanOracle} from "../src/interfaces/IGeomeanOracle.sol";
 import {PoolInfo} from "../src/structs/PoolInfo.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 

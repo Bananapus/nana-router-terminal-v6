@@ -65,12 +65,11 @@ This is a V5-to-V6 migration changelog, not a package release log or commit hist
 Generated from Foundry `out/**/*.json` artifacts, filtered to this repo's own runtime source roots and excluding tests, scripts, and dependencies.
 
 - V5 comparison package: `nana-swap-terminal-v5`.
-- Own-source ABI artifacts compared: V6 `13`, V5 `6`.
-- Contract/interface coverage: `12` added, `5` removed, `0` shared names with ABI changes, `1` shared names ABI-identical.
+- Own-source ABI artifacts compared: V6 `12`, V5 `6`.
+- Contract/interface coverage: `11` added, `5` removed, `0` shared names with ABI changes, `1` shared names ABI-identical.
 - Shared-name ABI item deltas: `0` added, `0` removed, `0` modified.
 
 Added V6 ABI artifacts:
-- `IGeomeanOracle` from `src/interfaces/IGeomeanOracle.sol`: `1` functions, `0` events, `0` errors.
 - `IJBForwardingTerminal` from `src/interfaces/IJBForwardingTerminal.sol`: `1` functions, `0` events, `0` errors.
 - `IJBPayRoutePreviewer` from `src/interfaces/IJBPayRoutePreviewer.sol`: `8` functions, `0` events, `0` errors.
 - `IJBPayRouteResolver` from `src/interfaces/IJBPayRouteResolver.sol`: `5` functions, `0` events, `0` errors.
