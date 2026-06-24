@@ -376,7 +376,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
         returns (bytes memory metadata)
     {
         return JBMetadataResolver.addToMetadata(
-            "", JBMetadataResolver.getId("quote"), abi.encode(amountToSwapWith, minimumSwapAmountOut)
+            "",
+            JBMetadataResolver.getId("pay", address(buybackHook)),
+            abi.encode(amountToSwapWith, minimumSwapAmountOut)
         );
     }
 
@@ -388,13 +390,20 @@ contract RouterTerminalBuybackHookForkTest is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         tickCumulatives[1] = int56(tick) * int56(int32(twapWindow));
 
-        uint136[] memory secondsPerLiquidityCumulativeX128s = new uint136[](2);
+        uint160[] memory secondsPerLiquidityCumulativeX128s = new uint160[](2);
         secondsPerLiquidityCumulativeX128s[0] = 0;
 
         uint256 liq = uint256(liquidity > 0 ? liquidity : -liquidity);
         if (liq == 0) liq = 1;
         // forge-lint: disable-next-line(unsafe-typecast)
-        secondsPerLiquidityCumulativeX128s[1] = uint136((uint256(twapWindow) << 128) / liq);
+        secondsPerLiquidityCumulativeX128s[1] = uint160((uint256(twapWindow) << 128) / liq);
+
+        vm.mockCall(
+            address(0), abi.encodeWithSelector(IGeomeanOracle.hasObservationCoverage.selector), abi.encode(true)
+        );
+        vm.mockCall(
+            address(0), abi.encodeWithSelector(IGeomeanOracle.observationCoverageOf.selector), abi.encode(twapWindow)
+        );
 
         vm.mockCall(
             address(0),
