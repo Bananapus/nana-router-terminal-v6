@@ -16,6 +16,8 @@ Pool discovery ranks candidates by instantaneous liquidity, so an attacker could
 **V4 TWAP branch uses live in-range liquidity for slippage tolerance, not time-averaged.** *(Medium)*
 In `_getV4SpotQuote`, when the V4 hook provides a TWAP tick (`usedTwap = true`), the gross quote tick is time-averaged but `_getLiquidity(id)` reads `POOL_MANAGER.getLiquidity(id)` — the CURRENT in-range liquidity. That live value feeds `_quoteWithSlippage` → `_getSlippageTolerance` → `JBSwapLib.calculateImpact`, where the sigmoid `tolerance = minSlippage + range * impact / (impact + K)` is monotonically increasing in impact. An attacker who thins in-range liquidity around quote time inflates the modeled impact and widens the tolerance up to `MAX_SLIPPAGE = 8800` (88%). Asymmetric vs the V3 path, which feeds `OracleLibrary.consult`'s `harmonicMeanLiquidity` over the same window into the same sigmoid.
 
+If the V4 oracle hook reports partial observation coverage, the router quotes against the longest retained best-effort window instead of reverting the auto-quote. That keeps programmatic routing live during pool warmup, but it is weaker than the full 120-second router TWAP until the pool has retained enough history.
+
 Why the practical impact is bounded rather than catastrophic:
 1. The TWAP tick anchors the gross quote price over the 120s window — an attacker cannot move the priced tick within a single block, only widen the tolerance band around it.
 2. Callers can pass `pay` swap-quote metadata to bypass the V4 spot-quote path entirely.

@@ -15,6 +15,7 @@ import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashO
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
 import {JBUniswapV4HookData} from "@bananapus/univ4-router-v6/src/libraries/JBUniswapV4HookData.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -38,7 +39,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 
-import {IGeomeanOracle} from "./interfaces/IGeomeanOracle.sol";
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
@@ -2436,10 +2436,8 @@ contract JBRouterTerminal is
     ///      quoter or RPC simulation). The quote must encode the output token and minimum output amount. When present,
     ///      this function is bypassed entirely — see `_pickPoolAndQuote`.
     ///   2. When a hook implements `IGeomeanOracle.observe(...)`, this uses its oracle-derived tick, not spot price.
-    ///   3. The sigmoid slippage formula (`JBSwapLib.getSlippageTolerance`) enforces a minimum 2% slippage floor
-    ///      (pool fee + 1%, with a hard floor of 2%), which bounds the worst-case loss even if the spot price is
-    ///      manipulated. For small swaps in deep pools the tolerance stays near this floor; for larger swaps it
-    ///      scales up to the 88% ceiling via a continuous sigmoid curve.
+    ///   3. The spot fallback uses a fixed 15% haircut instead of the sigmoid formula, because both spot price and
+    ///      instantaneous liquidity can be JIT-manipulated. TWAP-backed quotes still use the sigmoid tolerance model.
     ///   4. Pool discovery (`_discoverPool`) may select a V3 pool with TWAP if it has more liquidity, avoiding
     ///      this V4 spot-price path altogether.
     ///   5. On legs with no downstream `minReturnedTokens` backstop (`addToBalanceOf`, and cash-out routes that
@@ -2476,31 +2474,47 @@ contract JBRouterTerminal is
 
         // If the pool has a hook, try querying it as a geomean oracle (e.g., JBUniswapV4Hook implements this).
         if (address(key.hooks) != address(0)) {
-            // Build the two-element lookback array: [_TWAP_WINDOW seconds ago, current block time].
-            uint32[] memory secondsAgos = new uint32[](2);
-            secondsAgos[0] = _TWAP_WINDOW; // Start of the window (120 seconds ago).
-            secondsAgos[1] = 0; // End of the window (current block).
+            IGeomeanOracle oracle = IGeomeanOracle(address(key.hooks));
+            uint32 quoteWindow = _TWAP_WINDOW;
+            bool shouldObserve = true;
 
-            // Ask the hook for cumulative tick data over the window. Silently catch if it doesn't support it.
-            try IGeomeanOracle(address(key.hooks)).observe({key: key, secondsAgos: secondsAgos}) returns (
-                int56[] memory tickCumulatives, uint160[] memory
-            ) {
-                // Guard against malicious/broken hooks returning fewer elements than requested.
-                // An OOB access in the try-success block panics and is NOT caught by catch{}.
-                if (tickCumulatives.length >= 2) {
-                    // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
-                    int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
-                    // The TWAP window is a small protocol constant that fits in int32 and int56.
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    int56 period = int56(int32(_TWAP_WINDOW));
-                    // The cumulative tick values come from Uniswap observations, whose average tick is int24-bounded.
-                    // forge-lint: disable-next-line(unsafe-typecast)
-                    tick = int24(tickDelta / period);
-                    // Round towards negative infinity for negative ticks (Uniswap convention).
-                    if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
-                    usedTwap = true;
+            // Prefer the full router window, but use the retained best-effort window when the hook reports partial
+            // coverage. Hooks that do not expose this newer interface keep the previous observe-only behavior.
+            try oracle.observationCoverageOf({key: key}) returns (uint32 oldestSecondsAgo) {
+                if (oldestSecondsAgo == 0) {
+                    shouldObserve = false;
+                } else if (oldestSecondsAgo < quoteWindow) {
+                    quoteWindow = oldestSecondsAgo;
                 }
             } catch {}
+
+            if (shouldObserve) {
+                // Build the two-element lookback array: [quoteWindow seconds ago, current block time].
+                uint32[] memory secondsAgos = new uint32[](2);
+                secondsAgos[0] = quoteWindow;
+                secondsAgos[1] = 0;
+
+                // Ask the hook for cumulative tick data over the retained window. Silently catch if unsupported.
+                try oracle.observe({key: key, secondsAgos: secondsAgos}) returns (
+                    int56[] memory tickCumulatives, uint160[] memory
+                ) {
+                    // Guard against malicious/broken hooks returning fewer elements than requested.
+                    // An OOB access in the try-success block panics and is NOT caught by catch{}.
+                    if (tickCumulatives.length >= 2) {
+                        // Derive the arithmetic mean tick: (cumulative_now - cumulative_start) / elapsed_seconds.
+                        int56 tickDelta = tickCumulatives[1] - tickCumulatives[0];
+                        // quoteWindow is bounded by `_TWAP_WINDOW`, a small protocol constant.
+                        // forge-lint: disable-next-line(unsafe-typecast)
+                        int56 period = int56(int32(quoteWindow));
+                        // Cumulative values come from Uniswap observations, whose average tick is int24-bounded.
+                        // forge-lint: disable-next-line(unsafe-typecast)
+                        tick = int24(tickDelta / period);
+                        // Round towards negative infinity for negative ticks (Uniswap convention).
+                        if (tickDelta < 0 && (tickDelta % period != 0)) tick--;
+                        usedTwap = true;
+                    }
+                } catch {}
+            }
         }
 
         // If no TWAP was available (no hook, or hook doesn't implement observe), there is no manipulation-resistant

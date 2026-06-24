@@ -30,6 +30,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
+import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {JBPayRouteResolver} from "../src/JBPayRouteResolver.sol";
@@ -2740,6 +2741,100 @@ contract RouterTerminalTest is Test {
         assertEq(strictQuoted, 123, "strict leg with a caller quote uses it");
     }
 
+    /// @notice Strict V4 quotes use the retained best-effort hook oracle window when the requested TWAP is
+    /// under-covered.
+    function test_strictSwapQuote_hookOracleUsesBestEffortObservationCoverage() public {
+        address staleOracleHook = makeAddr("staleOracleHook");
+        vm.etch(staleOracleHook, hex"00");
+
+        RouterTerminalHarness hookedRouter = new RouterTerminalHarness(
+            mockDirectory,
+            mockPermissions,
+            mockTokens,
+            mockPermit2,
+            terminalOwner,
+            buybackHook,
+            address(0),
+            address(this)
+        );
+        hookedRouter.setChainSpecificConstants({
+            newWrappedNativeToken: mockWeth,
+            newFactory: mockFactory,
+            newPoolManager: mockPoolManager,
+            newUniv4Hook: staleOracleHook
+        });
+
+        address tokenIn = makeAddr("staleTokenIn");
+        address tokenOut = makeAddr("staleTokenOut");
+        uint256 amount = 1e18;
+
+        vm.mockCall(
+            address(mockFactory), abi.encodeWithSelector(IUniswapV3Factory.getPool.selector), abi.encode(address(0))
+        );
+
+        (address sorted0, address sorted1) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
+        PoolKey memory hookedKey = PoolKey({
+            currency0: Currency.wrap(sorted0),
+            currency1: Currency.wrap(sorted1),
+            fee: 3000,
+            tickSpacing: int24(60),
+            hooks: IHooks(staleOracleHook)
+        });
+
+        _mockV4PoolNotExists(sorted0, sorted1, 3000, int24(60));
+        _mockV4PoolExists(hookedKey.toId(), uint160(79_228_162_514_264_337_593_543_950_336), 1_000_000e18);
+
+        _mockV4PoolNotExists(sorted0, sorted1, 500, int24(10));
+        _mockV4PoolNotExists(
+            PoolKey({
+                currency0: Currency.wrap(sorted0),
+                currency1: Currency.wrap(sorted1),
+                fee: 500,
+                tickSpacing: int24(10),
+                hooks: IHooks(staleOracleHook)
+            })
+        );
+        _mockV4PoolNotExists(sorted0, sorted1, 10_000, int24(200));
+        _mockV4PoolNotExists(
+            PoolKey({
+                currency0: Currency.wrap(sorted0),
+                currency1: Currency.wrap(sorted1),
+                fee: 10_000,
+                tickSpacing: int24(200),
+                hooks: IHooks(staleOracleHook)
+            })
+        );
+        _mockV4PoolNotExists(sorted0, sorted1, 100, int24(1));
+        _mockV4PoolNotExists(
+            PoolKey({
+                currency0: Currency.wrap(sorted0),
+                currency1: Currency.wrap(sorted1),
+                fee: 100,
+                tickSpacing: int24(1),
+                hooks: IHooks(staleOracleHook)
+            })
+        );
+
+        int56[] memory tickCumulatives = new int56[](2);
+        tickCumulatives[0] = 0;
+        tickCumulatives[1] = int56(60 * 1234);
+        uint160[] memory secondsPerLiquidityCumulativeX128s = new uint160[](2);
+
+        vm.mockCall(
+            staleOracleHook,
+            abi.encodeWithSelector(IGeomeanOracle.observationCoverageOf.selector, hookedKey),
+            abi.encode(uint32(60))
+        );
+        vm.mockCall(
+            staleOracleHook,
+            abi.encodeWithSelector(IGeomeanOracle.observe.selector),
+            abi.encode(tickCumulatives, secondsPerLiquidityCumulativeX128s)
+        );
+
+        uint256 strictQuote = hookedRouter.exposedPickPoolAndQuote("", tokenIn, amount, tokenOut, true);
+        assertGt(strictQuote, 0, "strict leg accepted the retained best-effort oracle response as TWAP");
+    }
+
     function test_strictSwapQuote_successfulPayRestoresOuterStrictQuoteMode() public {
         uint256 projectId = 1;
 
@@ -2964,6 +3059,16 @@ contract RouterTerminalTest is Test {
             tickSpacing: tickSpacing,
             hooks: IHooks(address(0))
         });
+        PoolId id = key.toId();
+        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(id), bytes32(uint256(6))));
+
+        vm.mockCall(
+            address(mockPoolManager), abi.encodeWithSignature("extsload(bytes32)", stateSlot), abi.encode(bytes32(0))
+        );
+    }
+
+    /// @notice Mock a specific V4 pool key as non-existent.
+    function _mockV4PoolNotExists(PoolKey memory key) internal {
         PoolId id = key.toId();
         bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(id), bytes32(uint256(6))));
 
