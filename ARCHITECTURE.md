@@ -8,9 +8,9 @@ The router is intentionally heuristic. It does not search every possible route f
 
 ## System overview
 
-`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. For authenticated terminal-originated project transfers, it also retains failed downstream forwards for permissionless retry and deterministic source-project refund. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
+`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. For authenticated terminal-originated project transfers, it also retains failed downstream forwards for permissionless retry. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
 
-Final project accounting still happens in the downstream terminal selected through `nana-core-v6`. A pending registry call is custody, not credited project balance, until downstream settlement succeeds or autonomous finalization restores the original asset to the source project's terminal balance.
+Final project accounting still happens in the downstream terminal selected through `nana-core-v6`. A pending registry call is custody, not credited project balance, until that downstream settlement succeeds.
 
 ## Core invariants
 
@@ -24,14 +24,13 @@ Final project accounting still happens in the downstream terminal selected throu
 - caller reclaim minima only apply to the first cashout hop, because later hops may change token units
 - circular `router -> registry -> same router` forwarding remains blocked in the registry
 - a downstream failure cannot turn an authenticated registry-mediated project payout or non-native protocol fee into a successful source-terminal catch
-- an underfunded retry cannot advance a pending call's failure streak, and a changed error or route restarts qualification
 
 ## Modules
 
 | Module | Responsibility | Notes |
 | --- | --- | --- |
 | `JBRouterTerminal` | Intake, route discovery, swap execution, forwarding, and refunds | Main runtime surface |
-| `JBRouterTerminalRegistry` | Project-level router selection, locking, proxy forwarding, and failed-forward custody | Governance, permissionless retry, and deterministic refund surface |
+| `JBRouterTerminalRegistry` | Project-level router selection, locking, proxy forwarding, and failed-forward custody | Governance, safety, and permissionless retry surface |
 | `JBPayRouteResolver` | Preview candidate evaluation | Helper to keep runtime size bounded |
 | `JBSwapLib` and routing structs | Pool discovery, quoting, and route metadata | Shared routing logic |
 
@@ -65,11 +64,7 @@ source terminal fee or project payout
   -> registry retains enough gas to handle a failed downstream router call
   -> success: downstream terminal settles normally
   -> failure: registry keeps exact token custody and records a deterministic pending call
-  -> any caller makes fixed-gas retries against the project's currently resolved terminal
-  -> success: downstream terminal settles normally
-  -> three identical failures in daily windows: wait one more day and make a final fixed-gas attempt
-  -> identical final failure: restore the original asset to the authenticated source terminal's project balance
-  -> changed error or route: restart the failure streak and keep custody
+  -> any caller retries the pending call against the project's currently resolved terminal
 ```
 
 ## Accounting model
@@ -93,7 +88,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - be conservative with native wrapping, unwrapping, and refund behavior
 - if recursive cash-out logic changes, review hop limits and failure handling together
 - if metadata semantics change, re-check first-hop reclaim minima, one-shot source overrides, and preferred-token routing together
-- keep pending registry custody one-for-one, non-administrative, and releasable only through the recorded destination call or deterministic source-project refund
+- keep pending registry custody one-for-one, non-administrative, and releasable only through the recorded destination call
 
 ## Canonical checks
 

@@ -8,7 +8,6 @@ pragma solidity ^0.8.0;
 /// @custom:member amount The amount retained by the registry.
 /// @custom:member beneficiary The beneficiary for a retried pay call.
 /// @custom:member payer The original payer exposed to downstream forwarding terminals during a retry.
-/// @custom:member sourceTerminal The authenticated terminal whose project balance funded the payment.
 /// @custom:member preferAddToBalance Whether the retry should add to the project's balance instead of paying it.
 struct JBPendingTerminalCall {
     uint256 sourceProjectId;
@@ -17,6 +16,5 @@ struct JBPendingTerminalCall {
     uint256 amount;
     address beneficiary;
     address payer;
-    address sourceTerminal;
     bool preferAddToBalance;
 }

@@ -130,27 +130,23 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Actor:** keeper, operator, or any permissionless caller.
 
-**Intent:** settle or autonomously refund a project payout or non-native protocol fee whose downstream registry route failed consistently.
+**Intent:** finish a project payout or non-native protocol fee whose downstream registry route previously failed.
 
 **Preconditions**
 - `JBRouterTerminalRegistry_QueueTerminalCall` was emitted and the registry still reports a non-zero pending amount
 
 **Main Flow**
-1. Read the pending call and its failure state by event ID.
-2. Call `processPendingTerminalCall(id)` with enough gas; the registry forwards a fixed 2,000,000 gas.
-3. On success, confirm `JBRouterTerminalRegistry_ProcessTerminalCall` and a zero pending amount.
-4. On failure, confirm `JBRouterTerminalRegistry_RecordTerminalCallFailure`. Wait until `nextAttemptAt` before retrying.
-5. Three consecutive exact matching failures make the call finalizable after one more day. A changed error, route, terminal code hash, operation, or aggregated amount restarts qualification.
-6. Call `finalizePendingTerminalCall(id)`. It makes the final well-funded attempt itself.
-7. Confirm either processing success or `JBRouterTerminalRegistry_RefundTerminalCall`, which restores the original asset to the source project's terminal balance.
+1. Read the pending call by its event ID and diagnose why its resolved downstream terminal failed.
+2. Fix any route configuration or wait until the route is executable; no permission is required to settle it.
+3. Call `processPendingTerminalCall(id)` with enough gas.
+4. Confirm `JBRouterTerminalRegistry_ProcessTerminalCall` and that the pending amount is now zero.
 
 **Failure Modes**
-- the caller does not supply enough gas for the fixed attempt and reserve; the transaction reverts without advancing qualification
-- the error or route fingerprint changes; the failure streak restarts and custody remains pending
-- restoring the source project balance fails; finalization reverts atomically and preserves custody and qualification
+- the retry still runs out of gas or the destination route remains broken; the transaction reverts and custody remains pending
+- the project changes its resolved terminal before retry, so the current terminal receives the retained transfer
 
 **Postconditions**
-- either the destination terminal has accounted for the transfer or the source terminal has restored the original project balance; the registry no longer holds its backing amount
+- the destination terminal has accounted for the transfer and the registry no longer holds its backing amount
 
 ## Trust boundaries
 

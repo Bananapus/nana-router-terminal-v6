@@ -10,7 +10,6 @@ import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker
 
 import {DefaultTerminalSegment} from "../structs/DefaultTerminalSegment.sol";
 import {JBPendingTerminalCall} from "../structs/JBPendingTerminalCall.sol";
-import {JBPendingTerminalCallFailure} from "../structs/JBPendingTerminalCallFailure.sol";
 
 /// @notice A registry that maps projects to their preferred router terminal.
 interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPayerTracker {
@@ -46,30 +45,6 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     event JBRouterTerminalRegistry_QueueTerminalCall(
         bytes32 indexed id, JBPendingTerminalCall call, uint256 amount, address caller
     );
-
-    /// @notice Emitted when a gas-qualified retry reproduces a downstream terminal failure.
-    /// @param id The deterministic identifier of the pending call.
-    /// @param errorHash The hash of the exact revert data.
-    /// @param routeHash The hash of the resolved terminal, its code hash, and the call operation.
-    /// @param count The number of consecutive matching qualified failures.
-    /// @param nextAttemptAt The earliest timestamp at which another qualifying attempt may be made.
-    /// @param reason The exact revert data returned by the downstream call.
-    /// @param caller The address that retried the call.
-    event JBRouterTerminalRegistry_RecordTerminalCallFailure(
-        bytes32 indexed id,
-        bytes32 indexed errorHash,
-        bytes32 indexed routeHash,
-        uint32 count,
-        uint256 nextAttemptAt,
-        bytes reason,
-        address caller
-    );
-
-    /// @notice Emitted when a consistently failing pending call is restored to its source project's balance.
-    /// @param id The deterministic identifier of the refunded pending call.
-    /// @param call The pending call whose retained funds were restored.
-    /// @param caller The address that finalized the refund.
-    event JBRouterTerminalRegistry_RefundTerminalCall(bytes32 indexed id, JBPendingTerminalCall call, address caller);
 
     /// @notice Emitted when the default terminal is changed.
     /// @param terminal The new default terminal.
@@ -124,14 +99,6 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @return isAllowed Whether the terminal is allowed.
     function isTerminalAllowed(IJBTerminal terminal) external view returns (bool isAllowed);
 
-    /// @notice Return the consecutive qualified failure streak for a pending terminal call.
-    /// @param id The deterministic pending-call identifier.
-    /// @return failure The pending call's matching failure state.
-    function pendingTerminalCallFailureOf(bytes32 id)
-        external
-        view
-        returns (JBPendingTerminalCallFailure memory failure);
-
     /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
     /// @param id The deterministic pending-call identifier.
     /// @return call The retained terminal call.
@@ -153,21 +120,15 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param terminal The terminal to disallow.
     function disallowTerminal(IJBTerminal terminal) external;
 
-    /// @notice Make the final well-funded delivery attempt and autonomously refund a consistently failing call.
-    /// @param id The deterministic pending-call identifier.
-    /// @return wasRefunded Whether the retained payment was restored to its source project.
-    /// @return beneficiaryTokenCount The number of project tokens minted if the final attempt succeeded.
-    function finalizePendingTerminalCall(bytes32 id) external returns (bool wasRefunded, uint256 beneficiaryTokenCount);
-
     /// @notice Lock the terminal for a project, preventing it from being changed.
     /// @param projectId The ID of the project to lock the terminal for.
     /// @param expectedTerminal The terminal the caller expects to lock. Reverts if the current terminal doesn't match.
     function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) external;
 
-    /// @notice Make a gas-qualified retry of a terminal-originated payment retained after downstream failure.
+    /// @notice Retry a terminal-originated payment retained after downstream forwarding failed.
     /// @param id The deterministic pending-call identifier.
-    /// @return beneficiaryTokenCount The number of project tokens minted if the retry succeeds, or zero for a failed
-    /// retry or add-to-balance call.
+    /// @return beneficiaryTokenCount The number of project tokens minted when retrying a pay call, or zero for an
+    /// add-to-balance call.
     function processPendingTerminalCall(bytes32 id) external returns (uint256 beneficiaryTokenCount);
 
     /// @notice Set the default terminal used when a project has not set a specific terminal.
