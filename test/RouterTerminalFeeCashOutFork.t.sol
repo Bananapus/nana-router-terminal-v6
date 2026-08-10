@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 // JB core.
 import {JBPermissions} from "@bananapus/core-v6/src/JBPermissions.sol";
@@ -38,13 +39,18 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Router terminal.
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
+import {JBRouterTerminalGateway} from "../src/JBRouterTerminalGateway.sol";
+import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
+import {JBPendingRouterTerminalCall} from "../src/structs/JBPendingRouterTerminalCall.sol";
 
-/// @notice Fork test: fee project (project 1) accepts fees paid in project 2's ERC-20 token via the router terminal's
-/// cashout route.
+// Test helpers.
+import {FeeCashOutTestToken} from "./helpers/FeeCashOutTestToken.sol";
+
+/// @notice Fork test: fee project (project 1) accepts routed fees through the Registry and Gateway.
 ///
 /// Setup:
-///   - Project 1 (fee project): has a multi terminal (accepts NATIVE_TOKEN) AND a router terminal.
+///   - Project 1 (fee project): has a multi terminal (accepts NATIVE_TOKEN) and a Registry resolved to the Gateway.
 ///   - Project 2: accepts NATIVE_TOKEN, deploys an ERC-20 token, cashOutTaxRate = 0.
 ///   - Project 3: accepts project 2's ERC-20 as its token, has payout limits in that token.
 ///
@@ -53,8 +59,8 @@ import {IWETH9} from "../src/interfaces/IWETH9.sol";
 ///   2. Deploy ERC-20 for project 2, claim credits as ERC-20.
 ///   3. Pay project 3 with project 2's ERC-20 → project 3 holds a balance.
 ///   4. Project 3 sends payouts → fee is taken in project 2's ERC-20 token.
-///   5. Fee terminal lookup finds the router terminal for project 1.
-///   6. Router terminal cashes out project 2's tokens → receives ETH.
+///   5. Fee terminal lookup finds the Registry, which forwards through the Gateway to the Router.
+///   6. Router cashes out project 2's tokens → receives ETH.
 ///   7. Router forwards ETH to project 1's multi terminal.
 ///   8. Assert: project 1's ETH balance increased, router has no leftover.
 contract RouterTerminalFeeCashOutForkTest is Test {
@@ -92,6 +98,8 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     JBTerminalStore jbTerminalStore;
     JBMultiTerminal jbMultiTerminal;
     JBRouterTerminal routerTerminal;
+    JBRouterTerminalGateway routerTerminalGateway;
+    JBRouterTerminalRegistry routerTerminalRegistry;
 
     // ───────────────────────── Project IDs
     // ──────────────────────────
@@ -128,7 +136,19 @@ contract RouterTerminalFeeCashOutForkTest is Test {
             newUniv4Hook: address(0)
         });
 
-        // ── Project 1 (fee project): multi terminal (ETH) + router terminal ──
+        routerTerminalGateway = new JBRouterTerminalGateway({
+            directory: jbDirectory, permit2: PERMIT2, router: routerTerminal, trustedForwarder: trustedForwarder
+        });
+        routerTerminalRegistry = new JBRouterTerminalRegistry({
+            permissions: jbPermissions,
+            projects: jbProjects,
+            permit2: PERMIT2,
+            owner: address(this),
+            trustedForwarder: trustedForwarder
+        });
+        routerTerminalRegistry.setDefaultTerminal(routerTerminalGateway);
+
+        // ── Project 1 (fee project): multi terminal (ETH) + Registry/Gateway route ──
         feeProjectId = _launchFeeProject();
         require(feeProjectId == 1, "fee project must be #1");
 
@@ -167,6 +187,55 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
     // Test: fee paid in project 2's token routes through cashout to project 1
     // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Pins the fail-open behavior when a cash-out fee bypasses the Gateway and its Router route fails.
+    function test_fork_cashOutFeeRouteFailureIsForgivenWithoutGateway() public {
+        routerTerminalRegistry.allowTerminal(routerTerminal);
+        vm.prank(multisig);
+        routerTerminalRegistry.setTerminalFor({projectId: feeProjectId, terminal: routerTerminal});
+
+        (
+            FeeCashOutTestToken tokenToReclaim,
+            uint256 cashOutProjectId,
+            uint256 beneficiaryBalanceBefore,
+            uint256 reclaimAmount
+        ) = _cashOutUnroutableToken();
+        (bool sawFeeReverted, bool sawProcessFee) = _feeEventsIn(vm.getRecordedLogs());
+
+        assertTrue(sawFeeReverted, "cash-out fee failure should cross the unprotected catch boundary");
+        assertFalse(sawProcessFee, "forgiven cash-out fee must not be recognized as processed");
+        assertEq(routerTerminalGateway.pendingCallCount(), 0, "bypassed Gateway should not retain the fee");
+        assertEq(tokenToReclaim.balanceOf(address(routerTerminal)), 0, "failed Router route retained fee tokens");
+        assertEq(tokenToReclaim.balanceOf(payer) - beneficiaryBalanceBefore, reclaimAmount, "cash out changed");
+        assertGt(
+            jbTerminalStore.balanceOf(address(jbMultiTerminal), cashOutProjectId, address(tokenToReclaim)),
+            0,
+            "forgiven fee should return to the source project balance"
+        );
+    }
+
+    /// @notice A fee generated by a cash out must remain charged when its route into project 1 fails.
+    function test_fork_cashOutFeeRouteFailureIsRetainedByGateway() public {
+        (
+            FeeCashOutTestToken tokenToReclaim,
+            uint256 cashOutProjectId,
+            uint256 beneficiaryBalanceBefore,
+            uint256 reclaimAmount
+        ) = _cashOutUnroutableToken();
+        (bool sawFeeReverted, bool sawProcessFee) = _feeEventsIn(vm.getRecordedLogs());
+
+        JBPendingRouterTerminalCall memory pending = routerTerminalGateway.pendingCallOf(bytes32(uint256(1)));
+        assertGt(pending.amount, 0, "cash-out fee should be retained");
+        assertEq(pending.token, address(tokenToReclaim), "gateway retained the wrong fee token");
+        assertEq(pending.sourceProjectId, cashOutProjectId, "cash-out project ID was not propagated");
+        assertEq(pending.refundTo, address(jbMultiTerminal), "cash-out terminal was not preserved for refunds");
+        assertTrue(pending.refundToProject, "cash-out fee should qualify for a project refund");
+        assertEq(tokenToReclaim.balanceOf(address(routerTerminalGateway)), pending.amount, "custody mismatch");
+        assertEq(tokenToReclaim.balanceOf(address(routerTerminal)), 0, "failed Router route retained fee tokens");
+        assertEq(tokenToReclaim.balanceOf(payer) - beneficiaryBalanceBefore, reclaimAmount, "cash out changed");
+        assertFalse(sawFeeReverted, "cash-out fee was forgiven");
+        assertTrue(sawProcessFee, "cash-out fee was not recognized as processed");
+    }
 
     function test_fork_feeCashOutRoute() public {
         // ── Step 1: Pay project 2 with 10 ETH → mints credits ──
@@ -260,7 +329,67 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // Internal helpers
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @dev Launch the fee project (project 1) with both multi terminal and router terminal.
+    /// @dev Cash out a real core project whose reclaim token has no Router conversion route.
+    function _cashOutUnroutableToken()
+        internal
+        returns (
+            FeeCashOutTestToken tokenToReclaim,
+            uint256 cashOutProjectId,
+            uint256 beneficiaryBalanceBefore,
+            uint256 reclaimAmount
+        )
+    {
+        tokenToReclaim = new FeeCashOutTestToken();
+        cashOutProjectId = _launchProject({
+            owner: multisig,
+            acceptedToken: address(tokenToReclaim),
+            decimals: 18,
+            cashOutTaxRate: 1000,
+            payoutLimitToken: address(0),
+            payoutLimitAmount: 0
+        });
+        uint256 payAmount = 10 ether;
+        tokenToReclaim.mint({account: payer, amount: payAmount});
+
+        vm.startPrank(payer);
+        tokenToReclaim.approve({spender: address(jbMultiTerminal), value: payAmount});
+        jbMultiTerminal.pay({
+            projectId: cashOutProjectId,
+            token: address(tokenToReclaim),
+            amount: payAmount,
+            beneficiary: payer,
+            minReturnedTokens: 0,
+            memo: "fund cash-out project",
+            metadata: ""
+        });
+
+        uint256 cashOutCount = jbTokens.totalBalanceOf({holder: payer, projectId: cashOutProjectId});
+        beneficiaryBalanceBefore = tokenToReclaim.balanceOf(payer);
+        vm.recordLogs();
+        reclaimAmount = jbMultiTerminal.cashOutTokensOf({
+            holder: payer,
+            projectId: cashOutProjectId,
+            cashOutCount: cashOutCount,
+            tokenToReclaim: address(tokenToReclaim),
+            minTokensReclaimed: 0,
+            beneficiary: payable(payer),
+            metadata: ""
+        });
+        vm.stopPrank();
+    }
+
+    /// @dev Return whether the recorded logs contain the mutually exclusive fee result events.
+    function _feeEventsIn(Vm.Log[] memory logs) internal pure returns (bool sawFeeReverted, bool sawProcessFee) {
+        bytes32 feeRevertedTopic = keccak256("FeeReverted(uint256,address,uint256,uint256,bytes,address)");
+        bytes32 processFeeTopic = keccak256("ProcessFee(uint256,address,uint256,bool,address,address)");
+
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] == feeRevertedTopic) sawFeeReverted = true;
+            if (logs[i].topics[0] == processFeeTopic) sawProcessFee = true;
+        }
+    }
+
+    /// @dev Launch the fee project (project 1) with both its native terminal and routed-token forwarding path.
     function _launchFeeProject() internal returns (uint256 projectId) {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,
@@ -300,12 +429,13 @@ contract RouterTerminalFeeCashOutForkTest is Test {
             token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: uint32(uint160(JBConstants.NATIVE_TOKEN))
         });
 
-        // Router terminal: accepts any token (empty contexts — it generates them dynamically).
+        // The Registry delegates dynamic token contexts through the Gateway to the Router.
         JBAccountingContext[] memory routerContext = new JBAccountingContext[](0);
 
         JBTerminalConfig[] memory terminalConfigs = new JBTerminalConfig[](2);
         terminalConfigs[0] = JBTerminalConfig({terminal: jbMultiTerminal, accountingContextsToAccept: ethContext});
-        terminalConfigs[1] = JBTerminalConfig({terminal: routerTerminal, accountingContextsToAccept: routerContext});
+        terminalConfigs[1] =
+            JBTerminalConfig({terminal: routerTerminalRegistry, accountingContextsToAccept: routerContext});
 
         projectId = jbController.launchProjectFor({
             owner: multisig,
