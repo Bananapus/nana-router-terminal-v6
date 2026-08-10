@@ -45,11 +45,17 @@ When the oracle returns zero (no liquidity), slippage tolerance becomes zero. Th
 For an authenticated terminal-originated project transfer, a downstream `pay` or `addToBalanceOf` failure does not
 revert to the source terminal. The registry retains the exact received asset amount and records a deterministic call
 which anyone can retry. This prevents the source terminal's fail-open accounting from forgiving a non-native protocol
-fee or nullifying a registry-mediated project payout, but settlement can remain pending while the destination route is
-misconfigured, reverting, or too expensive for the retry transaction. Indexers and keepers should monitor
-`JBRouterTerminalRegistry_QueueTerminalCall` and call `processPendingTerminalCall`; a failed retry leaves the record and
-custody intact. A retry resolves the project's terminal at execution time, so an authorized project terminal change can
-change the concrete terminal which ultimately receives the pending transfer.
+fee or nullifying a registry-mediated project payout. A qualifying retry forwards a fixed 2,000,000 gas and requires
+enough caller gas to preserve failure-handling headroom. Three exact matching revert-data and route fingerprints, each
+at least one day apart, make the call finalizable after another day. Finalization first makes the same well-funded call;
+success settles, a changed fingerprint restarts the streak, and the same failure restores the original asset to the
+authenticated source terminal's project balance. Aggregating new value also resets the streak.
+
+The EVM cannot prove that a route is permanently broken. Empty revert data can represent OOG, `revert(0, 0)`, or an
+invalid opcode, and a temporary or manipulated swap failure can repeat. The multi-window exact-match policy makes a
+manufactured autonomous refund materially harder but cannot provide an absolute no-fee-evasion guarantee. Indexers and
+keepers should monitor queue, failure, process, and refund events. A retry resolves the destination project's terminal
+at execution time, so a route or terminal-code change resets the streak before any refund.
 
 Native-token protocol fees do not traverse this registry: the source terminal sends them directly to the fee project's
 native terminal. Native project payouts which do resolve through the registry are covered.

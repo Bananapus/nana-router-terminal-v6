@@ -21,6 +21,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
@@ -32,10 +33,14 @@ import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 
 import {DefaultTerminalSegment} from "./structs/DefaultTerminalSegment.sol";
 import {JBPendingTerminalCall} from "./structs/JBPendingTerminalCall.sol";
+import {JBPendingTerminalCallFailure} from "./structs/JBPendingTerminalCallFailure.sol";
 
 /// @notice A forwarding layer that lets each project choose which router terminal receives its payments, with an
 /// owner-managed default for projects that have not opted in. Projects can lock their choice to guarantee permanence.
 contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, Ownable, ERC2771Context {
+    // A library that safely narrows timestamps for packed failure-state storage.
+    using SafeCast for uint256;
+
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
 
@@ -52,11 +57,25 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Thrown when a terminal would forward a project back into this registry, directly or transitively.
     error JBRouterTerminalRegistry_CircularForward(IJBTerminal terminal);
 
+    /// @notice Thrown when a pending-call attempt does not leave enough gas for its fixed call and failure handling.
+    error JBRouterTerminalRegistry_InsufficientRetryGas(uint256 available, uint256 required);
+
     /// @notice Thrown when native tokens are sent on a call that does not accept them.
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
 
+    /// @notice Thrown when a pending terminal call has not reproduced enough matching qualified failures.
+    error JBRouterTerminalRegistry_PendingTerminalCallNotFinalizable(
+        bytes32 id, uint256 failureCount, uint256 requiredFailureCount
+    );
+
     /// @notice Thrown when attempting to process a pending terminal call that does not exist.
     error JBRouterTerminalRegistry_PendingTerminalCallNotFound(bytes32 id);
+
+    /// @notice Thrown when a pending terminal call has not reached its next autonomous retry timestamp.
+    error JBRouterTerminalRegistry_PendingTerminalCallNotReady(bytes32 id, uint256 eligibleAt);
+
+    /// @notice Thrown when a pending terminal call must use its final attempt instead of extending its failure streak.
+    error JBRouterTerminalRegistry_PendingTerminalCallRequiresFinalization(bytes32 id);
 
     /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in the metadata.
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
@@ -80,9 +99,30 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     // ----------------------- internal constants ------------------------ //
     //*********************************************************************//
 
+    /// @notice Time between the third matching failure and the autonomous final delivery attempt.
+    uint256 internal constant _FINALIZATION_FAILURE_DELAY = 1 days;
+
+    /// @notice Gas retained around a final delivery attempt for a source-project refund.
+    uint256 internal constant _FINALIZATION_GAS_RESERVE = 1_500_000;
+
     /// @notice Gas retained while forwarding a terminal-originated project payment so a failed downstream route can
     /// be recorded without returning control to the source terminal as a failed payment.
     uint256 internal constant _FORWARD_FAILURE_GAS_RESERVE = 200_000;
+
+    /// @notice Number of consecutive matching failures required before a call receives its final attempt.
+    uint256 internal constant _QUALIFIED_FAILURE_COUNT = 3;
+
+    /// @notice Minimum time between failures which can advance a pending call's consecutive failure streak.
+    uint256 internal constant _QUALIFIED_FAILURE_DELAY = 1 days;
+
+    /// @notice Gas forwarded when restoring a retained payment to its source project's terminal balance.
+    uint256 internal constant _REFUND_CALL_GAS = 1_000_000;
+
+    /// @notice Gas forwarded when proving that a retained downstream route still fails.
+    uint256 internal constant _RETRY_CALL_GAS = 2_000_000;
+
+    /// @notice Gas retained around an ordinary qualified retry for failure-state writes and event emission.
+    uint256 internal constant _RETRY_FAILURE_GAS_RESERVE = 500_000;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -137,8 +177,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @custom:param projectId The ID of the project to look up the explicit terminal for.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
-    /// @notice Terminal-originated project payments retained after their downstream forwarding call failed.
+    /// @notice Consecutive, gas-qualified failure streaks for retained terminal calls.
     /// @dev Appended after `_terminalOf` to preserve the registry's established storage layout.
+    /// @custom:param id The deterministic pending-call identifier.
+    mapping(bytes32 id => JBPendingTerminalCallFailure) internal _pendingTerminalCallFailureOf;
+
+    /// @notice Terminal-originated project payments retained after their downstream forwarding call failed.
+    /// @dev Stored after the failure mapping in the registry's append-only pending-call storage region.
     /// @custom:param id The deterministic identifier derived from the call's immutable routing fields.
     mapping(bytes32 id => JBPendingTerminalCall) internal _pendingTerminalCallOf;
 
@@ -275,6 +320,18 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return _defaultTerminalHistory.length;
     }
 
+    /// @notice Return the consecutive qualified failure streak for a pending terminal call.
+    /// @param id The deterministic pending-call identifier.
+    /// @return failure The pending call's matching failure state.
+    function pendingTerminalCallFailureOf(bytes32 id)
+        external
+        view
+        override
+        returns (JBPendingTerminalCallFailure memory failure)
+    {
+        return _pendingTerminalCallFailureOf[id];
+    }
+
     /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
     /// @param id The deterministic pending-call identifier.
     /// @return call The retained terminal call.
@@ -380,6 +437,18 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (msg.sender == address(terminal)) revert JBRouterTerminalRegistry_CircularForward(terminal);
     }
 
+    /// @notice Identify the downstream route whose exact error must repeat before autonomous finalization.
+    /// @param terminal The resolved terminal called by the retry.
+    /// @param preferAddToBalance Whether the pending operation is an add-to-balance call.
+    /// @return routeHash The resolved terminal, code hash, and operation fingerprint.
+    function _failureRouteHash(IJBTerminal terminal, bool preferAddToBalance)
+        internal
+        view
+        returns (bytes32 routeHash)
+    {
+        return keccak256(abi.encode(terminal, address(terminal).codehash, preferAddToBalance));
+    }
+
     /// @notice Return the gas available to a retryable downstream terminal call while preserving failure-handling
     /// headroom in this registry frame.
     /// @return callGas The gas to forward to the downstream terminal.
@@ -426,6 +495,19 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // which only happens when the caller is itself receiving a direct call — record the caller.
         address upstream = abi.decode(data, (address));
         return upstream == address(0) ? sender : upstream;
+    }
+
+    /// @notice Enforce a fixed downstream call budget while retaining gas for the specified post-call path.
+    /// @param callGas The gas to forward to the external call.
+    /// @param reserve The gas which must remain available after the downstream call consumes its full budget.
+    /// @return forwardedGas The fixed gas allowance to forward to the external call.
+    function _requireGasForCall(uint256 callGas, uint256 reserve) internal view returns (uint256 forwardedGas) {
+        uint256 available = gasleft();
+        uint256 required = callGas + reserve;
+        if (available < required) {
+            revert JBRouterTerminalRegistry_InsufficientRetryGas({available: available, required: required});
+        }
+        return callGas;
     }
 
     /// @notice Reject terminal choices that would forward the project back into this registry, directly or
@@ -588,6 +670,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
                     amount: amount,
                     beneficiary: address(0),
                     payer: payer,
+                    sourceTerminal: _msgSender(),
                     preferAddToBalance: true
                 });
                 return;
@@ -637,6 +720,71 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Emit the allowlist update for off-chain consumers and activity logs.
         emit JBRouterTerminalRegistry_DisallowTerminal({terminal: terminal, caller: _msgSender()});
+    }
+
+    /// @notice Make the final well-funded delivery attempt and autonomously refund a consistently failing call.
+    /// @dev The final failure must reproduce the exact error and route fingerprint recorded by three qualified
+    /// attempts. Any changed error or route restarts the streak because it signals progress or inconsistent failure.
+    /// @param id The deterministic pending-call identifier.
+    /// @return wasRefunded Whether the retained payment was restored to its source project.
+    /// @return beneficiaryTokenCount The number of project tokens minted if the final attempt succeeded.
+    function finalizePendingTerminalCall(bytes32 id)
+        external
+        override
+        returns (bool wasRefunded, uint256 beneficiaryTokenCount)
+    {
+        JBPendingTerminalCall memory call = _pendingTerminalCallOf[id];
+        if (call.amount == 0) revert JBRouterTerminalRegistry_PendingTerminalCallNotFound(id);
+
+        JBPendingTerminalCallFailure memory failure = _pendingTerminalCallFailureOf[id];
+        if (failure.count < _QUALIFIED_FAILURE_COUNT) {
+            revert JBRouterTerminalRegistry_PendingTerminalCallNotFinalizable({
+                id: id, failureCount: failure.count, requiredFailureCount: _QUALIFIED_FAILURE_COUNT
+            });
+        }
+
+        uint256 eligibleAt = uint256(failure.lastFailureAt) + _FINALIZATION_FAILURE_DELAY;
+        // Sequencer timestamp variance is negligible relative to the immutable one-day qualification window.
+        // forge-lint: disable-next-line(block-timestamp)
+        if (block.timestamp < eligibleAt) {
+            revert JBRouterTerminalRegistry_PendingTerminalCallNotReady({id: id, eligibleAt: eligibleAt});
+        }
+
+        IJBTerminal terminal = _requireResolvedTerminalOf(call.projectId);
+
+        // Remove the record before either external interaction so neither the destination nor source terminal can
+        // reenter and process the same retained funds twice. Any uncaught failure restores the deletion atomically.
+        delete _pendingTerminalCallOf[id];
+
+        bool success;
+        bytes memory reason;
+        (success, beneficiaryTokenCount, reason) =
+            _tryPendingTerminalCall({call: call, terminal: terminal, failureReserve: _FINALIZATION_GAS_RESERVE});
+
+        if (success) {
+            delete _pendingTerminalCallFailureOf[id];
+            emit JBRouterTerminalRegistry_ProcessTerminalCall({
+                id: id, call: call, terminal: terminal, caller: _msgSender()
+            });
+            return (false, beneficiaryTokenCount);
+        }
+
+        bytes32 errorHash = keccak256(reason);
+        bytes32 routeHash = _failureRouteHash({terminal: terminal, preferAddToBalance: call.preferAddToBalance});
+        if (errorHash != failure.errorHash || routeHash != failure.routeHash) {
+            // Restore the pending call before restarting its streak under the new exact failure fingerprint.
+            _pendingTerminalCallOf[id] = call;
+            _recordTerminalCallFailure({id: id, terminal: terminal, call: call, reason: reason, forceReset: true});
+            return (false, 0);
+        }
+
+        // Every qualified and final attempt reproduced the same exact failure. Restore the original asset to the
+        // authenticated source terminal's project balance instead of leaving it in a permanently broken sink queue.
+        delete _pendingTerminalCallFailureOf[id];
+        _refundPendingTerminalCall(call);
+
+        emit JBRouterTerminalRegistry_RefundTerminalCall({id: id, call: call, caller: _msgSender()});
+        return (true, 0);
     }
 
     /// @notice Permanently lock a project's router terminal choice so it can never be changed again.
@@ -778,6 +926,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
                     amount: amount,
                     beneficiary: beneficiary,
                     payer: payer,
+                    sourceTerminal: _msgSender(),
                     preferAddToBalance: false
                 });
                 return 0;
@@ -802,47 +951,48 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         originalPayer = previousPayer;
     }
 
-    /// @notice Retry a terminal-originated payment retained after downstream forwarding failed.
-    /// @dev Deletes the pending record before the external call to prevent reentrant double-processing. A failed
-    /// retry reverts the deletion and leaves the retained call available for another attempt.
+    /// @notice Make a gas-qualified retry of a terminal-originated payment retained after downstream failure.
+    /// @dev Matching exact errors advance the streak at most once per retry window. A changed error or route restarts
+    /// the streak because it signals progress or inconsistent failure. The pending funds remain fully backed.
     /// @param id The deterministic pending-call identifier.
-    /// @return beneficiaryTokenCount The number of project tokens minted when retrying a pay call, or zero for an
-    /// add-to-balance call.
+    /// @return beneficiaryTokenCount The number of project tokens minted if the retry succeeds, or zero for a failed
+    /// retry or add-to-balance call.
     function processPendingTerminalCall(bytes32 id) external override returns (uint256 beneficiaryTokenCount) {
         JBPendingTerminalCall memory call = _pendingTerminalCallOf[id];
         if (call.amount == 0) revert JBRouterTerminalRegistry_PendingTerminalCallNotFound(id);
 
-        IJBTerminal terminal = _requireResolvedTerminalOf(call.projectId);
-        delete _pendingTerminalCallOf[id];
-
-        uint256 payValue = _beforeTransferFor({to: address(terminal), token: call.token, amount: call.amount});
-        address previousPayer = originalPayer;
-        originalPayer = call.payer;
-
-        bytes memory metadata = abi.encodePacked(call.sourceProjectId);
-        if (call.preferAddToBalance) {
-            terminal.addToBalanceOf{value: payValue}({
-                projectId: call.projectId,
-                token: call.token,
-                amount: call.amount,
-                shouldReturnHeldFees: false,
-                memo: "",
-                metadata: metadata
-            });
-        } else {
-            beneficiaryTokenCount = terminal.pay{value: payValue}({
-                projectId: call.projectId,
-                token: call.token,
-                amount: call.amount,
-                beneficiary: call.beneficiary,
-                minReturnedTokens: 0,
-                memo: "",
-                metadata: metadata
-            });
+        JBPendingTerminalCallFailure memory failure = _pendingTerminalCallFailureOf[id];
+        if (failure.count >= _QUALIFIED_FAILURE_COUNT) {
+            revert JBRouterTerminalRegistry_PendingTerminalCallRequiresFinalization(id);
         }
 
-        _revokeAllowanceFor({terminal: terminal, token: call.token});
-        originalPayer = previousPayer;
+        if (failure.count != 0) {
+            uint256 eligibleAt = uint256(failure.lastFailureAt) + _QUALIFIED_FAILURE_DELAY;
+            // Sequencer timestamp variance is negligible relative to the immutable one-day qualification window.
+            // forge-lint: disable-next-line(block-timestamp)
+            if (block.timestamp < eligibleAt) {
+                revert JBRouterTerminalRegistry_PendingTerminalCallNotReady({id: id, eligibleAt: eligibleAt});
+            }
+        }
+
+        IJBTerminal terminal = _requireResolvedTerminalOf(call.projectId);
+
+        // Remove the record before the downstream interaction so it cannot reenter and process the same funds. A
+        // caught failure restores the record before returning; any uncaught failure restores it through EVM rollback.
+        delete _pendingTerminalCallOf[id];
+
+        bool success;
+        bytes memory reason;
+        (success, beneficiaryTokenCount, reason) =
+            _tryPendingTerminalCall({call: call, terminal: terminal, failureReserve: _RETRY_FAILURE_GAS_RESERVE});
+
+        if (!success) {
+            _pendingTerminalCallOf[id] = call;
+            _recordTerminalCallFailure({id: id, terminal: terminal, call: call, reason: reason, forceReset: false});
+            return 0;
+        }
+
+        delete _pendingTerminalCallFailureOf[id];
 
         emit JBRouterTerminalRegistry_ProcessTerminalCall({
             id: id, call: call, terminal: terminal, caller: _msgSender()
@@ -1002,6 +1152,7 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @param amount The amount retained by the registry.
     /// @param beneficiary The beneficiary for a retried pay call.
     /// @param payer The original payer to expose to downstream forwarding terminals during retry.
+    /// @param sourceTerminal The authenticated terminal whose project balance funded the payment.
     /// @param preferAddToBalance Whether the retry adds to the project's balance instead of paying it.
     function _queueTerminalCall(
         uint256 sourceProjectId,
@@ -1010,11 +1161,14 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         uint256 amount,
         address beneficiary,
         address payer,
+        address sourceTerminal,
         bool preferAddToBalance
     )
         internal
     {
-        bytes32 id = keccak256(abi.encode(sourceProjectId, projectId, token, beneficiary, payer, preferAddToBalance));
+        bytes32 id = keccak256(
+            abi.encode(sourceProjectId, projectId, token, beneficiary, payer, sourceTerminal, preferAddToBalance)
+        );
 
         JBPendingTerminalCall storage pendingCall = _pendingTerminalCallOf[id];
         if (pendingCall.amount == 0) {
@@ -1023,13 +1177,83 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
             pendingCall.token = token;
             pendingCall.beneficiary = beneficiary;
             pendingCall.payer = payer;
+            pendingCall.sourceTerminal = sourceTerminal;
             pendingCall.preferAddToBalance = preferAddToBalance;
+        } else {
+            // A newly aggregated amount has not experienced the existing failure streak, so every retained unit must
+            // reproduce the same qualified failures before the combined call may be refunded.
+            delete _pendingTerminalCallFailureOf[id];
         }
         pendingCall.amount += amount;
 
         emit JBRouterTerminalRegistry_QueueTerminalCall({
             id: id, call: pendingCall, amount: amount, caller: _msgSender()
         });
+    }
+
+    /// @notice Record one gas-qualified downstream failure, resetting the streak unless its exact fingerprint matches.
+    /// @param id The deterministic pending-call identifier.
+    /// @param terminal The resolved terminal which failed.
+    /// @param call The pending operation attempted.
+    /// @param reason The exact revert data returned by the terminal.
+    /// @param forceReset Whether to restart the streak even if the fingerprint matches.
+    function _recordTerminalCallFailure(
+        bytes32 id,
+        IJBTerminal terminal,
+        JBPendingTerminalCall memory call,
+        bytes memory reason,
+        bool forceReset
+    )
+        internal
+    {
+        bytes32 errorHash = keccak256(reason);
+        bytes32 routeHash = _failureRouteHash({terminal: terminal, preferAddToBalance: call.preferAddToBalance});
+
+        JBPendingTerminalCallFailure storage failure = _pendingTerminalCallFailureOf[id];
+        if (!forceReset && failure.count != 0 && failure.errorHash == errorHash && failure.routeHash == routeHash) {
+            // The exact same route and revert data failed in another retry window, advancing the consecutive streak.
+            ++failure.count;
+        } else {
+            // A changed error or route represents progress or inconsistency, so qualification restarts from one.
+            failure.count = 1;
+            failure.errorHash = errorHash;
+            failure.routeHash = routeHash;
+        }
+        failure.lastFailureAt = block.timestamp.toUint48();
+
+        uint256 delay =
+            failure.count >= _QUALIFIED_FAILURE_COUNT ? _FINALIZATION_FAILURE_DELAY : _QUALIFIED_FAILURE_DELAY;
+        emit JBRouterTerminalRegistry_RecordTerminalCallFailure({
+            id: id,
+            errorHash: errorHash,
+            routeHash: routeHash,
+            count: failure.count,
+            nextAttemptAt: block.timestamp + delay,
+            reason: reason,
+            caller: _msgSender()
+        });
+    }
+
+    /// @notice Restore a retained payment to the authenticated source terminal's project balance.
+    /// @param call The pending call whose original token and source accounting should be restored.
+    function _refundPendingTerminalCall(JBPendingTerminalCall memory call) internal {
+        IJBTerminal sourceTerminal = IJBTerminal(call.sourceTerminal);
+        uint256 payValue = _beforeTransferFor({to: address(sourceTerminal), token: call.token, amount: call.amount});
+        address previousPayer = originalPayer;
+        originalPayer = call.payer;
+
+        uint256 callGas = _requireGasForCall({callGas: _REFUND_CALL_GAS, reserve: _RETRY_FAILURE_GAS_RESERVE});
+        sourceTerminal.addToBalanceOf{value: payValue, gas: callGas}({
+            projectId: call.sourceProjectId,
+            token: call.token,
+            amount: call.amount,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+
+        _revokeAllowanceFor({terminal: sourceTerminal, token: call.token});
+        originalPayer = previousPayer;
     }
 
     /// @notice Revoke any unused downstream ERC-20 allowance after a forwarding attempt.
@@ -1062,5 +1286,62 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (amount > type(uint160).max) revert JBRouterTerminalRegistry_AmountOverflow(amount);
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
+    }
+
+    /// @notice Attempt a retained terminal call with a fixed gas budget and preserve custody on downstream failure.
+    /// @param call The pending call to attempt.
+    /// @param terminal The currently resolved destination terminal.
+    /// @param failureReserve The gas to retain for the caller's success or failure path.
+    /// @return success Whether the downstream call completed successfully.
+    /// @return beneficiaryTokenCount The tokens minted by a successful pay call, or zero otherwise.
+    /// @return reason The exact downstream revert data when the attempt fails.
+    function _tryPendingTerminalCall(
+        JBPendingTerminalCall memory call,
+        IJBTerminal terminal,
+        uint256 failureReserve
+    )
+        internal
+        returns (bool success, uint256 beneficiaryTokenCount, bytes memory reason)
+    {
+        uint256 payValue = _beforeTransferFor({to: address(terminal), token: call.token, amount: call.amount});
+        address previousPayer = originalPayer;
+        originalPayer = call.payer;
+        bytes memory metadata = abi.encodePacked(call.sourceProjectId);
+
+        uint256 callGas = _requireGasForCall({callGas: _RETRY_CALL_GAS, reserve: failureReserve});
+        if (call.preferAddToBalance) {
+            try terminal.addToBalanceOf{value: payValue, gas: callGas}({
+                projectId: call.projectId,
+                token: call.token,
+                amount: call.amount,
+                shouldReturnHeldFees: false,
+                memo: "",
+                metadata: metadata
+            }) {
+                success = true;
+            } catch (bytes memory failureReason) {
+                reason = failureReason;
+            }
+        } else {
+            try terminal.pay{value: payValue, gas: callGas}({
+                projectId: call.projectId,
+                token: call.token,
+                amount: call.amount,
+                beneficiary: call.beneficiary,
+                minReturnedTokens: 0,
+                memo: "",
+                metadata: metadata
+            }) returns (
+                uint256 tokenCount
+            ) {
+                success = true;
+                beneficiaryTokenCount = tokenCount;
+            } catch (bytes memory failureReason) {
+                reason = failureReason;
+            }
+        }
+
+        _revokeAllowanceFor({terminal: terminal, token: call.token});
+        originalPayer = previousPayer;
     }
 }

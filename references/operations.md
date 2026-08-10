@@ -20,14 +20,14 @@
 - Router behavior looks wrong, but the real issue is the downstream terminal's accepted-token or accounting behavior.
 - Preview output drifts from execution because quote and execution paths were edited independently.
 - Registry state makes a project use a different router than expected.
-- A terminal-originated fee or project payout is pending after its resolved downstream route reverted or exhausted gas; monitor the queue event and retry its ID permissionlessly once the route is executable.
+- A terminal-originated fee or project payout is pending after its resolved downstream route reverted or exhausted gas; make fixed-gas retries permissionlessly, and use autonomous finalization after three matching daily failures plus the final delay.
 - Metadata overrides force an output token or cash-out source that the caller did not intend.
 - On `addToBalanceOf` paths, a terminal-facing ERC-20 receipt mismatch indicates a non-standard final-hop token path.
 
 ## Useful proof points
 
 - [`test/RouterTerminalRegistry.t.sol`](../test/RouterTerminalRegistry.t.sol) for registry rules.
-- [`test/regression/RegistryForwardGasReserve.t.sol`](../test/regression/RegistryForwardGasReserve.t.sol) for fee and project-payout gas containment, custody, and retry behavior.
+- [`test/regression/RegistryForwardGasReserve.t.sol`](../test/regression/RegistryForwardGasReserve.t.sol) for fee and project-payout gas containment, exact-error qualification, custody, retry, and autonomous refund behavior.
 - [`test/RouterTerminalERC2771.t.sol`](../test/RouterTerminalERC2771.t.sol) for trusted-forwarder behavior.
 - [`test/RouterTerminalSandwichFork.t.sol`](../test/RouterTerminalSandwichFork.t.sol) and [`test/RouterTerminalFeeCashOutFork.t.sol`](../test/RouterTerminalFeeCashOutFork.t.sol) for adversarial routing conditions.
 - [`test/regression/LeftoverRefund.t.sol`](../test/regression/LeftoverRefund.t.sol), [`test/regression/PreviewPrimaryTerminalMismatch.t.sol`](../test/regression/PreviewPrimaryTerminalMismatch.t.sol), and [`test/regression/CashOutCircularPrimaryTerminal.t.sol`](../test/regression/CashOutCircularPrimaryTerminal.t.sol) for the route-selection and refund traps most likely to regress.

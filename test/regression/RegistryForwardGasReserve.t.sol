@@ -15,6 +15,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {JBPendingTerminalCall} from "../../src/structs/JBPendingTerminalCall.sol";
+import {JBPendingTerminalCallFailure} from "../../src/structs/JBPendingTerminalCallFailure.sol";
 
 contract ForwardGasToken {
     mapping(address account => uint256) public balanceOf;
@@ -45,7 +46,10 @@ contract ForwardGasToken {
 }
 
 contract ForwardGasTerminal {
-    bool public shouldRunOutOfGas;
+    error ForwardGasTerminal_FailureOne();
+    error ForwardGasTerminal_FailureTwo();
+
+    uint8 public failureMode;
     uint256 public addedBalance;
     uint256 public paid;
     address public originalPayerSeen;
@@ -62,11 +66,7 @@ contract ForwardGasTerminal {
         external
         payable
     {
-        if (shouldRunOutOfGas) {
-            assembly ("memory-safe") {
-                invalid()
-            }
-        }
+        _failIfNeeded();
         _accept(token, amount);
         addedBalance += amount;
     }
@@ -84,18 +84,18 @@ contract ForwardGasTerminal {
         payable
         returns (uint256)
     {
-        if (shouldRunOutOfGas) {
-            assembly ("memory-safe") {
-                invalid()
-            }
-        }
+        _failIfNeeded();
         _accept(token, amount);
         paid += amount;
         return 123;
     }
 
+    function setFailureMode(uint8 mode) external {
+        failureMode = mode;
+    }
+
     function setShouldRunOutOfGas(bool flag) external {
-        shouldRunOutOfGas = flag;
+        failureMode = flag ? 3 : 0;
     }
 
     function _accept(address token, uint256 amount) internal {
@@ -109,17 +109,51 @@ contract ForwardGasTerminal {
             require(IERC20(token).transferFrom(msg.sender, address(this), amount));
         }
     }
+
+    function _failIfNeeded() internal view {
+        if (failureMode == 1) revert ForwardGasTerminal_FailureOne();
+        if (failureMode == 2) revert ForwardGasTerminal_FailureTwo();
+        if (failureMode == 3) {
+            assembly ("memory-safe") {
+                invalid()
+            }
+        }
+    }
 }
 
 /// @notice Models the core terminal's catch boundary around project payouts and fee processing.
 contract ForwardGasSourceTerminal {
+    error ForwardGasSourceTerminal_RefundRejected();
+
     uint256 public catchAccounting;
     uint256 public outcome;
+    uint256 public refundedBalance;
+    bool public shouldRejectRefund;
 
     IJBDirectory public immutable DIRECTORY;
 
     constructor(IJBDirectory directory) {
         DIRECTORY = directory;
+    }
+
+    function addToBalanceOf(
+        uint256,
+        address token,
+        uint256 amount,
+        bool,
+        string calldata,
+        bytes calldata
+    )
+        external
+        payable
+    {
+        if (shouldRejectRefund) revert ForwardGasSourceTerminal_RefundRejected();
+        if (token == JBConstants.NATIVE_TOKEN) {
+            require(msg.value == amount);
+        } else {
+            require(IERC20(token).transferFrom(msg.sender, address(this), amount));
+        }
+        refundedBalance += amount;
     }
 
     function approve(ForwardGasToken token, JBRouterTerminalRegistry registry) external {
@@ -181,6 +215,10 @@ contract ForwardGasSourceTerminal {
             catchAccounting += amount;
         }
     }
+
+    function setShouldRejectRefund(bool flag) external {
+        shouldRejectRefund = flag;
+    }
 }
 
 contract RegistryForwardGasReserveTest is Test {
@@ -193,12 +231,13 @@ contract RegistryForwardGasReserveTest is Test {
     ForwardGasToken internal token;
     JBRouterTerminalRegistry internal registry;
     IJBDirectory internal directory;
+    address internal owner;
 
     function setUp() public {
         IJBPermissions permissions = IJBPermissions(makeAddr("permissions"));
         IJBProjects projects = IJBProjects(makeAddr("projects"));
         IPermit2 permit2 = IPermit2(makeAddr("permit2"));
-        address owner = makeAddr("owner");
+        owner = makeAddr("owner");
         directory = IJBDirectory(makeAddr("directory"));
 
         registry = new JBRouterTerminalRegistry(permissions, projects, permit2, owner, address(0));
@@ -281,7 +320,7 @@ contract RegistryForwardGasReserveTest is Test {
 
     function test_failedCallsWithTheSameRouteAggregateAndSettleTogether() public {
         address beneficiary = makeAddr("beneficiary");
-        terminal.setShouldRunOutOfGas(true);
+        terminal.setFailureMode(1);
 
         source.forwardPay(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary);
         token.mint(address(source), _AMOUNT);
@@ -363,15 +402,20 @@ contract RegistryForwardGasReserveTest is Test {
         assertEq(address(terminal).balance, _AMOUNT);
     }
 
-    function test_processPendingTerminalCallRevertsAndPreservesPendingCallWhenRetryFails() public {
+    function test_processPendingTerminalCallRecordsAndPreservesPendingCallWhenRetryFails() public {
         address beneficiary = makeAddr("beneficiary");
-        terminal.setShouldRunOutOfGas(true);
+        terminal.setFailureMode(1);
         source.forwardPay(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary);
 
         bytes32 id = _pendingId({beneficiary: beneficiary, preferAddToBalance: false});
-        vm.expectRevert();
         registry.processPendingTerminalCall(id);
 
+        JBPendingTerminalCallFailure memory failure = registry.pendingTerminalCallFailureOf(id);
+        assertEq(failure.count, 1);
+        assertEq(
+            failure.errorHash,
+            keccak256(abi.encodeWithSelector(ForwardGasTerminal.ForwardGasTerminal_FailureOne.selector))
+        );
         assertEq(registry.pendingTerminalCallOf(id).amount, _AMOUNT);
         assertEq(token.balanceOf(address(registry)), _AMOUNT);
     }
@@ -384,6 +428,246 @@ contract RegistryForwardGasReserveTest is Test {
             )
         );
         registry.processPendingTerminalCall(id);
+    }
+
+    function test_finalizePendingTerminalCallChangedErrorRestartsStreakWithoutRefund() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        terminal.setFailureMode(2);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        JBPendingTerminalCallFailure memory failure = registry.pendingTerminalCallFailureOf(id);
+        assertFalse(wasRefunded);
+        assertEq(tokenCount, 0);
+        assertEq(failure.count, 1);
+        assertEq(
+            failure.errorHash,
+            keccak256(abi.encodeWithSelector(ForwardGasTerminal.ForwardGasTerminal_FailureTwo.selector))
+        );
+        assertEq(registry.pendingTerminalCallOf(id).amount, _AMOUNT);
+        assertEq(source.refundedBalance(), 0);
+        assertEq(token.balanceOf(address(registry)), _AMOUNT);
+    }
+
+    function test_finalizePendingTerminalCallMatchingAddErrorsRefundsSourceProject() public {
+        terminal.setFailureMode(1);
+        source.forwardAddToBalance(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID);
+        bytes32 id = _pendingId({beneficiary: address(0), preferAddToBalance: true});
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        assertTrue(wasRefunded);
+        assertEq(tokenCount, 0);
+        assertEq(terminal.addedBalance(), 0);
+        assertEq(source.refundedBalance(), _AMOUNT);
+        assertEq(token.balanceOf(address(source)), _AMOUNT);
+        assertEq(token.balanceOf(address(registry)), 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, 0);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+    }
+
+    function test_finalizePendingTerminalCallMatchingErrorsRefundsSourceProject() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        assertTrue(wasRefunded);
+        assertEq(tokenCount, 0);
+        assertEq(source.refundedBalance(), _AMOUNT);
+        assertEq(token.balanceOf(address(source)), _AMOUNT);
+        assertEq(token.balanceOf(address(registry)), 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, 0);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+    }
+
+    function test_finalizePendingTerminalCallMatchingNativeErrorsRefundsSourceProject() public {
+        address beneficiary = makeAddr("nativeBeneficiary");
+        vm.deal(address(source), _AMOUNT);
+        terminal.setFailureMode(1);
+        source.forwardPay(
+            registry, JBConstants.NATIVE_TOKEN, _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary
+        );
+        bytes32 id = _pendingIdFor({
+            pendingToken: JBConstants.NATIVE_TOKEN,
+            beneficiary: beneficiary,
+            payer: address(source),
+            preferAddToBalance: false
+        });
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        assertTrue(wasRefunded);
+        assertEq(tokenCount, 0);
+        assertEq(source.refundedBalance(), _AMOUNT);
+        assertEq(address(source).balance, _AMOUNT);
+        assertEq(address(registry).balance, 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, 0);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+    }
+
+    function test_finalizePendingTerminalCallMatchingOutOfGasErrorsRefundsSourceProject() public {
+        address beneficiary = makeAddr("beneficiary");
+        terminal.setShouldRunOutOfGas(true);
+        source.forwardPay(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary);
+        bytes32 id = _pendingId({beneficiary: beneficiary, preferAddToBalance: false});
+        _qualifyForFinalization(id);
+
+        JBPendingTerminalCallFailure memory failure = registry.pendingTerminalCallFailureOf(id);
+        assertEq(failure.errorHash, keccak256(""));
+
+        _warpToNextAttempt(id);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        assertTrue(wasRefunded);
+        assertEq(tokenCount, 0);
+        assertEq(source.refundedBalance(), _AMOUNT);
+        assertEq(token.balanceOf(address(source)), _AMOUNT);
+        assertEq(token.balanceOf(address(registry)), 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, 0);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+    }
+
+    function test_finalizePendingTerminalCallRefundFailurePreservesCustodyAndQualification() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        source.setShouldRejectRefund(true);
+        vm.expectRevert(ForwardGasSourceTerminal.ForwardGasSourceTerminal_RefundRejected.selector);
+        registry.finalizePendingTerminalCall(id);
+
+        assertEq(registry.pendingTerminalCallOf(id).amount, _AMOUNT);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 3);
+        assertEq(source.refundedBalance(), 0);
+        assertEq(token.balanceOf(address(registry)), _AMOUNT);
+    }
+
+    function test_finalizePendingTerminalCallSuccessSettlesInsteadOfRefunding() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        _qualifyForFinalization(id);
+
+        _warpToNextAttempt(id);
+        terminal.setFailureMode(0);
+        (bool wasRefunded, uint256 tokenCount) = registry.finalizePendingTerminalCall(id);
+
+        assertFalse(wasRefunded);
+        assertEq(tokenCount, 123);
+        assertEq(terminal.paid(), _AMOUNT);
+        assertEq(source.refundedBalance(), 0);
+        assertEq(token.balanceOf(address(registry)), 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, 0);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+    }
+
+    function test_processPendingTerminalCallChangedErrorRestartsFailureStreak() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        registry.processPendingTerminalCall(id);
+
+        _warpToNextAttempt(id);
+        terminal.setFailureMode(2);
+        registry.processPendingTerminalCall(id);
+
+        JBPendingTerminalCallFailure memory failure = registry.pendingTerminalCallFailureOf(id);
+        assertEq(failure.count, 1);
+        assertEq(
+            failure.errorHash,
+            keccak256(abi.encodeWithSelector(ForwardGasTerminal.ForwardGasTerminal_FailureTwo.selector))
+        );
+    }
+
+    function test_processPendingTerminalCallChangedRouteRestartsFailureStreak() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        registry.processPendingTerminalCall(id);
+        bytes32 firstRouteHash = registry.pendingTerminalCallFailureOf(id).routeHash;
+
+        _warpToNextAttempt(id);
+        ForwardGasTerminal replacement = new ForwardGasTerminal();
+        replacement.setFailureMode(1);
+        vm.prank(owner);
+        registry.setDefaultTerminal(IJBTerminal(address(replacement)));
+        registry.processPendingTerminalCall(id);
+
+        JBPendingTerminalCallFailure memory failure = registry.pendingTerminalCallFailureOf(id);
+        assertEq(failure.count, 1);
+        assertNotEq(failure.routeHash, firstRouteHash);
+    }
+
+    function test_processPendingTerminalCallMatchingErrorsAdvanceOncePerDay() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        registry.processPendingTerminalCall(id);
+
+        uint256 eligibleAt = block.timestamp + 1 days;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_PendingTerminalCallNotReady.selector, id, eligibleAt
+            )
+        );
+        registry.processPendingTerminalCall(id);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 1);
+
+        vm.warp(eligibleAt);
+        registry.processPendingTerminalCall(id);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 2);
+    }
+
+    function test_processPendingTerminalCallRequiresFinalizationAfterThreeMatchingErrors() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        _qualifyForFinalization(id);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalRegistry.JBRouterTerminalRegistry_PendingTerminalCallRequiresFinalization.selector, id
+            )
+        );
+        registry.processPendingTerminalCall(id);
+    }
+
+    function test_processPendingTerminalCallUnderfundedAttemptDoesNotCount() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+
+        (bool success, bytes memory reason) = address(registry).call{gas: 2_400_000}(
+            abi.encodeCall(JBRouterTerminalRegistry.processPendingTerminalCall, (id))
+        );
+
+        assertFalse(success);
+        assertGe(reason.length, 4);
+        // The length assertion guarantees that narrowing the revert data to its selector cannot truncate it.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        assertEq(bytes4(reason), JBRouterTerminalRegistry.JBRouterTerminalRegistry_InsufficientRetryGas.selector);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, _AMOUNT);
+        assertEq(token.balanceOf(address(registry)), _AMOUNT);
+    }
+
+    function test_queueTerminalCallAggregationResetsFailureStreak() public {
+        address beneficiary = makeAddr("beneficiary");
+        bytes32 id = _queueFailedPay(beneficiary);
+        registry.processPendingTerminalCall(id);
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 1);
+
+        token.mint(address(source), _AMOUNT);
+        source.forwardPay(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary);
+
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 0);
+        assertEq(registry.pendingTerminalCallOf(id).amount, _AMOUNT * 2);
+        assertEq(token.balanceOf(address(registry)), _AMOUNT * 2);
     }
 
     function testFuzz_forwardedPayNeverCompletesTheSourceCatchWithoutRegistryCustody(uint24 gasLimit) public {
@@ -438,14 +722,40 @@ contract RegistryForwardGasReserveTest is Test {
         bool preferAddToBalance
     )
         internal
-        pure
+        view
         returns (bytes32)
     {
         return keccak256(
             abi.encode(
-                _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, pendingToken, beneficiary, payer, preferAddToBalance
+                _SOURCE_PROJECT_ID,
+                _DESTINATION_PROJECT_ID,
+                pendingToken,
+                beneficiary,
+                payer,
+                address(source),
+                preferAddToBalance
             )
         );
+    }
+
+    function _qualifyForFinalization(bytes32 id) internal {
+        registry.processPendingTerminalCall(id);
+        _warpToNextAttempt(id);
+        registry.processPendingTerminalCall(id);
+        _warpToNextAttempt(id);
+        registry.processPendingTerminalCall(id);
+
+        assertEq(registry.pendingTerminalCallFailureOf(id).count, 3);
+    }
+
+    function _queueFailedPay(address beneficiary) internal returns (bytes32 id) {
+        terminal.setFailureMode(1);
+        source.forwardPay(registry, address(token), _AMOUNT, _SOURCE_PROJECT_ID, _DESTINATION_PROJECT_ID, beneficiary);
+        return _pendingId({beneficiary: beneficiary, preferAddToBalance: false});
+    }
+
+    function _warpToNextAttempt(bytes32 id) internal {
+        vm.warp(uint256(registry.pendingTerminalCallFailureOf(id).lastFailureAt) + 1 days);
     }
 }
 
@@ -503,7 +813,9 @@ contract RegistryForwardGasReserveBaseForkTest is Test {
         assertFalse(sawFeeReverted, "fee was forgiven");
         assertTrue(sawProcessFee, "source terminal did not recognize fee custody");
 
-        bytes32 id = keccak256(abi.encode(uint256(9), uint256(1), _USDC, _FEE_BENEFICIARY, _MULTI_TERMINAL, false));
+        bytes32 id = keccak256(
+            abi.encode(uint256(9), uint256(1), _USDC, _FEE_BENEFICIARY, _MULTI_TERMINAL, _MULTI_TERMINAL, false)
+        );
         JBPendingTerminalCall memory pending = deployed.pendingTerminalCallOf(id);
         assertEq(pending.amount, 25_003, "fee was not retained");
         assertEq(IERC20(_USDC).balanceOf(_REGISTRY) - registryBalanceBefore, 25_003, "registry custody mismatch");

@@ -76,7 +76,9 @@ authenticates core terminal project transfers and retains failed downstream call
 4. Registry controls stay narrow.  
    Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
 5. Pending terminal calls remain fully backed.
-   Only authenticated core terminal call shapes may be queued; success, aggregation, retry, and failed retry must conserve exact custody without reaching the source terminal's catch accounting.
+   Only authenticated core terminal call shapes may be queued; success, aggregation, qualified retry, finalization, and source-project refund must conserve exact custody without reaching the source terminal's catch accounting.
+6. Autonomous refunds require consistent failure evidence.
+   Underfunded attempts do not count. Three failures in distinct daily windows and the final attempt must match the exact revert-data and route fingerprints; changed errors, routes, code hashes, operations, or aggregated amounts restart qualification.
 
 ## Attack surfaces
 
@@ -85,7 +87,7 @@ authenticates core terminal project transfers and retains failed downstream call
 - V4 unlock callback and swap settlement
 - pool discovery and best-path selection
 - registry allowlist and lock behavior
-- source-terminal authentication, gas reservation, pending-call aggregation, and permissionless retry
+- source-terminal authentication, fixed retry gas, pending-call aggregation, matching-failure qualification, and autonomous refund
 
 ## Verification
 

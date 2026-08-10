@@ -2,7 +2,7 @@
 
 Scope: three contracts in this package — `JBRouterTerminal` (universal-token payment terminal), `JBRouterTerminalRegistry` (per-project terminal selection with cohort-stable defaults), and `JBPayRouteResolver` (preview-only route ranking helper). Package: `@bananapus/router-terminal-v6`.
 
-Trust model in one sentence: the router is a **stateless routing surface** that accepts ANY token, normalizes through Uniswap V3/V4 swaps and recursive JB cashout loops, and forwards into a destination terminal whose `minReturnedTokens` is the authoritative slippage gate — the router does not account for project balances as surplus, refunds route-scoped partial-fill leftovers to the *true* original payer (propagated through transient storage when called via the registry), rejects ERC-20 receipt shortfalls at the final hop on `addToBalanceOf`, and rejects circular forwarding cycles before any irreversible state is written; the registry may retain a failed authenticated terminal-originated transfer one-for-one until a permissionless retry settles it downstream.
+Trust model in one sentence: the router is a **stateless routing surface** that accepts ANY token, normalizes through Uniswap V3/V4 swaps and recursive JB cashout loops, and forwards into a destination terminal whose `minReturnedTokens` is the authoritative slippage gate — the router does not account for project balances as surplus, refunds route-scoped partial-fill leftovers to the *true* original payer (propagated through transient storage when called via the registry), rejects ERC-20 receipt shortfalls at the final hop on `addToBalanceOf`, and rejects circular forwarding cycles before any irreversible state is written; the registry retains failed authenticated terminal-originated transfers one-for-one until permissionless settlement succeeds or deterministic matching-failure finalization restores the source project's balance.
 
 This file documents invariants enforced by the **runtime contracts in this repo**. The destination-terminal slippage guarantee, fee semantics, and ruleset state machine all live in `nana-core-v6/INVARIANTS.md`. Cashout-loop economic safety against revenue-recursion attacks ultimately depends on the bonding-curve guarantees documented at `../INVARIANTS.md` Section A.2.
 
@@ -58,7 +58,8 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 
 - Only the raw 32-byte source-project metadata used by core project transfers is eligible. The registry verifies that the immediate contract caller exposes a directory using this registry's immutable `PROJECTS` contract and that the caller is a terminal of the encoded source project. `pay` additionally requires an empty memo and zero `minReturnedTokens`; `addToBalanceOf` requires an empty memo and `shouldReturnHeldFees == false`. Ordinary user and unverified contract calls keep synchronous revert behavior.
 - Eligible downstream calls are made with a fixed gas reserve left in the registry frame. If the resolved router terminal reverts or exhausts its forwarded gas, the registry revokes its allowance, restores transient payer state, retains the exact received amount, aggregates it under a deterministic call ID, and returns success to the source terminal. The source cannot enter its fee-forgiveness or payout-nullification catch path after the registry has accepted the transfer.
-- `processPendingTerminalCall(id)` is permissionless. It deletes the pending record before the external call, resolves the destination project's current terminal, restores the recorded original-payer context, and replays the original `pay` or `addToBalanceOf` shape. A failed retry reverts the deletion and leaves both the record and custody intact.
+- `processPendingTerminalCall(id)` is permissionless. It deletes the pending record before interaction, resolves the destination project's current terminal, restores the recorded original-payer context, and replays the original `pay` or `addToBalanceOf` shape with 2,000,000 gas. A successful retry settles and clears the record. A failed qualified retry restores the record and advances only a matching exact revert-data and route fingerprint, at most once per day; a changed fingerprint restarts the streak.
+- `finalizePendingTerminalCall(id)` becomes available one day after three matching qualified failures. It makes the same fixed-gas attempt before deciding. Success settles; a changed error or route restores the call and restarts qualification; the same failure restores the original asset through the authenticated source terminal's `addToBalanceOf` for the source project. A refund failure reverts atomically and preserves custody and qualification.
 - Native-token protocol fees bypass the registry and are outside this guarantee. Non-native fees routed through the registry and native or ERC-20 project payouts routed through it are covered.
 
 ---
@@ -103,7 +104,7 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 ### B.5 Powers the registry owner does NOT have
 
 - **Cannot redirect existing project's payments.** All silent-reroute paths are closed by the cohort-stable default mechanism (B.3) and the lock surface (B.2). The only way to change a project's resolved terminal is for the project owner / `SET_ROUTER_TERMINAL` operator to call `setTerminalFor`.
-- **Cannot withdraw retained funds.** The router does not hold project balances between calls. The registry can retain assets only for failed authenticated terminal-originated calls; there is no owner withdrawal surface, the pending amount is backed one-for-one, and it can leave custody only by replaying the recorded destination call.
+- **Cannot withdraw retained funds.** The router does not hold project balances between calls. The registry can retain assets only for failed authenticated terminal-originated calls; there is no owner withdrawal surface, the pending amount is backed one-for-one, and it can leave custody only by replaying the recorded destination call or satisfying the deterministic source-project refund policy.
 - **Cannot bypass per-project permission gates.** `setTerminalFor` and `lockTerminalFor` always route through `_requirePermissionFrom(PROJECTS.ownerOf(projectId), ...)`.
 
 ---
@@ -184,8 +185,11 @@ Implements `IJBRouterTerminalRegistry`, `IJBForwardingTerminal`, `IJBTerminal`, 
 - **`addToBalanceOf(projectId, token, amount, shouldReturnHeldFees, memo, metadata) payable`** — `:423-470`.
   - Same pattern; no `minReturnedTokens`. Authenticated terminal-originated calls with `shouldReturnHeldFees == false` are retained for retry on downstream failure.
 
+- **`finalizePendingTerminalCall(id) → (wasRefunded, beneficiaryTokenCount)`** — permissionless.
+  - Available one day after three matching qualified failures. Makes the final fixed-gas attempt; success settles, a changed fingerprint restarts qualification, and the same fingerprint restores the original asset to the source project's terminal balance.
+
 - **`processPendingTerminalCall(id) → beneficiaryTokenCount`** — permissionless.
-  - Replays a retained `pay` or `addToBalanceOf` call against the project's currently resolved terminal. Deletes before interaction; any revert restores the pending record atomically.
+  - Replays a retained `pay` or `addToBalanceOf` call against the project's currently resolved terminal with a fixed gas budget. Matching failures advance at most once per day; changed errors or routes restart the streak; underfunded attempts revert without changing state.
 
 **Project owners / operators (`SET_ROUTER_TERMINAL`):**
 
@@ -207,6 +211,7 @@ Implements `IJBRouterTerminalRegistry`, `IJBForwardingTerminal`, `IJBTerminal`, 
 - **`defaultTerminalHistoryLength() → uint256`** — `:223-225`.
 - **`previewPayFor(projectId, token, amount, beneficiary, metadata)`** — `:238-263`. Forwards to the resolved terminal's `previewPayFor`.
 - **`terminalOf(projectId) → IJBTerminal`** — `:266-268`. `IJBForwardingTerminal` surface; returns zero only when no default has ever been set.
+- **`pendingTerminalCallFailureOf(id) → JBPendingTerminalCallFailure`** — returns the consecutive exact-error and route qualification state.
 - **`pendingTerminalCallOf(id) → JBPendingTerminalCall`** — returns the retained call and its one-for-one custody amount, or a zeroed struct if no call exists.
 - **`originalPayer() → address`** — transient storage view; `:109`. Reads as zero outside an in-flight forward.
 
@@ -220,7 +225,8 @@ Implements `IJBRouterTerminalRegistry`, `IJBForwardingTerminal`, `IJBTerminal`, 
 - `isTerminalAllowed[terminal]` (`bool`; storage; `:88`).
 - `_defaultTerminalHistory` (`DefaultTerminalSegment[]`; internal; append-only; `:98`).
 - `_terminalOf[projectId]` (`IJBTerminal`; internal; `:102`).
-- `_pendingTerminalCallOf[id]` (`JBPendingTerminalCall`; internal; failed authenticated terminal forwards only).
+- `_pendingTerminalCallFailureOf[id]` (`JBPendingTerminalCallFailure`; internal; qualified exact-error streak).
+- `_pendingTerminalCallOf[id]` (`JBPendingTerminalCall`; internal; failed authenticated terminal forwards only, including the authenticated source terminal used for refunds).
 - `originalPayer` (`address transient`; `:109`).
 
 ### C.3 `JBPayRouteResolver`
@@ -260,7 +266,7 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 8. **Pool callbacks are authenticated by the active swap context.** The V3 callback verifies `msg.sender` against the transient `_v3ExpectedPool` set by `_executeV3Swap`; the V4 callback verifies `msg.sender == poolManager`, whose unlock flow returns only to the caller that initiated the unlock. Spoofed callbacks revert before any state change.
 9. **Cashout-loop iteration bound + first-hop-only `minTokensReclaimed`.** The 20-hop ceiling forecloses on infinite recursion through adversarial project-token graphs; the user-supplied reclaim minimum is intentionally NOT carried across hops because token units change between hops.
 10. **Quote precedence: explicit metadata > V3 TWAP > V4 hook geomean > V4 spot (accepted-risk fallback).** When supplied, `pay` swap-quote skips on-chain quoting entirely and a token-mismatch reverts `JBRouterTerminal_QuoteTokenMismatch`. The V4 spot fallback is bounded by a fixed 15% haircut and is documented as accepted-risk for routine flows.
-11. **Failed authenticated terminal forwards remain fully backed.** A queued amount equals the balance delta accepted from the source terminal, identical routes aggregate without changing their immutable fields, and retry is the only release surface. Failed retries roll back atomically.
+11. **Failed authenticated terminal forwards remain fully backed.** A queued amount equals the balance delta accepted from the source terminal. Identical routes aggregate, and newly aggregated value resets qualification. Release occurs only through successful destination processing or an autonomous source-project refund after three matching daily failures, a final delay, and the same final failure. Underfunded attempts, changed fingerprints, and failed refunds cannot release custody.
 
 ---
 
@@ -281,7 +287,7 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
   - Redirect payments for any project with an explicit `_terminalOf` override.
   - Redirect payments for any project whose ID is covered by a historical `_defaultTerminalHistory` segment (i.e. any cohort that was created under a previous default).
   - Override `hasLockedTerminal`.
-  - Withdraw assets backing pending terminal calls (there is no admin transfer surface; only permissionless replay can release them).
+  - Withdraw assets backing pending terminal calls (there is no admin transfer surface; only permissionless processing or deterministic finalization can release them).
 - **Per-project authority** lives with `PROJECTS.ownerOf(projectId)` or `SET_ROUTER_TERMINAL` operators: `setTerminalFor` and `lockTerminalFor` are the only project-scoped state mutators.
 - The registry allowlist is a hard prerequisite for any project to opt into a terminal; this is a *trust-minimization* surface for the registry owner — they can curate which terminals projects may select — but it does not grant the owner the ability to retroactively reroute opted-in projects.
 

@@ -43,14 +43,18 @@ This is a V5-to-V6 migration changelog, not a package release log or commit hist
   - `defaultTerminalHistoryAt(uint256)`
   - `defaultTerminalHistoryLength()`
   - `defaultTerminalProjectIdThreshold()`
+  - `finalizePendingTerminalCall(bytes32)`
   - `lockTerminalFor(uint256,IJBTerminal)` now includes an expected terminal.
   - `PERMIT2()`
+  - `pendingTerminalCallFailureOf(bytes32)`
   - `pendingTerminalCallOf(bytes32)`
   - `processPendingTerminalCall(bytes32)`
 - Added or changed events:
   - registry events are namespaced as `JBRouterTerminalRegistry_*` and include caller fields.
-  - `JBRouterTerminalRegistry_QueueTerminalCall`
   - `JBRouterTerminalRegistry_ProcessTerminalCall`
+  - `JBRouterTerminalRegistry_QueueTerminalCall`
+  - `JBRouterTerminalRegistry_RecordTerminalCallFailure`
+  - `JBRouterTerminalRegistry_RefundTerminalCall`
   - `Permit2AllowanceFailed`
 - Added or migration-sensitive errors include:
   - terminal-not-set / terminal-not-allowed registry errors
@@ -79,7 +83,7 @@ Added V6 ABI artifacts:
 - `IJBPayRouteResolver` from `src/interfaces/IJBPayRouteResolver.sol`: `5` functions, `0` events, `0` errors.
 - `IJBPayerTracker`: consumed from `@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol` (the canonical definition; the local copy was de-duplicated). `1` functions, `0` events, `0` errors.
 - `IJBRouterTerminal` from `src/interfaces/IJBRouterTerminal.sol`: `11` functions, `6` events, `0` errors.
-- `IJBRouterTerminalRegistry` from `src/interfaces/IJBRouterTerminalRegistry.sol`: `27` functions, `13` events, `0` errors.
+- `IJBRouterTerminalRegistry` from `src/interfaces/IJBRouterTerminalRegistry.sol`: `29` functions, `15` events, `0` errors.
 - `JBForwardingCheck` from `src/libraries/JBForwardingCheck.sol`: `0` functions, `0` events, `0` errors.
 - `JBPayRouteResolver` from `src/JBPayRouteResolver.sol`: `6` functions, `0` events, `2` errors.
 - `JBRouterTerminal` from `src/JBRouterTerminal.sol`: `30` functions, `7` events, `23` errors.

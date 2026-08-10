@@ -26,7 +26,7 @@ It can route through:
 - Uniswap V3 or V4 swaps
 - recursive Juicebox token cash outs when the input is itself a project token
 
-Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The first `setDefaultTerminal` serves every project that already existed when it was called — including the canonical fee project (ID 1) — so those pre-existing projects can route tokens through the default. After that, the default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`). Authenticated project-to-project payouts and non-native protocol fees also fail closed at this proxy boundary: if the resolved terminal runs out of gas or reverts, the registry retains the funds and records a permissionlessly retryable terminal call instead of returning a failure to the source terminal's catch path.
+Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The first `setDefaultTerminal` serves every project that already existed when it was called — including the canonical fee project (ID 1) — so those pre-existing projects can route tokens through the default. After that, the default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`). Authenticated project-to-project payouts and non-native protocol fees also fail closed at this proxy boundary: if the resolved terminal runs out of gas or reverts, the registry retains the funds and records a permissionlessly retryable terminal call instead of returning a failure to the source terminal's catch path. Retries receive a fixed gas budget. Three matching failures at least one day apart make the call finalizable after another day; the final attempt must reproduce the same exact error and route fingerprint before the original asset is autonomously restored to the source project's terminal balance.
 
 Use this repo when UX requires "pay with many tokens, settle into the right one." Do not use it as a replacement for downstream terminal accounting or as an authoritative decimal source.
 
@@ -37,7 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
-| `JBRouterTerminalRegistry` | Registry and proxy surface that selects router terminals and retains failed terminal-originated forwards for permissionless retry. |
+| `JBRouterTerminalRegistry` | Registry and proxy surface that selects router terminals and retains, retries, or autonomously refunds failed terminal-originated forwards. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
 ## Mental model
@@ -72,7 +72,7 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
-- authenticated terminal-originated fees and project payouts can remain pending in registry custody until their downstream route succeeds
+- authenticated terminal-originated fees and project payouts remain in registry custody until settlement succeeds or the deterministic matching-failure refund policy completes
 
 ## Where state lives
 
