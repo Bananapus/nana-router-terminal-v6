@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {stdJson} from "forge-std/Script.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {NetworkInfo, SphinxConstants} from "@sphinx-labs/contracts/contracts/foundry/SphinxConstants.sol";
 
 import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
 import {IJBRouterTerminalGateway} from "../../src/interfaces/IJBRouterTerminalGateway.sol";
@@ -28,25 +27,8 @@ library RouterTerminalDeploymentLib {
     /// @notice Read the router-terminal deployment for the current chain.
     /// @param path The root path containing Sphinx deployment artifacts.
     /// @return deployment The deployment addresses for the current chain.
-    function getDeployment(string memory path) internal returns (RouterTerminalDeployment memory deployment) {
-        // Read the current chain ID so the helper can select the matching Sphinx network entry.
-        uint256 chainId = block.chainid;
-
-        // Deploy the Sphinx constants helper so the script can reuse its canonical network-name mapping.
-        SphinxConstants sphinxConstants = new SphinxConstants();
-
-        // Materialize the supported network list once so the current chain can be matched below.
-        NetworkInfo[] memory networks = sphinxConstants.getNetworkInfoArray();
-
-        for (uint256 _i; _i < networks.length; _i++) {
-            // Return as soon as the helper finds the network entry matching the active chain.
-            if (networks[_i].chainId == chainId) {
-                return getDeployment({path: path, networkName: networks[_i].name});
-            }
-        }
-
-        // Abort when Sphinx has no network metadata for the active chain.
-        revert("ChainID is not (currently) supported by Sphinx.");
+    function getDeployment(string memory path) internal view returns (RouterTerminalDeployment memory deployment) {
+        return getDeployment({path: path, networkName: _networkNameOf(block.chainid)});
     }
 
     /// @notice Read the router-terminal deployment for an explicit Sphinx network name.
@@ -151,6 +133,21 @@ library RouterTerminalDeploymentLib {
         // forge-lint: disable-next-line(unsafe-cheatcode)
         vm.readFile(deploymentPath);
         deploymentAddress = stdJson.readAddress({json: deploymentJson, key: ".address"});
+    }
+
+    /// @notice Return the canonical artifact directory name for a supported chain ID.
+    /// @param chainId The chain ID to resolve.
+    /// @return networkName The deployment artifact network name.
+    function _networkNameOf(uint256 chainId) internal pure returns (string memory networkName) {
+        if (chainId == 1) return "ethereum";
+        if (chainId == 10) return "optimism";
+        if (chainId == 8453) return "base";
+        if (chainId == 42_161) return "arbitrum";
+        if (chainId == 84_532) return "base_sepolia";
+        if (chainId == 421_614) return "arbitrum_sepolia";
+        if (chainId == 11_155_111) return "sepolia";
+        if (chainId == 11_155_420) return "optimism_sepolia";
+        revert("ChainID is not supported by RouterTerminalDeploymentLib.");
     }
 
     /// @notice Resolve either a package-local or Sphinx-project deployment artifact path.
