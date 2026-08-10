@@ -2,8 +2,6 @@
 pragma solidity 0.8.28;
 
 import {JBPermissioned} from "@bananapus/core-v6/src/abstract/JBPermissioned.sol";
-import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
-import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -31,7 +29,6 @@ import {IJBRouterTerminalRegistry} from "./interfaces/IJBRouterTerminalRegistry.
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 
 import {DefaultTerminalSegment} from "./structs/DefaultTerminalSegment.sol";
-import {JBPendingTerminalCall} from "./structs/JBPendingTerminalCall.sol";
 
 /// @notice A forwarding layer that lets each project choose which router terminal receives its payments, with an
 /// owner-managed default for projects that have not opted in. Projects can lock their choice to guarantee permanence.
@@ -58,9 +55,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in the metadata.
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
 
-    /// @notice Thrown when attempting to process a pending terminal call that does not exist.
-    error JBRouterTerminalRegistry_PendingTerminalCallNotFound(bytes32 id);
-
     /// @notice Thrown when changing a project's terminal after its terminal choice has been permanently locked.
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
 
@@ -75,14 +69,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
     /// @notice Thrown when setting the default terminal to the zero address.
     error JBRouterTerminalRegistry_ZeroAddress(address terminal);
-
-    //*********************************************************************//
-    // ----------------------- internal constants ------------------------ //
-    //*********************************************************************//
-
-    /// @notice Gas retained while forwarding a terminal-originated project payment so a failed downstream route can
-    /// be recorded without returning control to the source terminal as a failed payment.
-    uint256 internal constant _FORWARD_FAILURE_GAS_RESERVE = 200_000;
 
     //*********************************************************************//
     // ---------------- public immutable stored properties --------------- //
@@ -136,10 +122,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice The terminal explicitly configured for a project before default-terminal fallback is applied.
     /// @custom:param projectId The ID of the project to look up the explicit terminal for.
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
-
-    /// @notice Terminal-originated project payments retained after their downstream forwarding call failed.
-    /// @custom:param id The deterministic identifier derived from the call's immutable routing fields.
-    mapping(bytes32 id => JBPendingTerminalCall) internal _pendingTerminalCallOf;
 
     //*********************************************************************//
     // -------------------- transient stored properties ------------------ //
@@ -319,13 +301,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return _resolvedTerminalOf(projectId);
     }
 
-    /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
-    /// @param id The deterministic pending-call identifier.
-    /// @return call The retained terminal call.
-    function pendingTerminalCallOf(bytes32 id) external view override returns (JBPendingTerminalCall memory call) {
-        return _pendingTerminalCallOf[id];
-    }
-
     //*********************************************************************//
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
@@ -353,14 +328,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     function _enforceNoCircularForward(IJBTerminal terminal) internal view {
         // Reject immediate caller cycles so router -> registry -> same router cannot recurse indefinitely.
         if (msg.sender == address(terminal)) revert JBRouterTerminalRegistry_CircularForward(terminal);
-    }
-
-    /// @notice Return the gas available to a retryable downstream terminal call while preserving failure-handling
-    /// headroom in this registry frame.
-    /// @return callGas The gas to forward to the downstream terminal.
-    function _gasForForwardedTerminalCall() internal view returns (uint256 callGas) {
-        uint256 available = gasleft();
-        if (available > _FORWARD_FAILURE_GAS_RESERVE) return available - _FORWARD_FAILURE_GAS_RESERVE;
     }
 
     /// @notice The calldata. Preferred to use over `msg.data`.
@@ -464,46 +431,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
     }
 
-    /// @notice Decode the raw source-project metadata used by core terminal project transfers.
-    /// @param metadata The metadata supplied to the registry call.
-    /// @param isForwardedProjectCall Whether the remaining call shape matches a core terminal project transfer.
-    /// @return sourceProjectId The decoded source project ID, or zero for an ordinary synchronous call.
-    function _sourceProjectIdFrom(
-        bytes calldata metadata,
-        bool isForwardedProjectCall
-    )
-        internal
-        view
-        returns (uint256 sourceProjectId)
-    {
-        if (!isForwardedProjectCall || metadata.length != 32 || _msgSender().code.length == 0) return 0;
-        assembly ("memory-safe") {
-            sourceProjectId := calldataload(metadata.offset)
-        }
-
-        if (sourceProjectId == 0) return 0;
-
-        // Authenticate the raw metadata against the originating multi-terminal and the same project registry this
-        // forwarding registry was deployed with. This keeps ordinary contract callers synchronous even if they send
-        // a coincidental 32-byte metadata value.
-        address sourceTerminal = _msgSender();
-        try IJBMultiTerminal(sourceTerminal).DIRECTORY() returns (IJBDirectory directory) {
-            try directory.PROJECTS() returns (IJBProjects projects) {
-                if (projects != PROJECTS) return 0;
-            } catch {
-                return 0;
-            }
-
-            try directory.isTerminalOf(sourceProjectId, IJBTerminal(sourceTerminal)) returns (bool isTerminal) {
-                if (!isTerminal) return 0;
-            } catch {
-                return 0;
-            }
-        } catch {
-            return 0;
-        }
-    }
-
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
@@ -542,13 +469,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Resolve the terminal that should receive this forwarded add-to-balance call before accepting funds.
         IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
-        // Core terminals identify project-to-project balance transfers with the raw 32-byte source project ID. Only
-        // those contract-originated calls may be retained for retry; ordinary callers keep synchronous revert
-        // semantics.
-        uint256 sourceProjectId = _sourceProjectIdFrom({
-            metadata: metadata, isForwardedProjectCall: !shouldReturnHeldFees && bytes(memo).length == 0
-        });
-
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
@@ -561,51 +481,23 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer. If the immediate caller is itself a forwarding intermediary that exposes
         // its own original payer, propagate that — otherwise refunds in nested forwards stop at the intermediary.
-        address payer = _originalPayerOrSender();
-        originalPayer = payer;
+        originalPayer = _originalPayerOrSender();
 
         // Reject forwards that would bounce straight back into this call's immediate caller.
         _enforceNoCircularForward(terminal);
 
-        if (sourceProjectId != 0 && amount != 0) {
-            // Retain gas around the downstream route. If it fails, keep custody and record a retryable transfer so
-            // the source terminal observes a successful payment instead of forgiving a fee or nullifying a payout.
-            try terminal.addToBalanceOf{value: payValue, gas: _gasForForwardedTerminalCall()}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                shouldReturnHeldFees: false,
-                memo: "",
-                metadata: metadata
-            }) {}
-            catch {
-                _revokeAllowanceFor({terminal: terminal, token: token});
-                originalPayer = previousPayer;
-                _queueTerminalCall({
-                    sourceProjectId: sourceProjectId,
-                    projectId: projectId,
-                    token: token,
-                    amount: amount,
-                    beneficiary: address(0),
-                    payer: payer,
-                    preferAddToBalance: true
-                });
-                return;
-            }
-        } else {
-            // Ordinary calls preserve the registry's synchronous forwarding and revert behavior.
-            terminal.addToBalanceOf{value: payValue}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                shouldReturnHeldFees: shouldReturnHeldFees,
-                memo: memo,
-                metadata: metadata
-            });
-        }
+        // Forward to the resolved terminal.
+        terminal.addToBalanceOf{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            shouldReturnHeldFees: shouldReturnHeldFees,
+            memo: memo,
+            metadata: metadata
+        });
 
         // Revoke any leftover allowance the terminal did not pull.
-        _revokeAllowanceFor({terminal: terminal, token: token});
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
 
         // Restore the previous payer (supports nested reentrant calls through pay hooks).
         originalPayer = previousPayer;
@@ -728,13 +620,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Resolve the terminal that should receive this forwarded payment before accepting funds.
         IJBTerminal terminal = _requireResolvedTerminalOf(projectId);
 
-        // Core terminals identify project-to-project payments and protocol fees with the raw 32-byte source project
-        // ID, an empty memo, and no synchronous token-count floor. Only those contract-originated calls may be
-        // retained for retry.
-        uint256 sourceProjectId = _sourceProjectIdFrom({
-            metadata: metadata, isForwardedProjectCall: minReturnedTokens == 0 && bytes(memo).length == 0
-        });
-
         // Accept the funds for the token.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
 
@@ -747,106 +632,27 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         // Store the original payer in transient storage so downstream router terminals can refund partial-fill
         // leftovers to the true payer. If the immediate caller is itself a forwarding intermediary that exposes
         // its own original payer, propagate that — otherwise refunds in nested forwards stop at the intermediary.
-        address payer = _originalPayerOrSender();
-        originalPayer = payer;
+        originalPayer = _originalPayerOrSender();
 
         // Reject forwards that would bounce straight back into this call's immediate caller.
         _enforceNoCircularForward(terminal);
 
-        if (sourceProjectId != 0 && amount != 0) {
-            // Retain gas around the downstream route. If it fails, keep custody and record a retryable transfer so
-            // the source terminal observes a successful payment instead of forgiving a fee or nullifying a payout.
-            try terminal.pay{value: payValue, gas: _gasForForwardedTerminalCall()}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                beneficiary: beneficiary,
-                minReturnedTokens: 0,
-                memo: "",
-                metadata: metadata
-            }) returns (
-                uint256 beneficiaryTokenCount
-            ) {
-                result = beneficiaryTokenCount;
-            } catch {
-                _revokeAllowanceFor({terminal: terminal, token: token});
-                originalPayer = previousPayer;
-                _queueTerminalCall({
-                    sourceProjectId: sourceProjectId,
-                    projectId: projectId,
-                    token: token,
-                    amount: amount,
-                    beneficiary: beneficiary,
-                    payer: payer,
-                    preferAddToBalance: false
-                });
-                return 0;
-            }
-        } else {
-            // Ordinary calls preserve the registry's synchronous forwarding, slippage, and revert behavior.
-            result = terminal.pay{value: payValue}({
-                projectId: projectId,
-                token: token,
-                amount: amount,
-                beneficiary: beneficiary,
-                minReturnedTokens: minReturnedTokens,
-                memo: memo,
-                metadata: metadata
-            });
-        }
+        // Forward the payment to the terminal.
+        result = terminal.pay{value: payValue}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: minReturnedTokens,
+            memo: memo,
+            metadata: metadata
+        });
 
         // Revoke any leftover allowance the terminal did not pull.
-        _revokeAllowanceFor({terminal: terminal, token: token});
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
 
         // Restore the previous payer (supports nested reentrant calls through pay hooks).
         originalPayer = previousPayer;
-    }
-
-    /// @notice Retry a terminal-originated payment retained after downstream forwarding failed.
-    /// @dev Deletes the pending record before the external call to prevent reentrant double-processing. A failed
-    /// retry reverts the deletion and leaves the retained call available for another attempt.
-    /// @param id The deterministic pending-call identifier.
-    /// @return beneficiaryTokenCount The number of project tokens minted when retrying a pay call, or zero for an
-    /// add-to-balance call.
-    function processPendingTerminalCall(bytes32 id) external override returns (uint256 beneficiaryTokenCount) {
-        JBPendingTerminalCall memory call = _pendingTerminalCallOf[id];
-        if (call.amount == 0) revert JBRouterTerminalRegistry_PendingTerminalCallNotFound(id);
-
-        IJBTerminal terminal = _requireResolvedTerminalOf(call.projectId);
-        delete _pendingTerminalCallOf[id];
-
-        uint256 payValue = _beforeTransferFor({to: address(terminal), token: call.token, amount: call.amount});
-        address previousPayer = originalPayer;
-        originalPayer = call.payer;
-
-        bytes memory metadata = abi.encodePacked(call.sourceProjectId);
-        if (call.preferAddToBalance) {
-            terminal.addToBalanceOf{value: payValue}({
-                projectId: call.projectId,
-                token: call.token,
-                amount: call.amount,
-                shouldReturnHeldFees: false,
-                memo: "",
-                metadata: metadata
-            });
-        } else {
-            beneficiaryTokenCount = terminal.pay{value: payValue}({
-                projectId: call.projectId,
-                token: call.token,
-                amount: call.amount,
-                beneficiary: call.beneficiary,
-                minReturnedTokens: 0,
-                memo: "",
-                metadata: metadata
-            });
-        }
-
-        _revokeAllowanceFor({terminal: terminal, token: call.token});
-        originalPayer = previousPayer;
-
-        emit JBRouterTerminalRegistry_ProcessTerminalCall({
-            id: id, call: call, terminal: terminal, caller: _msgSender()
-        });
     }
 
     /// @notice Change the registry-wide default terminal for projects created AFTER this call.
@@ -992,51 +798,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         IERC20(token).forceApprove({spender: to, value: amount});
 
         return 0;
-    }
-
-    /// @notice Retain a failed terminal-originated project payment for permissionless retry.
-    /// @dev Calls with identical immutable routing fields aggregate under one deterministic identifier.
-    /// @param sourceProjectId The project whose terminal originated the payment.
-    /// @param projectId The project the payment is intended for.
-    /// @param token The token retained by the registry.
-    /// @param amount The amount retained by the registry.
-    /// @param beneficiary The beneficiary for a retried pay call.
-    /// @param payer The original payer to expose to downstream forwarding terminals during retry.
-    /// @param preferAddToBalance Whether the retry adds to the project's balance instead of paying it.
-    function _queueTerminalCall(
-        uint256 sourceProjectId,
-        uint256 projectId,
-        address token,
-        uint256 amount,
-        address beneficiary,
-        address payer,
-        bool preferAddToBalance
-    )
-        internal
-    {
-        bytes32 id = keccak256(abi.encode(sourceProjectId, projectId, token, beneficiary, payer, preferAddToBalance));
-
-        JBPendingTerminalCall storage pendingCall = _pendingTerminalCallOf[id];
-        if (pendingCall.amount == 0) {
-            pendingCall.sourceProjectId = sourceProjectId;
-            pendingCall.projectId = projectId;
-            pendingCall.token = token;
-            pendingCall.beneficiary = beneficiary;
-            pendingCall.payer = payer;
-            pendingCall.preferAddToBalance = preferAddToBalance;
-        }
-        pendingCall.amount += amount;
-
-        emit JBRouterTerminalRegistry_QueueTerminalCall({
-            id: id, call: pendingCall, amount: amount, caller: _msgSender()
-        });
-    }
-
-    /// @notice Revoke any unused downstream ERC-20 allowance after a forwarding attempt.
-    /// @param terminal The terminal whose allowance should be revoked.
-    /// @param token The token whose allowance should be revoked.
-    function _revokeAllowanceFor(IJBTerminal terminal, address token) internal {
-        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).forceApprove({spender: address(terminal), value: 0});
     }
 
     /// @notice Transfer tokens from one address to another using direct approval, `safeTransfer`, or Permit2 fallback.

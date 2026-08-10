@@ -14,7 +14,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 ## Key surfaces
 
 - `JBRouterTerminal`: route discovery and execution
-- `JBRouterTerminalRegistry`: router selection, locking, forwarding, and retryable failed-forward custody
+- `JBRouterTerminalRegistry`: router selection, locking, forwarding, and registry-held balance migration
 - `JBPayRouteResolver`: preview and route-resolution helper logic
 
 ## Journey 1: Put a router in front of a project's canonical terminal
@@ -126,27 +126,26 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the registry records the chosen router terminal and locks the decision
 
-## Journey 6: Settle a retained terminal-originated transfer
+## Journey 6: Migrate registry-held balance or router responsibility safely
 
-**Actor:** keeper, operator, or any permissionless caller.
+**Actor:** operator or migration responder.
 
-**Intent:** finish a project payout or non-native protocol fee whose downstream registry route previously failed.
+**Intent:** move router responsibility or registry-held value without stranding balances.
 
 **Preconditions**
-- `JBRouterTerminalRegistry_QueueTerminalCall` was emitted and the registry still reports a non-zero pending amount
+- the project is changing router expectations or needs to move balance from a registry-held context
 
 **Main Flow**
-1. Read the pending call by its event ID and diagnose why its resolved downstream terminal failed.
-2. Fix any route configuration or wait until the route is executable; no permission is required to settle it.
-3. Call `processPendingTerminalCall(id)` with enough gas.
-4. Confirm `JBRouterTerminalRegistry_ProcessTerminalCall` and that the pending amount is now zero.
+1. Use the registry's migration surface when a project's router balance or canonical terminal relationship needs to change.
+2. Verify the destination terminal and router assumptions before moving value.
+3. Update frontends only after the registry state and balance migration agree.
 
 **Failure Modes**
-- the retry still runs out of gas or the destination route remains broken; the transaction reverts and custody remains pending
-- the project changes its resolved terminal before retry, so the current terminal receives the retained transfer
+- balances move to a destination terminal that no longer matches routing assumptions
+- frontends switch early and point users at stale registry state
 
 **Postconditions**
-- the destination terminal has accounted for the transfer and the registry no longer holds its backing amount
+- the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind
 
 ## Trust boundaries
 

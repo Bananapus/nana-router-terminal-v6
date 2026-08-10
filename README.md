@@ -26,7 +26,7 @@ It can route through:
 - Uniswap V3 or V4 swaps
 - recursive Juicebox token cash outs when the input is itself a project token
 
-Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The first `setDefaultTerminal` serves every project that already existed when it was called — including the canonical fee project (ID 1) — so those pre-existing projects can route tokens through the default. After that, the default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`). Authenticated project-to-project payouts and non-native protocol fees also fail closed at this proxy boundary: if the resolved terminal runs out of gas or reverts, the registry retains the funds and records a permissionlessly retryable terminal call instead of returning a failure to the source terminal's catch path.
+Projects can use the registry to choose, and optionally lock, a project-specific router terminal or fall back to the registry's default. The first `setDefaultTerminal` serves every project that already existed when it was called — including the canonical fee project (ID 1) — so those pre-existing projects can route tokens through the default. After that, the default is cohort-pinned: when the registry owner calls `setDefaultTerminal` again, the new default applies only to projects created after that call; existing projects continue to resolve against the default that was current when their ID range was active (see `defaultTerminalFor(projectId)`).
 
 Use this repo when UX requires "pay with many tokens, settle into the right one." Do not use it as a replacement for downstream terminal accounting or as an authoritative decimal source.
 
@@ -37,7 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
-| `JBRouterTerminalRegistry` | Registry and proxy surface that selects router terminals and retains failed terminal-originated forwards for permissionless retry. |
+| `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
 ## Mental model
@@ -72,12 +72,11 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
-- authenticated terminal-originated fees and project payouts can remain pending in registry custody until their downstream route succeeds
 
 ## Where state lives
 
 - route-selection logic: `JBRouterTerminal`
-- per-project router choice, lock status, and retryable failed-forward custody: `JBRouterTerminalRegistry`
+- per-project router choice and lock status: `JBRouterTerminalRegistry`
 - accepted-token accounting and final balance changes: the downstream terminal, usually in `nana-core-v6`
 
 That separation is why a successful route can still end in downstream terminal behavior you did not expect.
@@ -89,7 +88,6 @@ That separation is why a successful route can still end in downstream terminal b
 3. `test/RouterTerminalCashOutFork.t.sol`
 4. `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 5. `test/regression/CashOutCircularPrimaryTerminal.t.sol`
-6. `test/regression/RegistryForwardGasReserve.t.sol`
 
 ## Install
 
@@ -139,9 +137,7 @@ script/
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
-  settlement paths, although authenticated terminal-originated native project payouts can be retained pending retry
-- native-token protocol fees bypass the registry and go directly to the fee project's terminal; retryable fee custody
-  therefore protects only non-native fees whose primary-terminal path resolves through this registry
+  settlement paths
 
 The most common reader mistake here is to stop at the router and forget to inspect the terminal that actually receives the value.
 

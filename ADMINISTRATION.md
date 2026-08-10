@@ -27,7 +27,6 @@
 | Project owner | `JBProjects.ownerOf(projectId)` | Per project | May delegate `SET_ROUTER_TERMINAL` |
 | Terminal delegate | `JBPermissions` grant | Per project | Usually `SET_ROUTER_TERMINAL` |
 | Payer | Per transaction | Per payment | No special permissions needed for standard ERC-20 routing |
-| Pending-call settler | Permissionless | Per retained transfer | Retries the recorded call; cannot choose its fields or withdraw its assets |
 
 ## Privileged surfaces
 
@@ -36,7 +35,6 @@
 | `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and the default fallback for NEW projects only. `setDefaultTerminal` snapshots the outgoing default into `_defaultTerminalHistory` so projects with ID <= `defaultTerminalProjectIdThreshold` continue to resolve against the default that was current when their cohort was active. |
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
-| `JBRouterTerminalRegistry` | `processPendingTerminalCall(...)` | Anyone | Replays a retained terminal-originated transfer against the project's currently resolved terminal |
 
 ## Immutable and one-way
 
@@ -52,7 +50,6 @@
 - still review fall-through resolution before changing the default — `defaultTerminalFor(projectId)` returns the resolved default for any project, and `defaultTerminalHistoryAt(index)` exposes each captured snapshot
 - encourage projects to lock only after validating the resolved terminal and routing behavior
 - distinguish configuration risk from quote-quality risk
-- monitor `JBRouterTerminalRegistry_QueueTerminalCall` and retry pending calls once their downstream route is executable
 
 ## Machine notes
 
@@ -67,7 +64,6 @@
 - locked projects cannot be unlocked by the registry
 - bad immutable router behavior means replacement infrastructure, not in-place edits
 - quote-path weakness is usually mitigated operationally with better pool choice, external quoting, or replacement routing infrastructure
-- a failed pending-call retry leaves custody and the record unchanged; fix the destination route or supply more gas, then retry permissionlessly
 
 ## Admin boundaries
 
@@ -76,7 +72,6 @@
 - project operators cannot set a terminal that the registry does not allow
 - router maintainers cannot tune routing heuristics or constructor immutables post-deploy
 - there is no pause surface in the registry or router
-- the registry owner has no withdrawal or cancellation surface for pending terminal calls
 
 ## Source map
 

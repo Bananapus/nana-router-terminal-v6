@@ -8,9 +8,9 @@ The router is intentionally heuristic. It does not search every possible route f
 
 ## System overview
 
-`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. For authenticated terminal-originated project transfers, it also retains failed downstream forwards for permissionless retry. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
+`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
 
-Final project accounting still happens in the downstream terminal selected through `nana-core-v6`. A pending registry call is custody, not credited project balance, until that downstream settlement succeeds.
+Final accounting still happens in the downstream terminal selected through `nana-core-v6`.
 
 ## Core invariants
 
@@ -23,14 +23,13 @@ Final project accounting still happens in the downstream terminal selected throu
 - recursive project-token cashout routing is intentionally bounded
 - caller reclaim minima only apply to the first cashout hop, because later hops may change token units
 - circular `router -> registry -> same router` forwarding remains blocked in the registry
-- a downstream failure cannot turn an authenticated registry-mediated project payout or non-native protocol fee into a successful source-terminal catch
 
 ## Modules
 
 | Module | Responsibility | Notes |
 | --- | --- | --- |
 | `JBRouterTerminal` | Intake, route discovery, swap execution, forwarding, and refunds | Main runtime surface |
-| `JBRouterTerminalRegistry` | Project-level router selection, locking, proxy forwarding, and failed-forward custody | Governance, safety, and permissionless retry surface |
+| `JBRouterTerminalRegistry` | Project-level router selection, locking, and proxy forwarding to the resolved router terminal | Governance, safety, and proxy surface |
 | `JBPayRouteResolver` | Preview candidate evaluation | Helper to keep runtime size bounded |
 | `JBSwapLib` and routing structs | Pool discovery, quoting, and route metadata | Shared routing logic |
 
@@ -40,7 +39,6 @@ Final project accounting still happens in the downstream terminal selected throu
 - the router trusts Uniswap V3, Uniswap V4, Permit2, and optional payer trackers for routing-side behavior
 - fee-on-transfer tokens are reconciled on ingress but remain unsafe for routed payments because terminal-side loss is not enforced on `pay`
 - the registry is trusted to resolve and forward into the intended router implementation for a project
-- only a core terminal authenticated against the registry's `PROJECTS` directory receives fail-closed forwarding; ordinary callers keep synchronous revert semantics
 
 ## Critical flows
 
@@ -56,20 +54,9 @@ router pay call
   -> refund leftover input when possible
 ```
 
-### Terminal-originated project transfer
-
-```text
-source terminal fee or project payout
-  -> registry authenticates the raw source-project metadata against the source terminal's directory
-  -> registry retains enough gas to handle a failed downstream router call
-  -> success: downstream terminal settles normally
-  -> failure: registry keeps exact token custody and records a deterministic pending call
-  -> any caller retries the pending call against the project's currently resolved terminal
-```
-
 ## Accounting model
 
-The router does not own project balances. It owns transient route accounting: input reconciliation, swap execution, forwarded amount, and refund resolution. The registry may temporarily own assets backing pending terminal calls one-for-one, but those assets are never reported as project surplus and cannot be withdrawn by the registry owner.
+The router does not own project balances. It owns transient route accounting: input reconciliation, swap execution, forwarded amount, and refund resolution.
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 
@@ -88,7 +75,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - be conservative with native wrapping, unwrapping, and refund behavior
 - if recursive cash-out logic changes, review hop limits and failure handling together
 - if metadata semantics change, re-check first-hop reclaim minima, one-shot source overrides, and preferred-token routing together
-- keep pending registry custody one-for-one, non-administrative, and releasable only through the recorded destination call
+- do not turn the router into a persistent treasury layer
 
 ## Canonical checks
 
@@ -104,8 +91,6 @@ Preview and execution share the same conceptual route shape: optional recursive 
   `test/regression/CashOutFallbackPrefersRecursiveLoop.t.sol`
 - final-hop ERC-20 receipt shortfalls:
   `test/regression/LossyReceiptRegression.t.sol`
-- failed terminal-originated fee and project-payout forwards:
-  `test/regression/RegistryForwardGasReserve.t.sol`
 
 ## Source map
 
