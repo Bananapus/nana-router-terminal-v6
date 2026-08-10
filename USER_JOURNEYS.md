@@ -153,7 +153,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - a source terminal rejects the refund, reverting finalization and preserving pending custody
 
 **Postconditions**
-- the original input is either settled, still represented by pending state, or credited back to its predetermined source project
+- the original input is either settled, still represented by pending state, or credited back to its predetermined source project through a currently registered accounting terminal
 
 ## Trust boundaries
 

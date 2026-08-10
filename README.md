@@ -77,6 +77,8 @@ The shortest useful reading order is:
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 - shape-qualified failed fees and payouts through the gateway become asynchronous pending calls; ordinary caller failures remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
+- keepers should retry unusually expensive pending routes through `processPendingCallWithGas` instead of treating a 5M gas exhaustion as a sink failure
+- deployment migrates project 1 by default; list other issued cohorts in `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS`
 
 ## Where state lives
 

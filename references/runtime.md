@@ -27,7 +27,7 @@
 - Preview normalization: buyback-hook metadata can improve the user-visible preview outcome, so route ranking must normalize hook-returned hints consistently across candidates.
 - Pending-call conservation: failed Router frames must leave the Gateway holding the exact original input represented by pending state.
 - Gateway intake: the transient balance-delta guard prevents callback tokens from counting a nested deposit twice, while nested Router allowances are restored for legitimate forwarding hooks.
-- Qualification comparability: every counted failure gets the same five-million-gas budget, a one-day interval, and an unchanged error selector; encoded arguments are ignored.
+- Qualification comparability: every counted failure gets at least five million gas, a one-day interval, and an unchanged error selector; encoded arguments are ignored, and complete-budget empty failures do not qualify.
 
 ## Tests to trust first
 

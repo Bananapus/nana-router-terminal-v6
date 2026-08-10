@@ -63,7 +63,7 @@ library RouterTerminalDeploymentLib {
     {
         // Read the router gateway address from its Sphinx deployment artifact.
         deployment.gateway = IJBRouterTerminalGateway(
-            _getDeploymentAddress({
+            _getDeploymentAddressOrZero({
                 path: path,
                 projectName: "nana-router-terminal-v6",
                 networkName: networkName,
@@ -109,12 +109,73 @@ library RouterTerminalDeploymentLib {
         view
         returns (address deploymentAddress)
     {
+        string memory deploymentPath = _resolveDeploymentPath({
+            path: path, projectName: projectName, networkName: networkName, contractName: contractName
+        });
+
         // Read the raw deployment artifact so the `.address` field can be decoded below.
         string memory deploymentJson =
         // forge-lint: disable-next-line(unsafe-cheatcode)
-        vm.readFile(string.concat(path, projectName, "/", networkName, "/", contractName, ".json"));
+        vm.readFile(deploymentPath);
 
         // Decode and return the deployed contract address from the Sphinx artifact payload.
         deploymentAddress = stdJson.readAddress({json: deploymentJson, key: ".address"});
+    }
+
+    /// @notice Get a deployment address, returning zero when the artifact does not exist.
+    /// @param path The path to the deployment file.
+    /// @param projectName The Sphinx project name containing the deployment artifact.
+    /// @param networkName The Sphinx network name containing the deployment artifact.
+    /// @param contractName The name of the contract to get the address of.
+    /// @return deploymentAddress The deployed contract address, or zero when no artifact exists.
+    function _getDeploymentAddressOrZero(
+        string memory path,
+        string memory projectName,
+        string memory networkName,
+        string memory contractName
+    )
+        internal
+        view
+        returns (address deploymentAddress)
+    {
+        string memory deploymentPath = _resolveDeploymentPath({
+            path: path, projectName: projectName, networkName: networkName, contractName: contractName
+        });
+
+        // An absent optional artifact means the contract has not been deployed for this network.
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        if (!vm.exists(deploymentPath)) return address(0);
+
+        // Read and decode the artifact only after establishing that it exists.
+        string memory deploymentJson =
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        vm.readFile(deploymentPath);
+        deploymentAddress = stdJson.readAddress({json: deploymentJson, key: ".address"});
+    }
+
+    /// @notice Resolve either a package-local or Sphinx-project deployment artifact path.
+    /// @param path The root deployment path.
+    /// @param projectName The Sphinx project name.
+    /// @param networkName The Sphinx network name.
+    /// @param contractName The deployment contract name.
+    /// @return deploymentPath The artifact path to read.
+    function _resolveDeploymentPath(
+        string memory path,
+        string memory projectName,
+        string memory networkName,
+        string memory contractName
+    )
+        internal
+        view
+        returns (string memory deploymentPath)
+    {
+        string memory packagePath = string.concat(path, networkName, "/", contractName, ".json");
+
+        // Prefer package-local artifacts because deployment packages expose their own `deployments/` directory.
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        if (vm.exists(packagePath)) return packagePath;
+
+        // A shared artifact root groups deployments under their Sphinx project name.
+        return string.concat(path, projectName, "/", networkName, "/", contractName, ".json");
     }
 }

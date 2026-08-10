@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -33,6 +34,9 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Thrown when retry calldata does not match the data retained with a pending call.
     error JBRouterTerminalGateway_CallDataMismatch(bytes32 expectedHash, bytes32 actualHash);
 
+    /// @notice Thrown when a qualified attempt consumes its entire forwarded budget without returning an error.
+    error JBRouterTerminalGateway_GasExhausted(uint256 gasLimit);
+
     /// @notice Thrown when a qualified attempt was not supplied enough gas.
     error JBRouterTerminalGateway_InsufficientRetryGas(uint256 available, uint256 required);
 
@@ -51,13 +55,19 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Thrown when ordinary processing is attempted after a call has qualified for finalization.
     error JBRouterTerminalGateway_PendingCallRequiresFinalization(bytes32 id);
 
+    /// @notice Thrown when neither the original nor current primary terminal accepts a project refund.
+    error JBRouterTerminalGateway_RefundFailed(address originalTerminal, address primaryTerminal);
+
     /// @notice Thrown when a callback-capable token re-enters the inbound balance-delta measurement.
     error JBRouterTerminalGateway_ReentrantTokenTransfer(address token);
+
+    /// @notice Thrown when a caller-specified qualified gas limit is below the protocol minimum.
+    error JBRouterTerminalGateway_RetryGasLimitTooLow(uint256 gasLimit, uint256 minimum);
 
     /// @notice Thrown when a call which is not eligible for retention cannot be settled synchronously.
     error JBRouterTerminalGateway_RouteFailed(bytes32 errorHash);
 
-    /// @notice Thrown when the immutable router is the zero address.
+    /// @notice Thrown when the immutable directory or router is the zero address.
     error JBRouterTerminalGateway_ZeroAddress();
 
     //*********************************************************************//
@@ -67,7 +77,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice The number of matching, time-separated qualified failures required before finalization.
     uint256 public constant override FINALIZATION_FAILURE_COUNT = 3;
 
-    /// @notice The gas forwarded by every qualified retry and final attempt.
+    /// @notice The default and minimum gas forwarded by a qualified retry or final attempt.
     uint256 public constant override QUALIFIED_CALL_GAS = 5_000_000;
 
     /// @notice The minimum delay between qualified failures and before finalization.
@@ -83,6 +93,9 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
+
+    /// @notice The immutable directory used to resolve a source project's current accounting terminal for refunds.
+    IJBDirectory public immutable override DIRECTORY;
 
     /// @notice The immutable router terminal this gateway calls atomically.
     IJBRouterTerminal public immutable override ROUTER;
@@ -118,18 +131,15 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
+    /// @param directory The immutable directory used to resolve project accounting terminals.
     /// @param router The immutable router terminal to call atomically.
-    constructor(IJBRouterTerminal router) {
-        if (address(router) == address(0)) revert JBRouterTerminalGateway_ZeroAddress();
+    constructor(IJBDirectory directory, IJBRouterTerminal router) {
+        if (address(directory) == address(0) || address(router) == address(0)) {
+            revert JBRouterTerminalGateway_ZeroAddress();
+        }
+        DIRECTORY = directory;
         ROUTER = router;
     }
-
-    //*********************************************************************//
-    // ------------------------- receive / fallback ---------------------- //
-    //*********************************************************************//
-
-    /// @notice Receive native tokens retained after a failed route.
-    receive() external payable {}
 
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
@@ -169,7 +179,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             token: token
         });
 
-        (bool success, bytes32 errorHash,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
+        (bool success, bytes32 errorHash,,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
         // Ordinary callers retain synchronous failure semantics; only shape-qualified project refunds enter escrow.
@@ -187,38 +197,21 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         override
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
-        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
-        JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
+        return _finalizePendingCall({id: id, gasLimit: QUALIFIED_CALL_GAS, memo: memo, metadata: metadata});
+    }
 
-        if (failure.count < FINALIZATION_FAILURE_COUNT) {
-            revert JBRouterTerminalGateway_PendingCallNotFinalizable({id: id, failureCount: failure.count});
-        }
-        _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
-
-        delete _pendingCallOf[id];
-
-        (bool success, bytes32 errorHash, uint256 count) =
-            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: QUALIFIED_CALL_GAS});
-
-        if (success) {
-            delete _pendingCallFailureOf[id];
-            emit JBRouterTerminalGateway_ProcessPendingCall({
-                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
-            });
-            return (false, count);
-        }
-
-        if (errorHash != failure.errorHash) {
-            _pendingCallOf[id] = call;
-            _recordFailure({id: id, errorHash: errorHash, previous: failure});
-            return (false, 0);
-        }
-
-        delete _pendingCallFailureOf[id];
-        _refund(call);
-
-        emit JBRouterTerminalGateway_RefundPendingCall({id: id, call: call, caller: msg.sender});
-        return (true, 0);
+    /// @notice Make one final qualified attempt with an expanded gas budget.
+    function finalizePendingCallWithGas(
+        bytes32 id,
+        uint256 gasLimit,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        override
+        returns (bool wasRefunded, uint256 beneficiaryTokenCount)
+    {
+        return _finalizePendingCall({id: id, gasLimit: gasLimit, memo: memo, metadata: metadata});
     }
 
     /// @notice Empty implementation because the gateway only escrows retained calls, not project balances.
@@ -259,7 +252,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             token: token
         });
 
-        (bool success, bytes32 errorHash, uint256 count) =
+        (bool success, bytes32 errorHash, uint256 count,) =
             _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
@@ -270,7 +263,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         _queue({call: call, errorHash: errorHash});
     }
 
-    /// @notice Make a permissionless gas-qualified attempt to process a retained call.
+    /// @notice Make a permissionless attempt using the default qualified gas budget.
     function processPendingCall(
         bytes32 id,
         string calldata memo,
@@ -280,29 +273,21 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
-        JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
+        return _processPendingCall({id: id, gasLimit: QUALIFIED_CALL_GAS, memo: memo, metadata: metadata});
+    }
 
-        if (failure.count >= FINALIZATION_FAILURE_COUNT) {
-            revert JBRouterTerminalGateway_PendingCallRequiresFinalization(id);
-        }
-        if (failure.count != 0) _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
-
-        delete _pendingCallOf[id];
-
-        (bool success, bytes32 errorHash, uint256 count) =
-            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: QUALIFIED_CALL_GAS});
-
-        if (success) {
-            delete _pendingCallFailureOf[id];
-            emit JBRouterTerminalGateway_ProcessPendingCall({
-                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
-            });
-            return count;
-        }
-
-        _pendingCallOf[id] = call;
-        _recordFailure({id: id, errorHash: errorHash, previous: failure});
+    /// @notice Make a permissionless attempt with an expanded qualified gas budget.
+    function processPendingCallWithGas(
+        bytes32 id,
+        uint256 gasLimit,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        override
+        returns (uint256 beneficiaryTokenCount)
+    {
+        return _processPendingCall({id: id, gasLimit: gasLimit, memo: memo, metadata: metadata});
     }
 
     //*********************************************************************//
@@ -455,7 +440,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         uint256 gasLimit
     )
         internal
-        returns (bool success, bytes32 errorHash, uint256 beneficiaryTokenCount)
+        returns (bool success, bytes32 errorHash, uint256 beneficiaryTokenCount, bool gasExhausted)
     {
         bytes memory routerCall;
         if (call.preferAddToBalance) {
@@ -486,13 +471,16 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             // callers still revert below instead of entering escrow.
             if (available > _FAILURE_GAS_RESERVE) gasLimit = available - _FAILURE_GAS_RESERVE;
         } else {
+            if (gasLimit < QUALIFIED_CALL_GAS) {
+                revert JBRouterTerminalGateway_RetryGasLimitTooLow({gasLimit: gasLimit, minimum: QUALIFIED_CALL_GAS});
+            }
             _requireRetryGas(gasLimit);
         }
 
         address previousPayer = originalPayer;
         originalPayer = call.refundTo;
 
-        (success, errorHash, beneficiaryTokenCount) =
+        (success, errorHash, beneficiaryTokenCount, gasExhausted) =
             _boundedCall({target: address(ROUTER), value: value, gasLimit: gasLimit, data: routerCall});
 
         originalPayer = previousPayer;
@@ -500,6 +488,91 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             // Restore rather than clear so a nested route cannot clobber its enclosing Router pull.
             IERC20(call.token).forceApprove({spender: address(ROUTER), value: previousAllowance});
         }
+    }
+
+    /// @notice Finalize a retained call using a caller-selected qualified gas budget.
+    function _finalizePendingCall(
+        bytes32 id,
+        uint256 gasLimit,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        internal
+        returns (bool wasRefunded, uint256 beneficiaryTokenCount)
+    {
+        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
+        JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
+
+        if (failure.count < FINALIZATION_FAILURE_COUNT) {
+            revert JBRouterTerminalGateway_PendingCallNotFinalizable({id: id, failureCount: failure.count});
+        }
+        _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
+
+        delete _pendingCallOf[id];
+
+        (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
+            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: gasLimit});
+
+        if (success) {
+            delete _pendingCallFailureOf[id];
+            emit JBRouterTerminalGateway_ProcessPendingCall({
+                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
+            });
+            return (false, count);
+        }
+
+        // A budget-exhausted attempt proves only that this retry limit was inadequate, not that the route is broken.
+        if (gasExhausted) revert JBRouterTerminalGateway_GasExhausted(gasLimit);
+
+        if (errorHash != failure.errorHash) {
+            _pendingCallOf[id] = call;
+            _recordFailure({id: id, errorHash: errorHash, previous: failure});
+            return (false, 0);
+        }
+
+        delete _pendingCallFailureOf[id];
+        _refund(call);
+
+        emit JBRouterTerminalGateway_RefundPendingCall({id: id, call: call, caller: msg.sender});
+        return (true, 0);
+    }
+
+    /// @notice Process a retained call using a caller-selected qualified gas budget.
+    function _processPendingCall(
+        bytes32 id,
+        uint256 gasLimit,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        internal
+        returns (uint256 beneficiaryTokenCount)
+    {
+        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
+        JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
+
+        if (failure.count >= FINALIZATION_FAILURE_COUNT) {
+            revert JBRouterTerminalGateway_PendingCallRequiresFinalization(id);
+        }
+        if (failure.count != 0) _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
+
+        delete _pendingCallOf[id];
+
+        (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
+            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: gasLimit});
+
+        if (success) {
+            delete _pendingCallFailureOf[id];
+            emit JBRouterTerminalGateway_ProcessPendingCall({
+                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
+            });
+            return count;
+        }
+
+        // Do not let a caller turn an inadequate retry budget into evidence that the downstream route is broken.
+        if (gasExhausted) revert JBRouterTerminalGateway_GasExhausted(gasLimit);
+
+        _pendingCallOf[id] = call;
+        _recordFailure({id: id, errorHash: errorHash, previous: failure});
     }
 
     /// @notice Queue a failed call while retaining its original input token.
@@ -534,26 +607,51 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         });
     }
 
-    /// @notice Refund a finalized call into its predetermined source project's terminal balance.
+    /// @notice Refund a finalized call through an active source-project accounting terminal.
     function _refund(JBPendingRouterTerminalCall memory call) internal {
+        IJBTerminal originalTerminal = IJBTerminal(call.refundTo);
+
+        // Prefer the source terminal while it remains registered for the project, preserving the original destination.
+        if (
+            DIRECTORY.isTerminalOf({projectId: call.sourceProjectId, terminal: originalTerminal})
+                && _tryRefund({call: call, terminal: originalTerminal})
+        ) {
+            return;
+        }
+
+        // If that terminal was removed or rejects the token, use the project's current token-specific primary terminal.
+        IJBTerminal primaryTerminal = DIRECTORY.primaryTerminalOf({projectId: call.sourceProjectId, token: call.token});
+        if (
+            address(primaryTerminal) != address(0) && primaryTerminal != originalTerminal
+                && _tryRefund({call: call, terminal: primaryTerminal})
+        ) {
+            return;
+        }
+
+        revert JBRouterTerminalGateway_RefundFailed({
+            originalTerminal: address(originalTerminal), primaryTerminal: address(primaryTerminal)
+        });
+    }
+
+    /// @notice Attempt a project-accounting refund without letting one terminal block an alternate terminal.
+    function _tryRefund(JBPendingRouterTerminalCall memory call, IJBTerminal terminal) internal returns (bool success) {
         uint256 value;
         if (call.token == JBConstants.NATIVE_TOKEN) {
             value = call.amount;
         } else {
-            IERC20(call.token).forceApprove({spender: call.refundTo, value: call.amount});
+            IERC20(call.token).forceApprove({spender: address(terminal), value: call.amount});
         }
 
-        IJBTerminal(call.refundTo).addToBalanceOf{value: value}({
-            projectId: call.sourceProjectId,
-            token: call.token,
-            amount: call.amount,
-            shouldReturnHeldFees: false,
-            memo: "",
-            metadata: ""
-        });
+        (success,) = address(terminal).call{value: value}(
+            abi.encodeCall(
+                IJBTerminal.addToBalanceOf,
+                (call.sourceProjectId, call.token, call.amount, false, string(""), bytes(""))
+            )
+        );
 
+        // Always close the exact approval before trying another terminal or returning.
         if (call.token != JBConstants.NATIVE_TOKEN) {
-            IERC20(call.token).forceApprove({spender: call.refundTo, value: 0});
+            IERC20(call.token).forceApprove({spender: address(terminal), value: 0});
         }
     }
 
@@ -570,14 +668,19 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         bytes memory data
     )
         internal
-        returns (bool success, bytes32 errorHash, uint256 result)
+        returns (bool success, bytes32 errorHash, uint256 result, bool gasExhausted)
     {
         assembly ("memory-safe") {
             let ptr := mload(0x40)
+            let gasBefore := gas()
             success := call(gasLimit, target, value, add(data, 0x20), mload(data), ptr, 0x20)
+            let gasSpent := sub(gasBefore, gas())
 
             let size := returndatasize()
             if and(success, gt(size, 0x1f)) { result := mload(ptr) }
+
+            // A failed call with no error data which consumed its complete budget is an unqualified gas exhaustion.
+            gasExhausted := and(iszero(success), and(iszero(size), iszero(lt(gasSpent, gasLimit))))
 
             let copySize := size
             if gt(copySize, 4) { copySize := 4 }
@@ -598,7 +701,14 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         if (account.code.length == 0) return false;
         (bool success, bytes memory data) =
             account.staticcall{gas: 30_000}(abi.encodeCall(IERC165.supportsInterface, (type(IJBTerminal).interfaceId)));
-        return success && data.length >= 32 && abi.decode(data, (bool));
+        if (!success || data.length < 32) return false;
+
+        // Require the canonical ABI encoding without letting a malformed boolean revert the enclosing payment.
+        uint256 supported;
+        assembly ("memory-safe") {
+            supported := mload(add(data, 0x20))
+        }
+        return supported == 1;
     }
 
     /// @notice Require a pending call and verify its original memo and metadata.
@@ -632,7 +742,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Require enough gas to forward a qualified attempt while retaining the failure-accounting reserve.
     function _requireRetryGas(uint256 gasLimit) internal view {
         uint256 available = gasleft();
-        uint256 required = gasLimit + _FAILURE_GAS_RESERVE;
+        // Include the EIP-150 withholding margin so the requested amount is actually forwarded by `CALL`.
+        uint256 required = gasLimit + gasLimit / 63 + _FAILURE_GAS_RESERVE;
         if (available < required) {
             revert JBRouterTerminalGateway_InsufficientRetryGas({available: available, required: required});
         }

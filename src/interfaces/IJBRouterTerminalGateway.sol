@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 
 import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
@@ -47,12 +48,16 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
         bytes32 indexed id, JBPendingRouterTerminalCall call, address caller
     );
 
+    /// @notice The directory used to resolve a source project's current accounting terminal for refunds.
+    /// @return directory The core terminal directory.
+    function DIRECTORY() external view returns (IJBDirectory directory);
+
     /// @notice The number of matching qualified failures required before finalization.
     /// @return count The required failure count.
     function FINALIZATION_FAILURE_COUNT() external view returns (uint256 count);
 
-    /// @notice The gas forwarded by each qualified router attempt.
-    /// @return gasLimit The qualified attempt gas limit.
+    /// @notice The default and minimum gas forwarded by a qualified router attempt.
+    /// @return gasLimit The default and minimum qualified attempt gas limit.
     function QUALIFIED_CALL_GAS() external view returns (uint256 gasLimit);
 
     /// @notice The minimum delay between qualified failures and before finalization.
@@ -91,6 +96,22 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
         external
         returns (bool wasRefunded, uint256 beneficiaryTokenCount);
 
+    /// @notice Make one final qualified attempt with an expanded gas budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, which must be at least `QUALIFIED_CALL_GAS`.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return wasRefunded Whether the retained input was refunded.
+    /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
+    function finalizePendingCallWithGas(
+        bytes32 id,
+        uint256 gasLimit,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        returns (bool wasRefunded, uint256 beneficiaryTokenCount);
+
     /// @notice Make a gas-qualified, permissionless attempt to process a retained call.
     /// @param id The pending call identifier.
     /// @param memo The original memo bound by the pending call.
@@ -98,6 +119,21 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCall(
         bytes32 id,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        external
+        returns (uint256 beneficiaryTokenCount);
+
+    /// @notice Make a gas-qualified, permissionless attempt with an expanded gas budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, which must be at least `QUALIFIED_CALL_GAS`.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
+    function processPendingCallWithGas(
+        bytes32 id,
+        uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
     )

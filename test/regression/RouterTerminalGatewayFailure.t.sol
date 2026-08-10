@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
@@ -18,6 +19,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
+import {RouterTerminalMigrationLib} from "../../script/helpers/RouterTerminalMigrationLib.sol";
 import {JBRouterTerminalGateway} from "../../src/JBRouterTerminalGateway.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
 import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
@@ -66,6 +68,40 @@ contract GatewayCallbackToken is ERC20 {
 
         return super.transferFrom({from: from, to: to, value: amount});
     }
+}
+
+contract GatewayDirtyERC165Payer {
+    function supportsInterface(bytes4) external pure returns (bool) {
+        assembly ("memory-safe") {
+            mstore(0, 2)
+            return(0, 32)
+        }
+    }
+}
+
+contract GatewayTestDirectory {
+    mapping(uint256 projectId => mapping(address terminal => bool)) public isTerminal;
+    mapping(uint256 projectId => mapping(address token => IJBTerminal terminal)) public primaryTerminal;
+
+    function isTerminalOf(uint256 projectId, IJBTerminal terminal) external view returns (bool) {
+        return isTerminal[projectId][address(terminal)];
+    }
+
+    function primaryTerminalOf(uint256 projectId, address token) external view returns (IJBTerminal) {
+        return primaryTerminal[projectId][token];
+    }
+
+    function setIsTerminalOf(uint256 projectId, IJBTerminal terminal, bool flag) external {
+        isTerminal[projectId][address(terminal)] = flag;
+    }
+
+    function setPrimaryTerminalOf(uint256 projectId, address token, IJBTerminal terminal) external {
+        primaryTerminal[projectId][token] = terminal;
+    }
+}
+
+interface IGatewayDirectoryProvider {
+    function DIRECTORY() external view returns (IJBDirectory directory);
 }
 
 contract GatewayTestProjects {
@@ -162,6 +198,16 @@ contract GatewayTestRouter {
             }
         }
         if (mode == 5) revert GatewayTestRouter_FailureWithArgument(failureArgument);
+        if (mode == 6) {
+            assembly ("memory-safe") {
+                revert(0, 0)
+            }
+        }
+        if (mode == 7 && gasleft() < 6_000_000) {
+            assembly ("memory-safe") {
+                invalid()
+            }
+        }
     }
 }
 
@@ -381,6 +427,7 @@ contract RouterTerminalGatewayFailureTest is Test {
 
     bytes32 internal constant _ID = bytes32(uint256(1));
 
+    GatewayTestDirectory internal directory;
     JBRouterTerminalGateway internal gateway;
     JBRouterTerminalRegistry internal registry;
     GatewayTestRouter internal router;
@@ -388,11 +435,26 @@ contract RouterTerminalGatewayFailureTest is Test {
     GatewayTestToken internal token;
 
     function setUp() public {
+        directory = new GatewayTestDirectory();
         router = new GatewayTestRouter();
-        gateway = new JBRouterTerminalGateway({router: IJBRouterTerminal(address(router))});
+        gateway = new JBRouterTerminalGateway({
+            directory: IJBDirectory(address(directory)), router: IJBRouterTerminal(address(router))
+        });
         registry = _registryFor(gateway);
         sourceTerminal = new GatewayTestSourceTerminal();
         token = new GatewayTestToken();
+
+        directory.setIsTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, terminal: IJBTerminal(address(sourceTerminal)), flag: true
+        });
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(sourceTerminal))
+        });
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID,
+            token: JBConstants.NATIVE_TOKEN,
+            terminal: IJBTerminal(address(sourceTerminal))
+        });
 
         token.mint(address(sourceTerminal), _AMOUNT);
         vm.deal(address(sourceTerminal), _AMOUNT);
@@ -512,6 +574,28 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallFailureOf(_ID).count, 2, "the new matching error can start a fresh streak");
     }
 
+    function test_dirtyERC165ResponseCannotRevertTerminalClassification() public {
+        GatewayDirtyERC165Payer payer = new GatewayDirtyERC165Payer();
+        token.mint({account: address(payer), amount: _AMOUNT});
+
+        vm.startPrank(address(payer));
+        token.approve({spender: address(gateway), value: _AMOUNT});
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(payer),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+        vm.stopPrank();
+
+        assertEq(gateway.pendingCallCount(), 0, "malformed ERC-165 data must not qualify for retention");
+        assertEq(token.balanceOf(address(payer)), _AMOUNT, "synchronous revert must restore the payer's input");
+    }
+
     function test_dynamicErrorArgumentsDoNotResetMatchingFailureStreak() public {
         router.setMode(5);
         router.setFailureArgument(1);
@@ -528,6 +612,25 @@ contract RouterTerminalGatewayFailureTest is Test {
         JBPendingRouterTerminalCallFailure memory second = gateway.pendingCallFailureOf(_ID);
         assertEq(second.count, 2, "arguments from the same custom error must not reset qualification");
         assertEq(second.errorHash, first.errorHash, "the failure class should encode only the selector");
+    }
+
+    function test_expandableRetryGasSettlesRouteAboveDefaultBudget() public {
+        _queueFee(address(token));
+        router.setMode(7);
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_GasExhausted.selector);
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 0, "gas exhaustion must not qualify as a route failure");
+        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "gas exhaustion must preserve custody");
+
+        uint256 beneficiaryTokenCount = gateway.processPendingCallWithGas({
+            id: _ID, gasLimit: 7_000_000, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+
+        assertEq(beneficiaryTokenCount, _AMOUNT, "expanded retry should settle the healthy route");
+        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "settled retry must clear pending state");
+        assertEq(token.balanceOf(address(gateway)), 0, "settled retry must consume custody");
     }
 
     function test_failedDirectAddToBalanceRevertsSynchronously() public {
@@ -651,12 +754,54 @@ contract RouterTerminalGatewayFailureTest is Test {
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         sourceTerminal.setRejectRefund(true);
 
-        vm.expectRevert(GatewayTestSourceTerminal.GatewayTestSourceTerminal_RefundRejected.selector);
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RefundFailed.selector);
         gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 3, "failed refund must preserve qualification");
         assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "failed refund must restore pending state");
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "failed refund must preserve custody");
+    }
+
+    function test_finalRefundFallsBackToCurrentPrimaryTerminal() public {
+        _queueFee(address(token));
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+
+        GatewayTestSourceTerminal primaryTerminal = new GatewayTestSourceTerminal();
+        sourceTerminal.setRejectRefund(true);
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(primaryTerminal))
+        });
+
+        (bool wasRefunded,) =
+            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertTrue(wasRefunded, "current primary terminal should accept the autonomous fallback");
+        assertEq(primaryTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
+        assertEq(token.balanceOf(address(gateway)), 0, "successful fallback must clear custody");
+    }
+
+    function test_finalRefundUsesCurrentPrimaryWhenOriginalTerminalWasRemoved() public {
+        _queueFee(address(token));
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+
+        GatewayTestSourceTerminal primaryTerminal = new GatewayTestSourceTerminal();
+        directory.setIsTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, terminal: IJBTerminal(address(sourceTerminal)), flag: false
+        });
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(primaryTerminal))
+        });
+
+        (bool wasRefunded,) =
+            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertTrue(wasRefunded, "removed source terminal should be replaced by the current primary");
+        assertEq(
+            sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), 0, "removed terminal must not be credited"
+        );
+        assertEq(primaryTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
     }
 
     function test_finalSuccessfulAttemptSettlesWithoutRefund() public {
@@ -695,8 +840,8 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0, "gateway has no retained input to represent");
     }
 
-    function test_matchingEmptyErrorsCanQualifyAndRefund() public {
-        router.setMode(3);
+    function test_matchingCheapEmptyErrorsCanQualifyAndRefund() public {
+        router.setMode(6);
         _queueFee(address(token));
         _qualifyWithMatchingFailures();
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
@@ -704,8 +849,19 @@ contract RouterTerminalGatewayFailureTest is Test {
         (bool wasRefunded,) =
             gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
 
-        assertTrue(wasRefunded, "matching invalid/OOG-shaped failures should qualify");
+        assertTrue(wasRefunded, "matching explicit empty reverts should qualify");
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
+    }
+
+    function test_matchingGasExhaustionCannotAdvanceQualification() public {
+        router.setMode(3);
+        _queueFee(address(token));
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_GasExhausted.selector);
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 0, "invalid/OOG-shaped failure must not qualify");
+        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "unqualified failure must preserve pending custody");
     }
 
     function test_multiplePendingCallsKeepCustodySeparated() public {
@@ -950,13 +1106,22 @@ contract RouterTerminalGatewayBaseForkTest is Test {
 
     function _installGateway() internal returns (JBRouterTerminalGateway gateway) {
         JBRouterTerminalRegistry registry = JBRouterTerminalRegistry(_REGISTRY);
-        gateway = new JBRouterTerminalGateway({router: IJBRouterTerminal(address(registry.terminalOf(1)))});
+        IJBRouterTerminal router = IJBRouterTerminal(address(registry.terminalOf(1)));
+        gateway = new JBRouterTerminalGateway({
+            directory: IGatewayDirectoryProvider(address(router)).DIRECTORY(), router: router
+        });
 
-        vm.prank(registry.owner());
-        registry.allowTerminal(gateway);
+        // Match deployment: changing the default does not move project 1, then the migration list does so explicitly.
+        vm.startPrank(registry.owner());
+        registry.setDefaultTerminal(gateway);
+        uint256[] memory projectIds = new uint256[](1);
+        projectIds[0] = 1;
+        RouterTerminalMigrationLib.migrateProjects({
+            registry: registry, terminal: gateway, projectCount: registry.PROJECTS().count(), projectIds: projectIds
+        });
+        vm.stopPrank();
 
-        vm.prank(registry.PROJECTS().ownerOf(1));
-        registry.setTerminalFor({projectId: 1, terminal: gateway});
+        assertEq(address(registry.terminalOf(1)), address(gateway), "deployment migration must repoint fee project");
     }
 
     function _replayReportedPayout(uint256 gasLimit) internal returns (bool success) {

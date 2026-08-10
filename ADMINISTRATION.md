@@ -43,7 +43,7 @@
 - `lockTerminalFor(...)` is irreversible
 - constructor dependencies on the router are immutable, and the chain-specific dependencies wired in via the one-shot `setChainSpecificConstants` setter are write-once (re-call reverts `JBRouterTerminal_AlreadyConfigured`)
 - the current default terminal must move before the old default can be disallowed
-- a Gateway's downstream `ROUTER`, qualified gas, failure count, and retry delay cannot be changed after deployment
+- a Gateway's downstream `ROUTER`, minimum qualified gas, failure count, and retry delay cannot be changed after deployment; retry callers may supply more than the minimum
 
 ## Operational notes
 
