@@ -2,7 +2,7 @@
 
 Scope: four contracts in this package — `JBRouterTerminal` (universal-token route executor), `JBRouterTerminalGateway` (failed-route escrow and autonomous recovery), `JBRouterTerminalRegistry` (per-project terminal selection with cohort-stable defaults), and `JBPayRouteResolver` (preview-only route ranking helper). Package: `@bananapus/router-terminal-v6`.
 
-Trust model in one sentence: the Router is a **stateless routing surface**, while the Registry-selected Gateway takes custody before calling it atomically and may retain only terminal-originated inputs represented by pending records — destination `minReturnedTokens` remains authoritative, Router-frame failure rolls every swap back, matching qualified error selectors gate autonomous refunds, and final project accounting remains in `nana-core-v6`.
+Trust model in one sentence: the Router is a **stateless routing surface**, while the Registry-selected Gateway takes custody before calling it atomically and may retain only shape-qualified inputs represented by pending records — destination `minReturnedTokens` remains authoritative, Router-frame failure rolls every swap back, matching qualified error selectors gate autonomous refunds, and final project accounting remains in `nana-core-v6`.
 
 This file documents invariants enforced by the **runtime contracts in this repo**. The destination-terminal slippage guarantee, fee semantics, and ruleset state machine all live in `nana-core-v6/INVARIANTS.md`. Cashout-loop economic safety against revenue-recursion attacks ultimately depends on the bonding-curve guarantees documented at `../INVARIANTS.md` Section A.2.
 
@@ -56,8 +56,9 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 
 ### A.7 Failed-call custody and autonomous recovery
 
-- `JBRouterTerminalGateway` takes custody before its low-level call to immutable `ROUTER`. A failed call, including a swap or downstream OOG, reverts the entire Router frame; eligible source-terminal calls retain the original input while ordinary calls revert synchronously.
-- Failed calls become `pendingCallOf(id)` only when a verified source-project terminal supplies the raw source project ID. Ordinary callers and non-zero-minimum `pay` failures revert synchronously.
+- `JBRouterTerminalGateway` takes custody before its low-level call to immutable `ROUTER`. A failed call, including a swap or downstream OOG, reverts the entire Router frame; calls qualified for source-project refund retain the original input while ordinary calls revert synchronously.
+- Failed calls become `pendingCallOf(id)` only when the raw source project ID is nonzero and the resolved `refundTo` contract self-asserts `IJBTerminal` support through the bounded ERC-165 probe. This is a forgeable shape check, not terminal authentication. A caller which satisfies the shape can escrow only the input it funds, and pending liabilities remain isolated by token. Ordinary callers and non-zero-minimum `pay` failures revert synchronously.
+- Current-core propagation relies on `JBMultiTerminal` not implementing `IJBPayerTracker.originalPayer()`: the Registry therefore records the multi-terminal itself and exposes it to the Gateway. `test_realCoreMultiTerminalPreservesSourceTerminalRetention` deploys the real core implementation, pins that interface assumption, and exercises the full Registry-to-Gateway inference so a future core change fails CI instead of silently disabling retention.
 - `processPendingCall` is permissionless. Each counted attempt forwards exactly 5,000,000 gas, must be separated by one day, and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one.
 - After three matching selectors and another day, `finalizePendingCall` makes the same fixed-gas attempt. Success settles; a changed selector resets; the same selector refunds the predetermined source project's terminal.
 - `_acceptFundsFor` uses the ecosystem's transient intake guard so a callback-capable token cannot nest another transfer inside an in-flight balance-delta measurement.
@@ -247,7 +248,7 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 
 Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPayerTracker`, and `IJBRouterTerminal` without changing the Registry ABI or storage.
 
-- `pay` and `addToBalanceOf` accept the original input and call immutable `ROUTER` with a 750,000-gas failure reserve. Failed terminal-originated calls queue; ordinary caller failures revert and successful calls settle synchronously.
+- `pay` and `addToBalanceOf` accept the original input and call immutable `ROUTER` with a 750,000-gas failure reserve. Shape-qualified failed calls queue; ordinary caller failures revert and successful calls settle synchronously.
 - `processPendingCall` retries with the original memo/metadata and a fixed 5,000,000-gas Router budget. It deletes pending state before interaction and restores it on caught failure.
 - `finalizePendingCall` requires three matching error selectors and a final matching attempt before refund. The source-terminal refund calls `addToBalanceOf(sourceProjectId, originalToken, originalAmount, false, "", "")`; pending calls never degrade into raw transfers to terminal addresses.
 - `terminalOf` returns immutable `ROUTER`, allowing forwarding-cycle checks to see through the Gateway.

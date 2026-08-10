@@ -138,7 +138,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Empty implementation because accounting contexts are delegated to `ROUTER`.
     function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
 
-    /// @notice Route an add-to-balance call, retaining failed input only for a verified source-project terminal.
+    /// @notice Route an add-to-balance call, retaining failed input only for a shape-qualified project refund.
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -172,7 +172,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         (bool success, bytes32 errorHash,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
-        // Ordinary callers retain synchronous failure semantics; only source-project terminals enter escrow.
+        // Ordinary callers retain synchronous failure semantics; only shape-qualified project refunds enter escrow.
         if (!call.refundToProject) revert JBRouterTerminalGateway_RouteFailed(errorHash);
         _queue({call: call, errorHash: errorHash});
     }
@@ -226,7 +226,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         return 0;
     }
 
-    /// @notice Route a payment, retaining failed zero-minimum input only for a verified source-project terminal.
+    /// @notice Route a payment, retaining failed zero-minimum input only for a shape-qualified project refund.
     function pay(
         uint256 projectId,
         address token,
@@ -482,7 +482,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
         if (gasLimit == 0) {
             uint256 available = gasleft();
-            // A zero-gas attempt keeps an underfunded source-terminal call inside the custody boundary; ordinary
+            // A zero-gas attempt keeps an underfunded retention-qualified call inside the custody boundary; ordinary
             // callers still revert below instead of entering escrow.
             if (available > _FAILURE_GAS_RESERVE) gasLimit = available - _FAILURE_GAS_RESERVE;
         } else {
@@ -592,7 +592,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
 
-    /// @notice Test whether an address identifies itself as a Juicebox terminal.
+    /// @notice Test whether an address identifies itself as a Juicebox terminal through ERC-165.
+    /// @dev This is a shape check, not authentication. Any contract can self-assert interface support.
     function _isTerminal(address account) internal view returns (bool) {
         if (account.code.length == 0) return false;
         (bool success, bytes memory data) =

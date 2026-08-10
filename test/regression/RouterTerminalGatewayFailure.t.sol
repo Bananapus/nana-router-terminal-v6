@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBSplits} from "@bananapus/core-v6/src/interfaces/IJBSplits.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+import {IJBTerminalStore} from "@bananapus/core-v6/src/interfaces/IJBTerminalStore.sol";
+import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {JBMultiTerminal} from "@bananapus/core-v6/src/JBMultiTerminal.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {JBRouterTerminalGateway} from "../../src/JBRouterTerminalGateway.sol";
 import {JBRouterTerminalRegistry} from "../../src/JBRouterTerminalRegistry.sol";
@@ -356,6 +362,15 @@ contract GatewayTestSourceTerminal {
     function _beforeCall(IJBTerminal terminal, address token, uint256 amount) internal returns (uint256 value) {
         if (token == JBConstants.NATIVE_TOKEN) return amount;
         IERC20(token).approve(address(terminal), amount);
+    }
+}
+
+/// @notice Minimal store shape used to deploy the current core terminal in a payer-propagation regression.
+contract GatewayTestTerminalStore {
+    /// @notice Return no directory because the regression only exercises the terminal's payer and interface shape.
+    /// @return directory The empty directory address.
+    function DIRECTORY() external pure returns (address directory) {
+        return address(0);
     }
 }
 
@@ -842,6 +857,49 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "custody must remain intact");
     }
 
+    /// @notice Pins the current core terminal's payer shape and the Registry-to-Gateway propagation it relies on.
+    function test_realCoreMultiTerminalPreservesSourceTerminalRetention() public {
+        JBMultiTerminal multiTerminal = new JBMultiTerminal({
+            feelessAddresses: IJBFeelessAddresses(address(0)),
+            permissions: IJBPermissions(address(0)),
+            projects: IJBProjects(address(0)),
+            splits: IJBSplits(address(0)),
+            store: IJBTerminalStore(address(new GatewayTestTerminalStore())),
+            tokens: IJBTokens(address(0)),
+            permit2: IPermit2(address(0)),
+            trustedForwarder: address(0)
+        });
+
+        (bool payerTrackerSuccess, bytes memory payerTrackerData) =
+            address(multiTerminal).staticcall(abi.encodeCall(IJBPayerTracker.originalPayer, ()));
+        assertFalse(
+            payerTrackerSuccess && payerTrackerData.length >= 32,
+            "core terminal payer tracking changed; review retained-call propagation"
+        );
+        assertTrue(multiTerminal.supportsInterface(type(IJBTerminal).interfaceId));
+
+        token.mint({account: address(multiTerminal), amount: _AMOUNT});
+        vm.startPrank(address(multiTerminal));
+        token.approve({spender: address(registry), value: _AMOUNT});
+        uint256 beneficiaryTokenCount = registry.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+        vm.stopPrank();
+
+        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
+        assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
+        assertEq(call.refundTo, address(multiTerminal), "registry must preserve the source terminal as refund target");
+        assertTrue(call.refundToProject, "current core terminal shape should qualify for project refund");
+        assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
+        assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
+    }
+
     /// @notice Reproduces the deployed fail-open boundary: the unchanged registry bubbles a router failure, so the
     /// source terminal forgives the fee while retaining its input token.
     function test_reproducesFeeForgivenessWhenRouterReverts() public {
@@ -867,7 +925,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallCount(), 1, "failed fee should be retained as pending");
         assertEq(call.amount, _AMOUNT);
         assertEq(call.refundTo, address(sourceTerminal), "registry should propagate the source terminal");
-        assertTrue(call.refundToProject, "terminal-originated fee should refund into project accounting");
+        assertTrue(call.refundToProject, "terminal-shaped fee payer should qualify for project accounting refund");
         assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "gateway should retain the original input token");
         assertEq(token.balanceOf(address(registry)), 0, "unchanged registry must remain stateless");

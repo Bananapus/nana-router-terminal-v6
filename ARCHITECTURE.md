@@ -8,7 +8,7 @@ The router is intentionally heuristic. It does not search every possible route f
 
 ## System overview
 
-`JBRouterTerminal` is a terminal-shaped route executor, not an accounting source of truth. `JBRouterTerminalGateway` is the fail-closed implementation selected by `JBRouterTerminalRegistry`: it owns the outer atomic boundary around a Router call and retains failed input only for verified source-project terminal calls. The registry remains a stable project-facing proxy and is unchanged by this mechanism. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
+`JBRouterTerminal` is a terminal-shaped route executor, not an accounting source of truth. `JBRouterTerminalGateway` is the fail-closed implementation selected by `JBRouterTerminalRegistry`: it owns the outer atomic boundary around a Router call and retains failed input only when source-project metadata and the resolved payer's self-asserted terminal shape qualify the call for project refund. The registry remains a stable project-facing proxy and is unchanged by this mechanism. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
 
 Final accounting still happens in the downstream terminal selected through `nana-core-v6`.
 
@@ -66,7 +66,7 @@ registry forwards original input to gateway
   -> gateway calls immutable router inside one fallible external-call boundary
   -> success: route settles synchronously
   -> ordinary caller failure: the call reverts synchronously
-  -> verified source-terminal failure: every inner transfer/swap rolls back and gateway retains the original input token
+  -> shape-qualified project-refund failure: every inner transfer/swap rolls back and gateway retains the original input token
   -> anyone may retry with the original memo and metadata and at least the qualified gas budget
   -> matching error selectors: advance at most once per day, regardless of encoded arguments
   -> changed selector: reset the streak to one and keep retrying
@@ -78,7 +78,7 @@ registry forwards original input to gateway
 
 ## Accounting model
 
-The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of failed terminal-originated calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic source-project refund; they are never reported as project surplus by the gateway.
+The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of shape-qualified failed calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic source-project refund; they are never reported as project surplus by the gateway. Shape qualification is not authentication: the resolved payer merely self-asserts `IJBTerminal` support through ERC-165.
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 
