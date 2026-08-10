@@ -17,6 +17,8 @@ import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
 import {IJBRouterTerminalGateway} from "./interfaces/IJBRouterTerminalGateway.sol";
 
+import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
+
 import {JBPendingRouterTerminalCall} from "./structs/JBPendingRouterTerminalCall.sol";
 import {JBPendingRouterTerminalCallFailure} from "./structs/JBPendingRouterTerminalCallFailure.sol";
 import {PoolInfo} from "./structs/PoolInfo.sol";
@@ -33,9 +35,6 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
     /// @notice Thrown when retry calldata does not match the data retained with a pending call.
     error JBRouterTerminalGateway_CallDataMismatch(bytes32 expectedHash, bytes32 actualHash);
-
-    /// @notice Thrown when a qualified attempt consumes its entire forwarded budget without returning an error.
-    error JBRouterTerminalGateway_GasExhausted(uint256 gasLimit);
 
     /// @notice Thrown when a qualified attempt was not supplied enough gas.
     error JBRouterTerminalGateway_InsufficientRetryGas(uint256 available, uint256 required);
@@ -55,13 +54,13 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Thrown when ordinary processing is attempted after a call has qualified for finalization.
     error JBRouterTerminalGateway_PendingCallRequiresFinalization(bytes32 id);
 
-    /// @notice Thrown when neither the original nor current primary terminal accepts a project refund.
+    /// @notice Thrown when no non-circular registered source-project terminal accepts a refund.
     error JBRouterTerminalGateway_RefundFailed(address originalTerminal, address primaryTerminal);
 
     /// @notice Thrown when a callback-capable token re-enters the inbound balance-delta measurement.
     error JBRouterTerminalGateway_ReentrantTokenTransfer(address token);
 
-    /// @notice Thrown when a caller-specified qualified gas limit is below the protocol minimum.
+    /// @notice Thrown when a caller-specified gas limit is below the budget required by the failure state.
     error JBRouterTerminalGateway_RetryGasLimitTooLow(uint256 gasLimit, uint256 minimum);
 
     /// @notice Thrown when a call which is not eligible for retention cannot be settled synchronously.
@@ -77,7 +76,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice The number of matching, time-separated qualified failures required before finalization.
     uint256 public constant override FINALIZATION_FAILURE_COUNT = 3;
 
-    /// @notice The default and minimum gas forwarded by a qualified retry or final attempt.
+    /// @notice The base and minimum gas forwarded by a qualified retry or final attempt.
     uint256 public constant override QUALIFIED_CALL_GAS = 5_000_000;
 
     /// @notice The minimum delay between qualified failures and before finalization.
@@ -89,6 +88,9 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
     /// @notice Gas retained around an attempted route for cleanup and durable failure accounting.
     uint256 internal constant _FAILURE_GAS_RESERVE = 750_000;
+
+    /// @notice The stable fingerprint used when an attempt consumes its complete forwarded gas budget.
+    bytes32 internal constant _GAS_EXHAUSTED_ERROR_HASH = keccak256("JBRouterTerminalGateway: gas exhausted");
 
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
@@ -187,7 +189,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         _queue({call: call, errorHash: errorHash});
     }
 
-    /// @notice Make one final qualified attempt, refunding only after the same error selector is reproduced.
+    /// @notice Make one final qualified attempt, refunding only after the same failure class is reproduced.
     function finalizePendingCall(
         bytes32 id,
         string calldata memo,
@@ -197,7 +199,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         override
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
-        return _finalizePendingCall({id: id, gasLimit: QUALIFIED_CALL_GAS, memo: memo, metadata: metadata});
+        return _finalizePendingCall({id: id, gasLimit: 0, memo: memo, metadata: metadata});
     }
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
@@ -273,7 +275,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        return _processPendingCall({id: id, gasLimit: QUALIFIED_CALL_GAS, memo: memo, metadata: metadata});
+        return _processPendingCall({id: id, gasLimit: 0, memo: memo, metadata: metadata});
     }
 
     /// @notice Make a permissionless attempt with an expanded qualified gas budget.
@@ -507,6 +509,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             revert JBRouterTerminalGateway_PendingCallNotFinalizable({id: id, failureCount: failure.count});
         }
         _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
+        gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
         delete _pendingCallOf[id];
 
@@ -521,8 +524,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             return (false, count);
         }
 
-        // A budget-exhausted attempt proves only that this retry limit was inadequate, not that the route is broken.
-        if (gasExhausted) revert JBRouterTerminalGateway_GasExhausted(gasLimit);
+        // Gas exhaustion is its own stable failure class, so each matching retry must use a larger budget.
+        if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
         if (errorHash != failure.errorHash) {
             _pendingCallOf[id] = call;
@@ -554,6 +557,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             revert JBRouterTerminalGateway_PendingCallRequiresFinalization(id);
         }
         if (failure.count != 0) _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
+        gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
         delete _pendingCallOf[id];
 
@@ -568,8 +572,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             return count;
         }
 
-        // Do not let a caller turn an inadequate retry budget into evidence that the downstream route is broken.
-        if (gasExhausted) revert JBRouterTerminalGateway_GasExhausted(gasLimit);
+        // Gas exhaustion advances only after the failure state has enforced the next larger budget.
+        if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
         _pendingCallOf[id] = call;
         _recordFailure({id: id, errorHash: errorHash, previous: failure});
@@ -583,7 +587,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         emit JBRouterTerminalGateway_QueuePendingCall({id: id, call: call, errorHash: errorHash, caller: msg.sender});
     }
 
-    /// @notice Record a qualified failure, resetting the streak whenever the error selector changes.
+    /// @notice Record a qualified failure, resetting the streak whenever the failure class changes.
     function _recordFailure(
         bytes32 id,
         bytes32 errorHash,
@@ -628,6 +632,14 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             return;
         }
 
+        // Search the remaining registered terminals so a circular or stale primary cannot permanently trap custody.
+        IJBTerminal[] memory terminals = DIRECTORY.terminalsOf(call.sourceProjectId);
+        for (uint256 i; i < terminals.length; i++) {
+            IJBTerminal terminal = terminals[i];
+            if (terminal == originalTerminal || terminal == primaryTerminal) continue;
+            if (_tryRefund({call: call, terminal: terminal})) return;
+        }
+
         revert JBRouterTerminalGateway_RefundFailed({
             originalTerminal: address(originalTerminal), primaryTerminal: address(primaryTerminal)
         });
@@ -635,6 +647,15 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
     /// @notice Attempt a project-accounting refund without letting one terminal block an alternate terminal.
     function _tryRefund(JBPendingRouterTerminalCall memory call, IJBTerminal terminal) internal returns (bool success) {
+        if (
+            address(terminal) == address(0)
+                || JBForwardingCheck.isCircularTerminal({
+                    target: address(this), projectId: call.sourceProjectId, terminal: terminal
+                })
+        ) {
+            return false;
+        }
+
         uint256 value;
         if (call.token == JBConstants.NATIVE_TOKEN) {
             value = call.amount;
@@ -689,6 +710,29 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             errorHash := keccak256(ptr, copySize)
             mstore(0x40, add(ptr, 0x20))
         }
+    }
+
+    /// @notice Resolve the minimum escalating gas budget for a qualified attempt.
+    /// @dev Consecutive gas exhaustion requires 5M, 10M, 15M, then 20M gas. Other failures retain the 5M base.
+    /// @param failure The pending call's current matching failure state.
+    /// @param requestedGasLimit The explicit caller-selected budget, or zero to select the required minimum.
+    /// @return gasLimit The validated gas budget to forward.
+    function _qualifiedGasLimit(
+        JBPendingRouterTerminalCallFailure memory failure,
+        uint256 requestedGasLimit
+    )
+        internal
+        pure
+        returns (uint256 gasLimit)
+    {
+        uint256 minimum = QUALIFIED_CALL_GAS;
+        if (failure.errorHash == _GAS_EXHAUSTED_ERROR_HASH) minimum *= uint256(failure.count) + 1;
+
+        if (requestedGasLimit == 0) return minimum;
+        if (requestedGasLimit < minimum) {
+            revert JBRouterTerminalGateway_RetryGasLimitTooLow({gasLimit: requestedGasLimit, minimum: minimum});
+        }
+        return requestedGasLimit;
     }
 
     //*********************************************************************//

@@ -43,7 +43,7 @@
 - `lockTerminalFor(...)` is irreversible
 - constructor dependencies on the router are immutable, and the chain-specific dependencies wired in via the one-shot `setChainSpecificConstants` setter are write-once (re-call reverts `JBRouterTerminal_AlreadyConfigured`)
 - the current default terminal must move before the old default can be disallowed
-- a Gateway's downstream `ROUTER`, minimum qualified gas, failure count, and retry delay cannot be changed after deployment; retry callers may supply more than the minimum
+- a Gateway's downstream `ROUTER`, base qualified gas, escalation schedule, failure count, and retry delay cannot be changed after deployment; retry callers may supply more than the current minimum
 
 ## Operational notes
 
@@ -51,6 +51,7 @@
 - the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that already exists at that moment (including the canonical fee project, ID 1) plus every later project with no override; pick it carefully because it propagates to all early projects
 - subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
 - moving an existing fee project or payout recipient to a Gateway requires an explicit `setTerminalFor`; the Registry owner must first allowlist it, but cannot perform the project-owner step
+- deployment attempts configured migrations without aborting on unauthorized projects; each `RouterTerminalMigrationFailed` project must be migrated later by its owner or operator through `script/MigrateProject.s.sol`
 - still review fall-through resolution before changing the default — `defaultTerminalFor(projectId)` returns the resolved default for any project, and `defaultTerminalHistoryAt(index)` exposes each captured snapshot
 - encourage projects to lock only after validating the resolved terminal and routing behavior
 - distinguish configuration risk from quote-quality risk

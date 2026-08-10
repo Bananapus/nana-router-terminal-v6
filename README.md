@@ -77,8 +77,9 @@ The shortest useful reading order is:
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 - shape-qualified failed fees and payouts through the gateway become asynchronous pending calls; ordinary caller failures remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
-- keepers should retry unusually expensive pending routes through `processPendingCallWithGas` instead of treating a 5M gas exhaustion as a sink failure
-- deployment migrates project 1 by default; list other issued cohorts in `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS`
+- gas-exhausted pending routes automatically retry with 5M, 10M, 15M, then 20M gas; `processPendingCallWithGas` may exceed, but cannot undercut, the current step
+- deployment attempts project 1 plus `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS` without aborting on unauthorized cohorts; each failure emits `RouterTerminalMigrationFailed`
+- an authorized project owner or operator can finish one failed cohort with `script/MigrateProject.s.sol`
 
 ## Where state lives
 
@@ -116,6 +117,7 @@ Useful scripts:
 
 - `npm run deploy:mainnets`
 - `npm run deploy:testnets`
+- `forge script script/MigrateProject.s.sol:MigrateProjectScript --rpc-url <RPC_URL> --broadcast` after setting `NANA_ROUTER_TERMINAL_REGISTRY`, `NANA_ROUTER_TERMINAL_GATEWAY`, and `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_ID`
 
 ## Deployment notes
 
@@ -135,6 +137,7 @@ test/
   unit, fork, registry, review, invariant, and regression coverage
 script/
   Deploy.s.sol
+  MigrateProject.s.sol
   helpers/
 ```
 
@@ -147,7 +150,7 @@ script/
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 - the gateway retains original inputs only when the resolved payer self-identifies as a terminal and metadata supplies a nonzero raw source project ID; this is a shape check, not authentication, and ordinary callers or non-zero-minimum payments still revert synchronously
-- three failures with the same error selector and five-million-gas budget, separated by one day, qualify a pending call for a final attempt after another day; encoded error arguments do not reset the streak
+- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose required budgets escalate from 5M through 20M
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths

@@ -141,11 +141,12 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Main Flow**
 1. Anyone calls `processPendingCall` with the pending ID and original data.
-2. A successful attempt settles immediately. A failed, five-million-gas attempt records its error selector without encoded arguments.
+2. A successful attempt settles immediately. A failed attempt records its selector-level class without encoded arguments.
 3. Wait at least one day between qualified failures.
 4. If the selector changes, the count resets to one and retries continue; changed arguments for the same selector do not reset.
 5. After three matching failures and one more day, anyone calls `finalizePendingCall`.
-6. The final attempt settles if possible, resets on a changed selector, or atomically refunds the fixed source project after the same selector.
+6. Complete-budget gas exhaustion automatically raises the required budget from 5M to 10M to 15M, with 20M required for the final attempt.
+7. The final attempt settles if possible, resets on a changed class, or atomically refunds the fixed source project after the same class.
 
 **Failure Modes**
 - underfunded retries revert without advancing qualification

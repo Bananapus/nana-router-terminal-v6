@@ -82,6 +82,7 @@ contract GatewayDirtyERC165Payer {
 contract GatewayTestDirectory {
     mapping(uint256 projectId => mapping(address terminal => bool)) public isTerminal;
     mapping(uint256 projectId => mapping(address token => IJBTerminal terminal)) public primaryTerminal;
+    mapping(uint256 projectId => IJBTerminal[] terminals) internal _terminalsOf;
 
     function isTerminalOf(uint256 projectId, IJBTerminal terminal) external view returns (bool) {
         return isTerminal[projectId][address(terminal)];
@@ -97,6 +98,14 @@ contract GatewayTestDirectory {
 
     function setPrimaryTerminalOf(uint256 projectId, address token, IJBTerminal terminal) external {
         primaryTerminal[projectId][token] = terminal;
+    }
+
+    function setTerminalsOf(uint256 projectId, IJBTerminal[] calldata terminals) external {
+        _terminalsOf[projectId] = terminals;
+    }
+
+    function terminalsOf(uint256 projectId) external view returns (IJBTerminal[] memory) {
+        return _terminalsOf[projectId];
     }
 }
 
@@ -618,19 +627,33 @@ contract RouterTerminalGatewayFailureTest is Test {
         _queueFee(address(token));
         router.setMode(7);
 
-        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_GasExhausted.selector);
         gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
 
-        assertEq(gateway.pendingCallFailureOf(_ID).count, 0, "gas exhaustion must not qualify as a route failure");
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 1, "the exhausted base budget should start escalation");
         assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "gas exhaustion must preserve custody");
 
-        uint256 beneficiaryTokenCount = gateway.processPendingCallWithGas({
-            id: _ID, gasLimit: 7_000_000, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
-        });
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        uint256 beneficiaryTokenCount =
+            gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
 
-        assertEq(beneficiaryTokenCount, _AMOUNT, "expanded retry should settle the healthy route");
+        assertEq(beneficiaryTokenCount, _AMOUNT, "the automatically expanded retry should settle the healthy route");
         assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "settled retry must clear pending state");
         assertEq(token.balanceOf(address(gateway)), 0, "settled retry must consume custody");
+    }
+
+    function test_gasExhaustionRequiresEscalatedCustomBudget() public {
+        router.setMode(3);
+        _queueFee(address(token));
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        uint256 baseGasLimit = gateway.QUALIFIED_CALL_GAS();
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RetryGasLimitTooLow.selector);
+        gateway.processPendingCallWithGas({
+            id: _ID, gasLimit: baseGasLimit, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 1, "an undersized custom retry must not advance custody");
     }
 
     function test_failedDirectAddToBalanceRevertsSynchronously() public {
@@ -781,6 +804,32 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0, "successful fallback must clear custody");
     }
 
+    function test_finalRefundSkipsCircularPrimaryAndUsesRegisteredAlternative() public {
+        _queueFee(address(token));
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+
+        GatewayTestSourceTerminal alternativeTerminal = new GatewayTestSourceTerminal();
+        directory.setIsTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, terminal: IJBTerminal(address(sourceTerminal)), flag: false
+        });
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(registry))
+        });
+
+        IJBTerminal[] memory terminals = new IJBTerminal[](2);
+        terminals[0] = IJBTerminal(address(registry));
+        terminals[1] = IJBTerminal(address(alternativeTerminal));
+        directory.setTerminalsOf({projectId: _SOURCE_PROJECT_ID, terminals: terminals});
+
+        (bool wasRefunded,) =
+            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertTrue(wasRefunded, "the registered non-circular terminal should receive the refund");
+        assertEq(alternativeTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
+        assertEq(token.balanceOf(address(gateway)), 0, "successful alternative refund must clear custody");
+    }
+
     function test_finalRefundUsesCurrentPrimaryWhenOriginalTerminalWasRemoved() public {
         _queueFee(address(token));
         _qualifyWithMatchingFailures();
@@ -853,15 +902,31 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
     }
 
-    function test_matchingGasExhaustionCannotAdvanceQualification() public {
+    function test_matchingGasExhaustionEscalatesAndEventuallyRefunds() public {
         router.setMode(3);
         _queueFee(address(token));
 
-        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_GasExhausted.selector);
         gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
+        assertEq(first.count, 1, "the first exhausted qualified budget should start the streak");
 
-        assertEq(gateway.pendingCallFailureOf(_ID).count, 0, "invalid/OOG-shaped failure must not qualify");
-        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "unqualified failure must preserve pending custody");
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        JBPendingRouterTerminalCallFailure memory second = gateway.pendingCallFailureOf(_ID);
+        assertEq(second.count, 2, "the second exhausted, larger budget should continue the streak");
+        assertEq(second.errorHash, first.errorHash, "gas exhaustion must have one stable failure fingerprint");
+
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 3, "the third larger budget should qualify finalization");
+
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        (bool wasRefunded,) =
+            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertTrue(wasRefunded, "four escalating exhausted budgets should prove the sink and release custody");
+        assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
+        assertEq(token.balanceOf(address(gateway)), 0, "final refund must clear retained custody");
     }
 
     function test_multiplePendingCallsKeepCustodySeparated() public {

@@ -59,8 +59,8 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 - `JBRouterTerminalGateway` takes custody before its low-level call to immutable `ROUTER`. A failed call, including a swap or downstream OOG, reverts the entire Router frame; calls qualified for source-project refund retain the original input while ordinary calls revert synchronously.
 - Failed calls become `pendingCallOf(id)` only when the raw source project ID is nonzero and the resolved `refundTo` contract self-asserts `IJBTerminal` support through the bounded ERC-165 probe. This is a forgeable shape check, not terminal authentication. A caller which satisfies the shape can escrow only the input it funds, and pending liabilities remain isolated by token. Ordinary callers and non-zero-minimum `pay` failures revert synchronously.
 - Current-core propagation relies on `JBMultiTerminal` not implementing `IJBPayerTracker.originalPayer()`: the Registry therefore records the multi-terminal itself and exposes it to the Gateway. `test_realCoreMultiTerminalPreservesSourceTerminalRetention` deploys the real core implementation, pins that interface assumption, and exercises the full Registry-to-Gateway inference so a future core change fails CI instead of silently disabling retention.
-- `processPendingCall` is permissionless. Each counted attempt forwards at least 5,000,000 gas, must be separated by one day, and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one. A complete-budget empty failure is classified as gas exhaustion and cannot advance the streak; `processPendingCallWithGas` lets keepers supply a larger budget.
-- After three matching selectors and another day, `finalizePendingCall` makes another qualified attempt. Success settles; a changed selector resets; the same selector refunds the source project. The original terminal is preferred while it remains registered, then the current token-specific `JBDirectory.primaryTerminalOf` is tried automatically.
+- `processPendingCall` is permissionless. Each counted attempt must be separated by one day and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one. Complete-budget empty failures use one stable gas-exhaustion fingerprint and require 5M, 10M, then 15M gas across the qualifying attempts. `processPendingCallWithGas` may exceed, but cannot undercut, the current requirement.
+- After three matching failure classes and another day, `finalizePendingCall` makes another qualified attempt. Success settles; a changed class resets; the same class refunds the source project. A gas-exhausted final attempt requires 20M gas. Refund delivery prefers the still-registered original terminal, then the token-specific primary, then every other registered non-circular terminal.
 - `_acceptFundsFor` uses the ecosystem's transient intake guard so a callback-capable token cannot nest another transfer inside an in-flight balance-delta measurement.
 - Pending state is deleted before retry/refund interactions. A failed refund reverts the transaction, atomically restoring pending state, qualification, and custody.
 
@@ -249,8 +249,8 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPayerTracker`, and `IJBRouterTerminal` without changing the Registry ABI or storage.
 
 - `pay` and `addToBalanceOf` accept the original input and call immutable `ROUTER` with a 750,000-gas failure reserve. Shape-qualified failed calls queue; ordinary caller failures revert and successful calls settle synchronously.
-- `processPendingCall` retries with the original memo/metadata and a default 5,000,000-gas Router budget. `processPendingCallWithGas` permits a larger budget, while complete-budget empty failures never count toward qualification. Pending state is deleted before interaction and restored on failure.
-- `finalizePendingCall` requires three matching error selectors and a final matching attempt before refund. The project refund calls `addToBalanceOf(sourceProjectId, originalToken, originalAmount, false, "", "")` on the still-registered source terminal or the current token-specific primary terminal; pending calls never degrade into raw transfers to terminal addresses.
+- `processPendingCall` retries with the original memo/metadata and an automatically selected gas budget. The base is 5,000,000 gas; matching complete-budget exhaustion requires 10M and then 15M. `processPendingCallWithGas` permits a larger budget but cannot undercut the current minimum. Pending state is deleted before interaction and restored on failure.
+- `finalizePendingCall` requires three matching failure classes and a final matching attempt before refund. Gas-exhaustion finalization requires 20M. The project refund calls `addToBalanceOf(sourceProjectId, originalToken, originalAmount, false, "", "")` through the still-registered source terminal, current token-specific primary terminal, or another registered non-circular terminal; pending calls never degrade into raw transfers to terminal addresses.
 - `terminalOf` returns immutable `ROUTER`, allowing forwarding-cycle checks to see through the Gateway.
 - Accounting, preview, and pool-discovery views delegate to `ROUTER`; `currentSurplusOf` therefore remains zero even while failed-call liabilities are escrowed.
 
@@ -269,8 +269,8 @@ Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPayerTracker
 9. **Cashout-loop iteration bound + first-hop-only `minTokensReclaimed`.** The 20-hop ceiling forecloses on infinite recursion through adversarial project-token graphs; the user-supplied reclaim minimum is intentionally NOT carried across hops because token units change between hops.
 10. **Quote precedence: explicit metadata > V3 TWAP > V4 hook geomean > V4 spot (accepted-risk fallback).** When supplied, `pay` swap-quote skips on-chain quoting entirely and a token-mismatch reverts `JBRouterTerminal_QuoteTokenMismatch`. The V4 spot fallback is bounded by a fixed 15% haircut and is documented as accepted-risk for routine flows.
 11. **Failed Router work is atomic with respect to Gateway custody.** A caught Router failure cannot leave a completed swap behind; the original input remains in the Gateway.
-12. **Changed error selectors prevent autonomous refund.** Qualification and finalization compare selector-level fingerprints; changed encoded arguments do not reset, but a changed selector always resets the streak to one. Empty complete-budget failures do not qualify at all.
-13. **Refund ownership is fixed at queue time.** Permissionless callers can trigger attempts but cannot choose the payer, source project, token, amount, or call data. Terminal delivery follows the creditor project's registered source terminal or current token-specific primary terminal.
+12. **Changed failure classes prevent autonomous refund.** Qualification and finalization compare selector-level fingerprints; changed encoded arguments do not reset, but a changed selector always resets the streak to one. Complete-budget empty failures share a distinct fingerprint and advance only through the 5M/10M/15M/20M gas schedule.
+13. **Refund ownership is fixed at queue time.** Permissionless callers can trigger attempts but cannot choose the payer, source project, token, amount, or call data. Terminal delivery searches only the creditor project's registered non-circular accounting terminals.
 14. **Gateway refunds are ordinary project balance.** The public terminal refund call cannot recreate core's internal `feeFreeSurplusOf` credit, so refunded fees may be fee-liable on a later cash out.
 
 ---
@@ -332,11 +332,11 @@ Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPayerTracker
 
 ### `src/JBRouterTerminalGateway.sol`
 
-- Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`.
+- Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`, `_GAS_EXHAUSTED_ERROR_HASH`.
 - Immutable: `ROUTER`.
 - Stored: `pendingCallCount`, `_pendingCallOf`, `_pendingCallFailureOf`; transient: `_acceptingToken`, `originalPayer`.
 - Entry points: `addToBalanceOf`, `finalizePendingCall`, `pay`, `processPendingCall`.
-- Critical helpers: `_attempt`, `_boundedCall`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`.
+- Critical helpers: `_attempt`, `_boundedCall`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`.
 
 ### `src/JBPayRouteResolver.sol`
 

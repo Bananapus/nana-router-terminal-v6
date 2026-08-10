@@ -92,7 +92,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - recursive cashout behavior, preferred-token handling, and one-shot source overrides are tightly coupled
 - a refund to a source project deletes pending state before interaction and relies on transaction rollback to restore state and custody if the source terminal rejects it
 - the gateway closes only its inbound balance-delta window against reentrancy and restores nested Router allowances so legitimate downstream forwarding hooks remain composable
-- retry and final attempts forward exactly `QUALIFIED_CALL_GAS`; entrypoint attempts dynamically reserve `_FAILURE_GAS_RESERVE` for durable queueing
+- retry and final attempts forward at least `QUALIFIED_CALL_GAS`; matching gas exhaustion escalates the required budget from 5M through 20M, while entrypoint attempts dynamically reserve `_FAILURE_GAS_RESERVE` for durable queueing
 
 ## Safe change guide
 

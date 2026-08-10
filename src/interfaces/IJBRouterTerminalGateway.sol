@@ -32,8 +32,8 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Emitted when a qualified retry fails.
     /// @param id The pending call identifier.
-    /// @param errorHash The selector-level downstream error fingerprint.
-    /// @param count The consecutive qualified attempts with this error selector.
+    /// @param errorHash The selector-level or gas-exhaustion failure-class fingerprint.
+    /// @param count The consecutive qualified attempts with this failure class.
     /// @param nextAttemptAt The earliest timestamp of the next qualified attempt.
     /// @param caller The account which attempted the call.
     event JBRouterTerminalGateway_RecordTerminalCallFailure(
@@ -56,8 +56,8 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return count The required failure count.
     function FINALIZATION_FAILURE_COUNT() external view returns (uint256 count);
 
-    /// @notice The default and minimum gas forwarded by a qualified router attempt.
-    /// @return gasLimit The default and minimum qualified attempt gas limit.
+    /// @notice The base and minimum gas forwarded by a qualified router attempt.
+    /// @return gasLimit The base and minimum qualified attempt gas limit.
     function QUALIFIED_CALL_GAS() external view returns (uint256 gasLimit);
 
     /// @notice The minimum delay between qualified failures and before finalization.
@@ -82,7 +82,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return call The retained call.
     function pendingCallOf(bytes32 id) external view returns (JBPendingRouterTerminalCall memory call);
 
-    /// @notice Make one final qualified attempt, refunding only if its error selector matches the qualified streak.
+    /// @notice Make one final qualified attempt with the gas budget required by its failure state.
     /// @param id The pending call identifier.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
@@ -98,7 +98,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
     /// @param id The pending call identifier.
-    /// @param gasLimit The gas to forward, which must be at least `QUALIFIED_CALL_GAS`.
+    /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return wasRefunded Whether the retained input was refunded.
@@ -112,7 +112,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
         external
         returns (bool wasRefunded, uint256 beneficiaryTokenCount);
 
-    /// @notice Make a gas-qualified, permissionless attempt to process a retained call.
+    /// @notice Make a permissionless attempt with the gas budget required by its failure state.
     /// @param id The pending call identifier.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
@@ -127,7 +127,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Make a gas-qualified, permissionless attempt with an expanded gas budget.
     /// @param id The pending call identifier.
-    /// @param gasLimit The gas to forward, which must be at least `QUALIFIED_CALL_GAS`.
+    /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.

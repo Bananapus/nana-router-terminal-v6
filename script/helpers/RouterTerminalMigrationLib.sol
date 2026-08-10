@@ -7,13 +7,18 @@ import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalR
 
 /// @notice Migrates configured project cohorts to a selected router-terminal implementation.
 library RouterTerminalMigrationLib {
+    /// @notice Emitted when a project-specific migration cannot pass the registry's permission or lock checks.
+    /// @param projectId The project ID which remains on its existing terminal.
+    event RouterTerminalMigrationFailed(uint256 indexed projectId);
+
     /// @notice Point configured, existing projects at the selected registry implementation when needed.
     /// @dev Each project owner must own the registry call or authorize the deployment caller with
-    /// `SET_ROUTER_TERMINAL`. A locked or unauthorized project reverts instead of silently remaining vulnerable.
+    /// `SET_ROUTER_TERMINAL`. A locked or unauthorized project is reported without aborting unrelated deployment work.
     /// @param registry The registry whose project-specific terminal pointers are updated.
     /// @param terminal The selected terminal implementation.
     /// @param projectCount The current highest project ID.
     /// @param projectIds The project IDs which must resolve to `terminal` after migration.
+    /// @return failedCount The number of eligible projects which could not be migrated.
     function migrateProjects(
         IJBRouterTerminalRegistry registry,
         IJBTerminal terminal,
@@ -21,6 +26,7 @@ library RouterTerminalMigrationLib {
         uint256[] memory projectIds
     )
         internal
+        returns (uint256 failedCount)
     {
         for (uint256 i; i < projectIds.length; i++) {
             uint256 projectId = projectIds[i];
@@ -31,8 +37,12 @@ library RouterTerminalMigrationLib {
             // A cohort already resolving through the selected terminal needs no project-authorized write.
             if (registry.terminalOf(projectId) == terminal) continue;
 
-            // Use the registry's project permission gate; failures abort deployment instead of leaving a partial fix.
-            registry.setTerminalFor({projectId: projectId, terminal: terminal});
+            // Preserve the registry's project permission gate without letting one cohort abort unrelated deployment.
+            try registry.setTerminalFor({projectId: projectId, terminal: terminal}) {}
+            catch {
+                failedCount++;
+                emit RouterTerminalMigrationFailed({projectId: projectId});
+            }
         }
     }
 }
