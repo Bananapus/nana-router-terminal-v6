@@ -41,6 +41,19 @@ When the oracle returns zero (no liquidity), slippage tolerance becomes zero. Th
 
 ## Registry and forwarding risks
 
+**Pending terminal-call settlement.** *(Operational tradeoff)*
+For an authenticated terminal-originated project transfer, a downstream `pay` or `addToBalanceOf` failure does not
+revert to the source terminal. The registry retains the exact received asset amount and records a deterministic call
+which anyone can retry. This prevents the source terminal's fail-open accounting from forgiving a non-native protocol
+fee or nullifying a registry-mediated project payout, but settlement can remain pending while the destination route is
+misconfigured, reverting, or too expensive for the retry transaction. Indexers and keepers should monitor
+`JBRouterTerminalRegistry_QueueTerminalCall` and call `processPendingTerminalCall`; a failed retry leaves the record and
+custody intact. A retry resolves the project's terminal at execution time, so an authorized project terminal change can
+change the concrete terminal which ultimately receives the pending transfer.
+
+Native-token protocol fees do not traverse this registry: the source terminal sends them directly to the fee project's
+native terminal. Native project payouts which do resolve through the registry are covered.
+
 **Credit cash-outs are not supported.** *(Documented limitation)*
 The router does not accept project-token credits as an input. Holders of unclaimed Juicebox credits must first call `JBTokens.claimFor` (or equivalent) to materialize the credits as ERC-20 tokens, then route through the router as a normal ERC-20 payment. This was an intentional simplification: supporting credit inputs required pulling credits via `IJBController.transferCreditsFrom` and carrying a `cashOutSource` metadata override through the cashout loop, which added attack surface (the holder had to be sourced from `msg.sender` rather than `originalPayer()` to prevent spoofing) and ~580 bytes of runtime size. Removing it leaves credit holders with a two-tx flow (`claimFor` → `router.pay`) but keeps the router's contract size below the EIP-170 24,576 B limit with room for future features.
 

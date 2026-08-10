@@ -3,7 +3,7 @@
 ## Contract roles
 
 - [`src/JBRouterTerminal.sol`](../src/JBRouterTerminal.sol) is the main execution surface. It accepts input tokens, discovers the output token, performs conversion, and forwards settlement to the downstream terminal.
-- [`src/JBRouterTerminalRegistry.sol`](../src/JBRouterTerminalRegistry.sol) selects a per-project router terminal or falls back to the default one, while enforcing allowlist and lock rules.
+- [`src/JBRouterTerminalRegistry.sol`](../src/JBRouterTerminalRegistry.sol) selects a per-project router terminal or falls back to the default one, enforces allowlist and lock rules, and retains failed authenticated terminal-originated transfers for permissionless retry.
 - Helper logic in [`src/JBPayRouteResolver.sol`](../src/JBPayRouteResolver.sol) and the repo's interfaces/structs define how pay-route resolution and metadata-driven routing fit together.
 
 ## Runtime path
@@ -22,7 +22,7 @@
 - Callback validation: V3 and V4 callback guards are security-critical and should not drift.
 - Leftover/refund handling: refunds can route to the original payer or fallback recipient depending on context.
 - Dynamic accounting contexts: this repo intentionally synthesizes accounting contexts instead of storing a static token list.
-- Final terminal-facing ERC-20 receipt enforcement: `addToBalanceOf` rejects lossy terminal pulls, while `pay` does not enforce receipt deltas because pay hooks can consume tokens during settlement. The registry does not independently enforce receipts; it relies on the router path it forwards into.
+- Final terminal-facing ERC-20 receipt enforcement: `addToBalanceOf` rejects lossy terminal pulls, while `pay` does not enforce receipt deltas because pay hooks can consume tokens during settlement. The registry does not independently enforce receipts; it relies on the router path it forwards into. An authenticated terminal-originated downstream failure is retained as exact pending custody rather than returned to the source terminal's catch path.
 - Preview normalization: buyback-hook metadata can improve the user-visible preview outcome, so route ranking must normalize hook-returned hints consistently across candidates.
 
 ## Tests to trust first

@@ -9,6 +9,7 @@ import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 
 import {DefaultTerminalSegment} from "../structs/DefaultTerminalSegment.sol";
+import {JBPendingTerminalCall} from "../structs/JBPendingTerminalCall.sol";
 
 /// @notice A registry that maps projects to their preferred router terminal.
 interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPayerTracker {
@@ -26,6 +27,24 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param projectId The ID of the project locked.
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller);
+
+    /// @notice Emitted when a terminal-originated payment is retained after its downstream forwarding call fails.
+    /// @param id The deterministic identifier of the pending call.
+    /// @param call The pending call that was retained.
+    /// @param amount The amount added to this pending call.
+    /// @param caller The address that originated the registry call.
+    event JBRouterTerminalRegistry_QueueTerminalCall(
+        bytes32 indexed id, JBPendingTerminalCall call, uint256 amount, address caller
+    );
+
+    /// @notice Emitted after a retained terminal call is successfully retried.
+    /// @param id The deterministic identifier of the processed call.
+    /// @param call The pending call that was processed.
+    /// @param terminal The terminal that received the retained funds.
+    /// @param caller The address that retried the call.
+    event JBRouterTerminalRegistry_ProcessTerminalCall(
+        bytes32 indexed id, JBPendingTerminalCall call, IJBTerminal terminal, address caller
+    );
 
     /// @notice Emitted when the default terminal is changed.
     /// @param terminal The new default terminal.
@@ -80,6 +99,11 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @return isAllowed Whether the terminal is allowed.
     function isTerminalAllowed(IJBTerminal terminal) external view returns (bool isAllowed);
 
+    /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
+    /// @param id The deterministic pending-call identifier.
+    /// @return call The retained terminal call.
+    function pendingTerminalCallOf(bytes32 id) external view returns (JBPendingTerminalCall memory call);
+
     /// @notice The permit2 utility used for token approvals.
     /// @return permit2 The permit2 contract.
     function PERMIT2() external view returns (IPermit2 permit2);
@@ -100,6 +124,12 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param projectId The ID of the project to lock the terminal for.
     /// @param expectedTerminal The terminal the caller expects to lock. Reverts if the current terminal doesn't match.
     function lockTerminalFor(uint256 projectId, IJBTerminal expectedTerminal) external;
+
+    /// @notice Retry a terminal-originated payment retained after downstream forwarding failed.
+    /// @param id The deterministic pending-call identifier.
+    /// @return beneficiaryTokenCount The number of project tokens minted when retrying a pay call, or zero for an
+    /// add-to-balance call.
+    function processPendingTerminalCall(bytes32 id) external returns (uint256 beneficiaryTokenCount);
 
     /// @notice Set the default terminal used when a project has not set a specific terminal.
     /// @param terminal The terminal to set as the default.

@@ -1,6 +1,6 @@
 # Audit Instructions
 
-This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
+This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit the main router as stateless and the registry as a forwarding proxy which can retain failed authenticated terminal-originated transfers. Mistakes show up as lost value, under-backed pending custody, bad slippage control, or wrong-route accounting.
 
 ## Audit objective
 
@@ -45,7 +45,8 @@ The router terminal:
 - forwards value into the destination terminal
 - optionally handles Permit2-funded transfers
 
-The registry chooses which router terminal instance a project uses and whether that choice is locked.
+The registry chooses which router terminal instance a project uses and whether that choice is locked. It also
+authenticates core terminal project transfers and retains failed downstream calls for permissionless retry.
 
 ## Roles and privileges
 
@@ -54,6 +55,7 @@ The registry chooses which router terminal instance a project uses and whether t
 | User or relayer | Initiate routed payment with beneficiary and slippage intent | Must receive exact refund semantics requested |
 | Registry controller | Set default or allowed router terminals | Must not redirect projects unexpectedly |
 | Router terminal | Hold funds only transiently during routing | Must not retain leftovers across flows |
+| Registry | Retain failed authenticated terminal forwards | Pending amounts must stay fully backed and have no administrative withdrawal path |
 
 ## Integration assumptions
 
@@ -73,6 +75,8 @@ The registry chooses which router terminal instance a project uses and whether t
    The quoted path, callback settlement, and final forwarded amount must all describe the same trade.
 4. Registry controls stay narrow.  
    Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
+5. Pending terminal calls remain fully backed.
+   Only authenticated core terminal call shapes may be queued; success, aggregation, retry, and failed retry must conserve exact custody without reaching the source terminal's catch accounting.
 
 ## Attack surfaces
 
@@ -81,6 +85,7 @@ The registry chooses which router terminal instance a project uses and whether t
 - V4 unlock callback and swap settlement
 - pool discovery and best-path selection
 - registry allowlist and lock behavior
+- source-terminal authentication, gas reservation, pending-call aggregation, and permissionless retry
 
 ## Verification
 
