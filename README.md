@@ -17,7 +17,7 @@
 
 ## Overview
 
-The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal.
+The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. Deployments put `JBRouterTerminalGateway` between the registry and the route-executing terminal so a failed route can retain its original input token without modifying the registry.
 
 It can route through:
 
@@ -37,6 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
+| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains failed zero-minimum calls, and manages autonomous retry or refund. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
@@ -52,16 +53,18 @@ The router answers those questions, then hands off to the canonical terminal. It
 
 The shortest useful reading order is:
 
-1. `JBRouterTerminal`
-2. `JBRouterTerminalRegistry`
-3. the downstream terminal selected through `JBDirectory`
+1. `JBRouterTerminalGateway`
+2. `JBRouterTerminal`
+3. `JBRouterTerminalRegistry`
+4. the downstream terminal selected through `JBDirectory`
 
 ## Read these files first
 
-1. `src/JBRouterTerminal.sol`
-2. `src/JBRouterTerminalRegistry.sol`
-3. `src/libraries/JBSwapLib.sol`
-4. the downstream terminal implementation in `nana-core-v6`
+1. `src/JBRouterTerminalGateway.sol`
+2. `src/JBRouterTerminal.sol`
+3. `src/JBRouterTerminalRegistry.sol`
+4. `src/libraries/JBSwapLib.sol`
+5. the downstream terminal implementation in `nana-core-v6`
 
 ## Integration traps
 
@@ -72,10 +75,13 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
+- zero-minimum failures through the gateway become asynchronous pending calls; retry calldata must reproduce the original memo and metadata
+- transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
 
 ## Where state lives
 
 - route-selection logic: `JBRouterTerminal`
+- failed-call custody and qualification state: `JBRouterTerminalGateway`
 - per-project router choice and lock status: `JBRouterTerminalRegistry`
 - accepted-token accounting and final balance changes: the downstream terminal, usually in `nana-core-v6`
 
@@ -88,6 +94,7 @@ That separation is why a successful route can still end in downstream terminal b
 3. `test/RouterTerminalCashOutFork.t.sol`
 4. `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 5. `test/regression/CashOutCircularPrimaryTerminal.t.sol`
+6. `test/regression/RouterTerminalGatewayFailure.t.sol`
 
 ## Install
 
@@ -117,6 +124,7 @@ This package depends on core, address-registry, and permission-ID packages plus 
 ```text
 src/
   JBRouterTerminal.sol
+  JBRouterTerminalGateway.sol
   JBRouterTerminalRegistry.sol
   interfaces/
   libraries/
@@ -136,6 +144,9 @@ script/
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
+- the gateway retains original inputs only for failed `addToBalanceOf` calls and failed `pay` calls whose `minReturnedTokens` is zero; non-zero-minimum failures still revert synchronously
+- three identical five-million-gas failures separated by one day qualify a pending call for a final attempt after another day; any changed error fingerprint resets the streak
+- the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths
 

@@ -3,16 +3,17 @@
 ## Contract roles
 
 - [`src/JBRouterTerminal.sol`](../src/JBRouterTerminal.sol) is the main execution surface. It accepts input tokens, discovers the output token, performs conversion, and forwards settlement to the downstream terminal.
+- [`src/JBRouterTerminalGateway.sol`](../src/JBRouterTerminalGateway.sol) is the Registry-selected fail-closed surface. It takes custody before atomically calling the Router and retains original inputs after failed zero-minimum calls.
 - [`src/JBRouterTerminalRegistry.sol`](../src/JBRouterTerminalRegistry.sol) selects a per-project router terminal or falls back to the default one, while enforcing allowlist and lock rules.
 - Helper logic in [`src/JBPayRouteResolver.sol`](../src/JBPayRouteResolver.sol) and the repo's interfaces/structs define how pay-route resolution and metadata-driven routing fit together.
 
 ## Runtime path
 
-1. The router accepts native tokens, ERC-20s, or claimed Juicebox project-token ERC-20s.
-2. If the input is a Juicebox project token, the router may enter a cash-out loop first.
-3. The router resolves the desired output token using direct acceptance, wrap/unwrap equivalence, metadata overrides, or pool discovery.
+1. The Gateway accepts native tokens, ERC-20s, or claimed Juicebox project-token ERC-20s and calls the Router atomically.
+2. If the input is a Juicebox project token, the Router may enter a cash-out loop first.
+3. The Router resolves the desired output token using direct acceptance, wrap/unwrap equivalence, metadata overrides, or pool discovery.
 4. It converts value through direct forwarding, wrap/unwrap, Uniswap V3, or Uniswap V4.
-5. It forwards the final asset to the destination project's canonical terminal.
+5. It forwards the final asset to the destination project's canonical terminal, or the failed inner frame rolls back and the Gateway retains the original input.
 
 ## High-risk areas
 
@@ -24,6 +25,8 @@
 - Dynamic accounting contexts: this repo intentionally synthesizes accounting contexts instead of storing a static token list.
 - Final terminal-facing ERC-20 receipt enforcement: `addToBalanceOf` rejects lossy terminal pulls, while `pay` does not enforce receipt deltas because pay hooks can consume tokens during settlement. The registry does not independently enforce receipts; it relies on the router path it forwards into.
 - Preview normalization: buyback-hook metadata can improve the user-visible preview outcome, so route ranking must normalize hook-returned hints consistently across candidates.
+- Pending-call conservation: failed Router frames must leave the Gateway holding the exact original input represented by pending state.
+- Qualification comparability: every counted failure gets the same five-million-gas budget, a one-day interval, and an unchanged bounded fingerprint.
 
 ## Tests to trust first
 
@@ -32,3 +35,4 @@
 - [`test/RouterTerminalReentrancy.t.sol`](../test/RouterTerminalReentrancy.t.sol) for callback and reentrancy-sensitive behavior.
 - [`test/RouterTerminalFork.t.sol`](../test/RouterTerminalFork.t.sol), [`test/RouterTerminalMultihopFork.t.sol`](../test/RouterTerminalMultihopFork.t.sol), and [`test/invariant/RouterTerminalInvariant.t.sol`](../test/invariant/RouterTerminalInvariant.t.sol) for live routing assumptions.
 - [`test/regression/CashOutCircularPrimaryTerminal.t.sol`](../test/regression/CashOutCircularPrimaryTerminal.t.sol), [`test/regression/CashOutFallbackPrefersRecursiveLoop.t.sol`](../test/regression/CashOutFallbackPrefersRecursiveLoop.t.sol), [`test/regression/LeftoverRefund.t.sol`](../test/regression/LeftoverRefund.t.sol), and [`test/regression/PreviewPrimaryTerminalMismatch.t.sol`](../test/regression/PreviewPrimaryTerminalMismatch.t.sol) for the misdiagnosis-prone edge cases.
+- [`test/regression/RouterTerminalGatewayFailure.t.sol`](../test/regression/RouterTerminalGatewayFailure.t.sol) for the exact Base reproduction, gas sweep, matching-error resets, retries, and refunds.

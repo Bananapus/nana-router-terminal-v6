@@ -14,7 +14,8 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 ## Key surfaces
 
 - `JBRouterTerminal`: route discovery and execution
-- `JBRouterTerminalRegistry`: router selection, locking, forwarding, and registry-held balance migration
+- `JBRouterTerminalGateway`: failed-route custody, retry qualification, and autonomous refund
+- `JBRouterTerminalRegistry`: router selection, locking, and stateless forwarding
 - `JBPayRouteResolver`: preview and route-resolution helper logic
 
 ## Journey 1: Put a router in front of a project's canonical terminal
@@ -28,8 +29,8 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - the team wants a router in front of that terminal rather than a new accounting surface
 
 **Main Flow**
-1. Deploy or select a `JBRouterTerminal` instance.
-2. Register it for the project in `JBRouterTerminalRegistry`, or rely on the default router if appropriate.
+1. Deploy or select a `JBRouterTerminal` route executor and its immutable `JBRouterTerminalGateway`.
+2. Register the Gateway for the project in `JBRouterTerminalRegistry`, or rely on the initial Gateway default if appropriate.
 3. Optionally lock the registry choice so later callers cannot redirect the project to a different router.
 4. Frontends can route users to a known router without changing downstream accounting contracts.
 
@@ -50,10 +51,11 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - the user wants exposure to a project but does not hold the exact token the destination terminal accepts
 
 **Main Flow**
-1. The payer calls `pay(...)` on `JBRouterTerminal` with the input token and destination project.
-2. The router discovers the destination terminal and accepted token.
-3. It decides whether the path is direct forwarding, wrap or unwrap, UniV3 swap, or UniV4 swap.
-4. It settles into the downstream terminal and passes along the payment metadata that the project actually expects.
+1. The payer calls `pay(...)` through the Registry-selected Gateway with the input token and destination project.
+2. The Gateway takes custody and calls the immutable Router atomically.
+3. The Router discovers the destination terminal and accepted token.
+4. It decides whether the path is direct forwarding, wrap or unwrap, UniV3 swap, or UniV4 swap.
+5. It settles into the downstream terminal and passes along the payment metadata that the project actually expects.
 
 **Failure Modes**
 - quotes are stale or liquidity moved before execution
@@ -126,26 +128,31 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the registry records the chosen router terminal and locks the decision
 
-## Journey 6: Migrate registry-held balance or router responsibility safely
+## Journey 6: Retry or autonomously refund a failed fee or project payout
 
-**Actor:** operator or migration responder.
+**Actor:** any keeper, frontend, or interested account.
 
-**Intent:** move router responsibility or registry-held value without stranding balances.
+**Intent:** settle a failed zero-minimum route without forgiving a fee or nullifying a project payout.
 
 **Preconditions**
-- the project is changing router expectations or needs to move balance from a registry-held context
+- the Gateway emitted `JBRouterTerminalGateway_QueuePendingCall`
+- the caller can reproduce the original memo and metadata from transaction calldata
 
 **Main Flow**
-1. Use the registry's migration surface when a project's router balance or canonical terminal relationship needs to change.
-2. Verify the destination terminal and router assumptions before moving value.
-3. Update frontends only after the registry state and balance migration agree.
+1. Anyone calls `processPendingCall` with the pending ID and original data.
+2. A successful attempt settles immediately. A failed, five-million-gas attempt records its error fingerprint.
+3. Wait at least one day between qualified failures.
+4. If an error changes, the count resets to one and retries continue.
+5. After three matching failures and one more day, anyone calls `finalizePendingCall`.
+6. The final attempt settles if possible, resets on a changed error, or atomically refunds the fixed payer/source project after the same error.
 
 **Failure Modes**
-- balances move to a destination terminal that no longer matches routing assumptions
-- frontends switch early and point users at stale registry state
+- underfunded retries revert without advancing qualification
+- changed memo or metadata does not match the retained call
+- a source terminal rejects the refund, reverting finalization and preserving pending custody
 
 **Postconditions**
-- the migration uses the repo's explicit migration path instead of leaving stranded value or stale routing assumptions behind
+- the original input is either settled, still represented by pending state, or credited back to its predetermined payer/project
 
 ## Trust boundaries
 

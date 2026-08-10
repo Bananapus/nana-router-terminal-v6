@@ -17,6 +17,7 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
+import {JBRouterTerminalGateway} from "../src/JBRouterTerminalGateway.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 
@@ -28,6 +29,9 @@ contract DeployScript is Script, Sphinx {
 
     /// @notice The CREATE2 salt used for the router terminal deployment.
     bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
+
+    /// @notice The CREATE2 salt used for the router-terminal gateway deployment.
+    bytes32 constant ROUTER_TERMINAL_GATEWAY = "JBRouterTerminalGatewayV6";
 
     /// @notice The CREATE2 salt used for the router-terminal registry deployment.
     bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
@@ -192,8 +196,13 @@ contract DeployScript is Script, Sphinx {
             newUniv4Hook: address(univ4Router.hook)
         });
 
-        // Set the terminal as the default for the registry.
-        registry.setDefaultTerminal(terminal);
+        // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
+        // failed fee and project-payout routes.
+        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({router: terminal});
+
+        // Point the registry at the gateway. Existing registries use the same operation when selecting this
+        // implementation; no registry bytecode or storage-layout change is required.
+        registry.setDefaultTerminal(gateway);
     }
 
     //*********************************************************************//

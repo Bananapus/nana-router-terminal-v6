@@ -41,6 +41,24 @@ When the oracle returns zero (no liquidity), slippage tolerance becomes zero. Th
 
 ## Registry and forwarding risks
 
+**Autonomous pending-call refund cannot prove permanent sink failure.** *(Accepted tradeoff)*
+The EVM cannot distinguish a permanently broken destination from a route which is temporarily failing or deliberately made to fail. The gateway therefore requires three permissionless attempts, each forwarding exactly 5,000,000 gas and separated by at least one day, followed by another one-day wait and a final 5,000,000-gas attempt. All four failures must have the same fingerprint. Any changed error resets the streak to one and keeps the input retryable. A deterministic sink can still be made to reproduce the same failure through every window, so this is strong evidence rather than a proof of permanent failure.
+
+**Failure fingerprints are bounded against return-data bombs.** *(Accepted tradeoff)*
+`JBRouterTerminalGateway` hashes the full return-data length plus its first 256 bytes. This exactly distinguishes ordinary Solidity errors, including standard empty OOG-shaped failures, while preventing a reverting sink from exhausting the gateway by returning unbounded data. Two oversized errors with equal lengths and equal 256-byte prefixes intentionally share a fingerprint.
+
+**Arbitrarily underfunded outer transactions cannot be made safe by an inner contract.** *(Documented limitation)*
+The gateway reserves 750,000 gas around its initial Router attempt so a route-level OOG normally becomes durable custody instead of bubbling into the source terminal's fail-open catch. No EVM callee can guarantee progress when the transaction itself supplies too little gas to reach or persist that fallback. Clients should submit at least 1.5–2x `eth_estimateGas`; qualified retries enforce their own gas floor and cannot advance failure state when underfunded. The reported Base transaction and a 750,000–1,500,000 gas sweep are covered by `RouterTerminalGatewayBaseForkTest`.
+
+**Fixed qualified gas may reject unusually expensive valid routes.** *(Accepted tradeoff)*
+Every qualifying retry and final attempt forwards exactly 5,000,000 gas so repeated empty failures are comparable and callers cannot manufacture qualification using a low per-call limit. A legitimate route requiring more than this fixed budget will remain failing and can eventually refund. Raising this constant requires a new gateway deployment and registry selection.
+
+**Native protocol fees may bypass the gateway.** *(Documented limitation)*
+When the fee token is `JBConstants.NATIVE_TOKEN` and the fee project directly accepts it, `JBMultiTerminal` pays that terminal directly. The Registry and Gateway are used only when terminal discovery chooses the Registry path, such as USDC paid to an ETH-denominated fee project. Native project payouts explicitly sent through the Registry are still protected.
+
+**Existing project cohorts do not follow a new default automatically.** *(Operational constraint)*
+Selecting a gateway as a later Registry default only affects new project cohorts. Existing projects, including project 1, require their owner or `SET_ROUTER_TERMINAL` operator to call `setTerminalFor` after the Registry owner allowlists the gateway. Locked projects cannot be moved.
+
 **Credit cash-outs are not supported.** *(Documented limitation)*
 The router does not accept project-token credits as an input. Holders of unclaimed Juicebox credits must first call `JBTokens.claimFor` (or equivalent) to materialize the credits as ERC-20 tokens, then route through the router as a normal ERC-20 payment. This was an intentional simplification: supporting credit inputs required pulling credits via `IJBController.transferCreditsFrom` and carrying a `cashOutSource` metadata override through the cashout loop, which added attack surface (the holder had to be sourced from `msg.sender` rather than `originalPayer()` to prevent spoofing) and ~580 bytes of runtime size. Removing it leaves credit holders with a two-tx flow (`claimFor` → `router.pay`) but keeps the router's contract size below the EIP-170 24,576 B limit with room for future features.
 

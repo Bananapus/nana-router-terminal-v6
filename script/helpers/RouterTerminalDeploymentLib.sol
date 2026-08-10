@@ -6,13 +6,16 @@ import {Vm} from "forge-std/Vm.sol";
 import {NetworkInfo, SphinxConstants} from "@sphinx-labs/contracts/contracts/foundry/SphinxConstants.sol";
 
 import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
+import {IJBRouterTerminalGateway} from "../../src/interfaces/IJBRouterTerminalGateway.sol";
 import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalRegistry.sol";
 
-/// @custom:member terminal The deployed router terminal for the selected network.
+/// @custom:member gateway The fail-closed router gateway selected by the registry.
 /// @custom:member registry The deployed router-terminal registry for the selected network.
+/// @custom:member terminal The deployed route-executing terminal wrapped by `gateway`.
 struct RouterTerminalDeployment {
-    IJBRouterTerminal terminal;
+    IJBRouterTerminalGateway gateway;
     IJBRouterTerminalRegistry registry;
+    IJBRouterTerminal terminal;
 }
 
 /// @notice Reads router-terminal deployment artifacts emitted by the repo's Sphinx deployment flow.
@@ -58,13 +61,13 @@ library RouterTerminalDeploymentLib {
         view
         returns (RouterTerminalDeployment memory deployment)
     {
-        // Read the router terminal address from its Sphinx deployment artifact.
-        deployment.terminal = IJBRouterTerminal(
+        // Read the router gateway address from its Sphinx deployment artifact.
+        deployment.gateway = IJBRouterTerminalGateway(
             _getDeploymentAddress({
                 path: path,
                 projectName: "nana-router-terminal-v6",
                 networkName: networkName,
-                contractName: "JBRouterTerminal"
+                contractName: "JBRouterTerminalGateway"
             })
         );
 
@@ -75,6 +78,16 @@ library RouterTerminalDeploymentLib {
                 projectName: "nana-router-terminal-v6",
                 networkName: networkName,
                 contractName: "JBRouterTerminalRegistry"
+            })
+        );
+
+        // Read the route-executing terminal address from its Sphinx deployment artifact.
+        deployment.terminal = IJBRouterTerminal(
+            _getDeploymentAddress({
+                path: path,
+                projectName: "nana-router-terminal-v6",
+                networkName: networkName,
+                contractName: "JBRouterTerminal"
             })
         );
     }

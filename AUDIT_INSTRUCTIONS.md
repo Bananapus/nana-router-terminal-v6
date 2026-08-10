@@ -1,6 +1,6 @@
 # Audit Instructions
 
-This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit it as a stateless router whose mistakes show up as lost value, bad slippage control, or wrong-route accounting.
+This repo accepts one token and routes value into whatever token a destination project actually accepts. Audit the Router as a stateless executor and the Gateway as a narrowly stateful failed-call escrow whose mistakes show up as lost value, bad slippage control, wrong-route accounting, or unauthorized refunds.
 
 ## Audit objective
 
@@ -19,6 +19,7 @@ Suggestions of where to look:
 In scope:
 
 - `src/JBRouterTerminal.sol`
+- `src/JBRouterTerminalGateway.sol`
 - `src/JBRouterTerminalRegistry.sol`
 - `src/interfaces/`
 - `src/libraries/JBSwapLib.sol`
@@ -32,9 +33,10 @@ Key dependencies:
 
 ## Start here
 
-1. `src/JBRouterTerminal.sol`
-2. `src/JBRouterTerminalRegistry.sol`
-3. `src/libraries/JBSwapLib.sol`
+1. `src/JBRouterTerminalGateway.sol`
+2. `src/JBRouterTerminal.sol`
+3. `src/JBRouterTerminalRegistry.sol`
+4. `src/libraries/JBSwapLib.sol`
 
 ## Security model
 
@@ -47,6 +49,8 @@ The router terminal:
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
 
+The gateway selected by the registry takes custody before calling the immutable Router. Failed zero-minimum calls become permissionlessly retryable; refunds require a time-separated matching-error streak and one final matching failure.
+
 ## Roles and privileges
 
 | Role | Powers | How constrained |
@@ -54,6 +58,7 @@ The registry chooses which router terminal instance a project uses and whether t
 | User or relayer | Initiate routed payment with beneficiary and slippage intent | Must receive exact refund semantics requested |
 | Registry controller | Set default or allowed router terminals | Must not redirect projects unexpectedly |
 | Router terminal | Hold funds only transiently during routing | Must not retain leftovers across flows |
+| Router gateway | Retain only original inputs represented by pending records | Immutable retry policy and refund destination |
 
 ## Integration assumptions
 
@@ -73,6 +78,10 @@ The registry chooses which router terminal instance a project uses and whether t
    The quoted path, callback settlement, and final forwarded amount must all describe the same trade.
 4. Registry controls stay narrow.  
    Default terminals, allowed terminals, and lock semantics must not let an unexpected router instance take over project routing.
+5. Pending custody is conserved.
+   Each pending amount remains in the gateway's original input token until the exact call settles or an atomic refund credits its fixed recipient.
+6. Error changes block finalization.
+   Qualification advances only for the same bounded fingerprint; any changed retry or final error resets the streak.
 
 ## Attack surfaces
 
@@ -81,9 +90,11 @@ The registry chooses which router terminal instance a project uses and whether t
 - V4 unlock callback and swap settlement
 - pool discovery and best-path selection
 - registry allowlist and lock behavior
+- gateway gas reservation, bounded return-data handling, retry timing, reentrancy, and refund rollback
 
 ## Verification
 
 - `npm install`
 - `forge build --deny notes`
 - `forge test --deny notes`
+- `forge test --match-path test/regression/RouterTerminalGatewayFailure.t.sol`

@@ -8,7 +8,7 @@ The router is intentionally heuristic. It does not search every possible route f
 
 ## System overview
 
-`JBRouterTerminal` is a terminal-shaped adapter, not an accounting source of truth. `JBRouterTerminalRegistry` is both a registry and a stable project-facing proxy surface: projects can point at the registry while the registry resolves, and can later lock, the actual router terminal implementation to use. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
+`JBRouterTerminal` is a terminal-shaped route executor, not an accounting source of truth. `JBRouterTerminalGateway` is the fail-closed implementation selected by `JBRouterTerminalRegistry`: it owns the outer atomic boundary around a Router call and retains the original input if that call fails. The registry remains a stable project-facing proxy and is unchanged by this mechanism. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
 
 Final accounting still happens in the downstream terminal selected through `nana-core-v6`.
 
@@ -18,6 +18,8 @@ Final accounting still happens in the downstream terminal selected through `nana
 - preview route discovery and live execution must stay aligned
 - buyback-hook preview scoring must distinguish executable floors from diagnostics
 - refund behavior is part of correctness, not only UX
+- a failed gateway attempt rolls back every swap and downstream call before the original input is retained
+- qualified failure streaks advance only on identical bounded error fingerprints; a changed fingerprint resets the streak
 - registry locking prevents silent migration to untrusted router implementations
 - `addToBalanceOf` final hops reject ERC-20 receipt shortfalls; `pay` cannot rely on terminal balance deltas because pay hooks can consume tokens during settlement
 - recursive project-token cashout routing is intentionally bounded
@@ -29,6 +31,7 @@ Final accounting still happens in the downstream terminal selected through `nana
 | Module | Responsibility | Notes |
 | --- | --- | --- |
 | `JBRouterTerminal` | Intake, route discovery, swap execution, forwarding, and refunds | Main runtime surface |
+| `JBRouterTerminalGateway` | Atomic Router boundary, failed-input escrow, permissionless retries, and autonomous refunds | Registry-selected safety surface |
 | `JBRouterTerminalRegistry` | Project-level router selection, locking, and proxy forwarding to the resolved router terminal | Governance, safety, and proxy surface |
 | `JBPayRouteResolver` | Preview candidate evaluation | Helper to keep runtime size bounded |
 | `JBSwapLib` and routing structs | Pool discovery, quoting, and route metadata | Shared routing logic |
@@ -39,6 +42,7 @@ Final accounting still happens in the downstream terminal selected through `nana
 - the router trusts Uniswap V3, Uniswap V4, Permit2, and optional payer trackers for routing-side behavior
 - fee-on-transfer tokens are reconciled on ingress but remain unsafe for routed payments because terminal-side loss is not enforced on `pay`
 - the registry is trusted to resolve and forward into the intended router implementation for a project
+- the gateway's immutable `ROUTER` is trusted as the route executor; it cannot be changed after deployment
 
 ## Critical flows
 
@@ -54,9 +58,25 @@ router pay call
   -> refund leftover input when possible
 ```
 
+### Gateway failure lifecycle
+
+```text
+registry forwards original input to gateway
+  -> gateway calls immutable router inside one fallible external-call boundary
+  -> success: route settles synchronously
+  -> failure: every inner transfer/swap rolls back and gateway retains the original input token
+  -> anyone may retry with the original memo and metadata and at least the qualified gas budget
+  -> matching errors: advance at most once per day
+  -> changed error: reset the streak to one and keep retrying
+  -> after three matches and one more day: one final qualified attempt
+       -> success: settle
+       -> changed error: reset and retain
+       -> same error: atomically refund the payer or source project's terminal
+```
+
 ## Accounting model
 
-The router does not own project balances. It owns transient route accounting: input reconciliation, swap execution, forwarded amount, and refund resolution.
+The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of failed calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic refund; they are never reported as project surplus by the gateway.
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 
@@ -68,6 +88,8 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - V4 discovery intentionally considers both vanilla pools and pools using the canonical `UNIV4_HOOK`
 - the router's "best route" claim is only as strong as its bounded discovery set and external-terminal safety checks
 - recursive cashout behavior, preferred-token handling, and one-shot source overrides are tightly coupled
+- a refund to a source project deletes pending state before interaction and relies on transaction rollback to restore state and custody if the source terminal rejects it
+- retry and final attempts forward exactly `QUALIFIED_CALL_GAS`; entrypoint attempts dynamically reserve `_FAILURE_GAS_RESERVE` for durable queueing
 
 ## Safe change guide
 
@@ -76,6 +98,8 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - if recursive cash-out logic changes, review hop limits and failure handling together
 - if metadata semantics change, re-check first-hop reclaim minima, one-shot source overrides, and preferred-token routing together
 - do not turn the router into a persistent treasury layer
+- preserve the gateway's outer custody boundary; do not catch failures after the Router has performed irreversible work in the gateway's frame
+- keep `JBRouterTerminalRegistry` source, ABI, and storage independent from gateway retry policy
 
 ## Canonical checks
 
@@ -91,10 +115,13 @@ Preview and execution share the same conceptual route shape: optional recursive 
   `test/regression/CashOutFallbackPrefersRecursiveLoop.t.sol`
 - final-hop ERC-20 receipt shortfalls:
   `test/regression/LossyReceiptRegression.t.sol`
+- exact Base fee-failure replay, matching-error qualification, and refunds:
+  `test/regression/RouterTerminalGatewayFailure.t.sol`
 
 ## Source map
 
 - `src/JBRouterTerminal.sol`
+- `src/JBRouterTerminalGateway.sol`
 - `src/JBRouterTerminalRegistry.sol`
 - `src/JBPayRouteResolver.sol`
 - `test/regression/CashOutLoopLimit.t.sol`
