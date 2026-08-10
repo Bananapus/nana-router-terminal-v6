@@ -7,6 +7,11 @@ import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalR
 
 /// @notice Migrates configured project cohorts to a selected router-terminal implementation.
 library RouterTerminalMigrationLib {
+    /// @notice Thrown when a required project still does not resolve through the selected terminal after migration.
+    error RouterTerminalMigrationLib_RequiredProjectMigrationFailed(
+        uint256 projectId, IJBTerminal currentTerminal, IJBTerminal expectedTerminal
+    );
+
     /// @notice Emitted when a project-specific migration cannot pass the registry's permission or lock checks.
     /// @param projectId The project ID which remains on its existing terminal.
     event RouterTerminalMigrationFailed(uint256 indexed projectId);
@@ -43,6 +48,26 @@ library RouterTerminalMigrationLib {
                 failedCount++;
                 emit RouterTerminalMigrationFailed({projectId: projectId});
             }
+        }
+    }
+
+    /// @notice Require a project to resolve through the selected terminal after migration.
+    /// @param registry The registry whose project-specific terminal pointer is checked.
+    /// @param terminal The terminal the project must resolve through.
+    /// @param projectId The project ID whose migration is mandatory.
+    function requireMigratedProject(
+        IJBRouterTerminalRegistry registry,
+        IJBTerminal terminal,
+        uint256 projectId
+    )
+        internal
+        view
+    {
+        IJBTerminal currentTerminal = registry.terminalOf(projectId);
+        if (currentTerminal != terminal) {
+            revert RouterTerminalMigrationLib_RequiredProjectMigrationFailed({
+                projectId: projectId, currentTerminal: currentTerminal, expectedTerminal: terminal
+            });
         }
     }
 }

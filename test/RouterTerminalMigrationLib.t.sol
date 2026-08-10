@@ -18,6 +18,12 @@ contract RouterTerminalMigrationRegistry {
         rejectProjectId = projectId;
     }
 
+    function requireMigratedProject(IJBTerminal terminal, uint256 projectId) external view {
+        RouterTerminalMigrationLib.requireMigratedProject({
+            registry: IJBRouterTerminalRegistry(address(this)), terminal: terminal, projectId: projectId
+        });
+    }
+
     function setTerminalFor(uint256 projectId, IJBTerminal terminal) external {
         if (projectId == rejectProjectId) revert RouterTerminalMigrationRegistry_Rejected(projectId);
         terminalOf[projectId] = terminal;
@@ -74,5 +80,33 @@ contract RouterTerminalMigrationLibTest is Test {
         assertEq(address(registry.terminalOf(2)), address(gateway), "gateway cohort must remain unchanged");
         assertEq(address(registry.terminalOf(3)), address(0), "unissued project must be ignored");
         assertEq(registry.writeCount() - writesBefore, 1, "only the vulnerable issued cohort should be written");
+        RouterTerminalMigrationLib.requireMigratedProject({
+            registry: IJBRouterTerminalRegistry(address(registry)), terminal: gateway, projectId: 1
+        });
+    }
+
+    function test_requiredProjectMigrationCannotSilentlyFail() public {
+        RouterTerminalMigrationRegistry registry = new RouterTerminalMigrationRegistry();
+        IJBTerminal gateway = IJBTerminal(makeAddr("gateway"));
+        registry.setRejectProjectId(1);
+
+        uint256[] memory projectIds = new uint256[](1);
+        projectIds[0] = 1;
+        RouterTerminalMigrationLib.migrateProjects({
+            registry: IJBRouterTerminalRegistry(address(registry)),
+            terminal: gateway,
+            projectCount: 1,
+            projectIds: projectIds
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RouterTerminalMigrationLib.RouterTerminalMigrationLib_RequiredProjectMigrationFailed.selector,
+                uint256(1),
+                IJBTerminal(address(0)),
+                gateway
+            )
+        );
+        registry.requireMigratedProject({terminal: gateway, projectId: 1});
     }
 }

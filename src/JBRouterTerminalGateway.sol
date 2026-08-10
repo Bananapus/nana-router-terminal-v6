@@ -3,14 +3,20 @@ pragma solidity 0.8.28;
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
+import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
+import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
@@ -25,13 +31,19 @@ import {PoolInfo} from "./structs/PoolInfo.sol";
 
 /// @notice A router-terminal gateway which retains an original input token when the fallible routing call fails.
 /// @dev The registry points to this contract, which forwards atomically into an immutable `JBRouterTerminal`.
-contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
+contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     // A library that adds default safety checks to ERC20 functionality.
     using SafeERC20 for IERC20;
 
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
+
+    /// @notice Thrown when an amount exceeds the maximum width Permit2 can transfer.
+    error JBRouterTerminalGateway_AmountOverflow(uint256 amount);
+
+    /// @notice Thrown when the live block gas limit cannot support the minimum qualified call budget.
+    error JBRouterTerminalGateway_BlockGasLimitTooLow(uint256 maximum, uint256 minimum);
 
     /// @notice Thrown when retry calldata does not match the data retained with a pending call.
     error JBRouterTerminalGateway_CallDataMismatch(bytes32 expectedHash, bytes32 actualHash);
@@ -54,11 +66,17 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Thrown when ordinary processing is attempted after a call has qualified for finalization.
     error JBRouterTerminalGateway_PendingCallRequiresFinalization(bytes32 id);
 
-    /// @notice Thrown when no non-circular registered source-project terminal accepts a refund.
-    error JBRouterTerminalGateway_RefundFailed(address originalTerminal, address primaryTerminal);
+    /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in metadata.
+    error JBRouterTerminalGateway_PermitAllowanceNotEnough(uint256 amount, uint256 allowance);
 
     /// @notice Thrown when a callback-capable token re-enters the inbound balance-delta measurement.
     error JBRouterTerminalGateway_ReentrantTokenTransfer(address token);
+
+    /// @notice Thrown when no non-circular registered source-project terminal accepts a refund.
+    error JBRouterTerminalGateway_RefundFailed(address originalTerminal, address primaryTerminal);
+
+    /// @notice Thrown when a caller-specified gas limit exceeds the live chain's executable budget.
+    error JBRouterTerminalGateway_RetryGasLimitTooHigh(uint256 gasLimit, uint256 maximum);
 
     /// @notice Thrown when a caller-specified gas limit is below the budget required by the failure state.
     error JBRouterTerminalGateway_RetryGasLimitTooLow(uint256 gasLimit, uint256 minimum);
@@ -92,6 +110,9 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice The stable fingerprint used when an attempt consumes its complete forwarded gas budget.
     bytes32 internal constant _GAS_EXHAUSTED_ERROR_HASH = keccak256("JBRouterTerminalGateway: gas exhausted");
 
+    /// @notice Block gas retained for transaction overhead, EIP-150 withholding, and durable failure accounting.
+    uint256 internal constant _TRANSACTION_GAS_RESERVE = 1_500_000;
+
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
@@ -99,8 +120,18 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice The immutable directory used to resolve a source project's current accounting terminal for refunds.
     IJBDirectory public immutable override DIRECTORY;
 
+    /// @notice The Permit2 contract used for gasless ERC-20 approvals and transfers.
+    IPermit2 public immutable override PERMIT2;
+
     /// @notice The immutable router terminal this gateway calls atomically.
     IJBRouterTerminal public immutable override ROUTER;
+
+    //*********************************************************************//
+    // -------------- internal immutable stored properties -------------- //
+    //*********************************************************************//
+
+    /// @notice Pre-computed metadata ID for `permit2` allowances addressed to this gateway.
+    bytes4 internal immutable _PERMIT2_ID;
 
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
@@ -134,13 +165,29 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     //*********************************************************************//
 
     /// @param directory The immutable directory used to resolve project accounting terminals.
+    /// @param permit2 The Permit2 singleton used for gasless ERC-20 approvals and transfers.
     /// @param router The immutable router terminal to call atomically.
-    constructor(IJBDirectory directory, IJBRouterTerminal router) {
+    /// @param trustedForwarder The trusted ERC-2771 forwarder used by the surrounding protocol.
+    constructor(
+        IJBDirectory directory,
+        IPermit2 permit2,
+        IJBRouterTerminal router,
+        address trustedForwarder
+    )
+        ERC2771Context(trustedForwarder)
+    {
         if (address(directory) == address(0) || address(router) == address(0)) {
             revert JBRouterTerminalGateway_ZeroAddress();
         }
+        // Refuse an installation whose chain cannot execute even the base recovery attempt.
+        uint256 maximumGasLimit = _maximumQualifiedCallGas(block.gaslimit);
+        if (maximumGasLimit < QUALIFIED_CALL_GAS) {
+            revert JBRouterTerminalGateway_BlockGasLimitTooLow({maximum: maximumGasLimit, minimum: QUALIFIED_CALL_GAS});
+        }
         DIRECTORY = directory;
+        PERMIT2 = permit2;
         ROUTER = router;
+        _PERMIT2_ID = JBMetadataResolver.getId("permit2");
     }
 
     //*********************************************************************//
@@ -163,8 +210,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         payable
         override
     {
-        address refundTo = _resolveOriginalPayer(msg.sender);
-        amount = _acceptFundsFor({token: token, amount: amount});
+        address refundTo = _resolveOriginalPayer(_msgSender());
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
         uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
@@ -236,8 +283,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        address refundTo = _resolveOriginalPayer(msg.sender);
-        amount = _acceptFundsFor({token: token, amount: amount});
+        address refundTo = _resolveOriginalPayer(_msgSender());
+        amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
         uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
@@ -402,10 +449,19 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
+    /// @notice Return the largest qualified call budget executable under the live chain's block gas limit.
+    /// @return gasLimit The maximum gas which may be forwarded while preserving accounting reserves.
+    function maximumQualifiedCallGas() public view override returns (uint256 gasLimit) {
+        return _maximumQualifiedCallGas(block.gaslimit);
+    }
+
     /// @notice Indicates whether this gateway implements an interface.
+    /// @param interfaceId The interface identifier to test.
+    /// @return supported Whether the gateway implements `interfaceId`.
     function supportsInterface(bytes4 interfaceId) public pure override returns (bool supported) {
         return interfaceId == type(IJBForwardingTerminal).interfaceId
-            || interfaceId == type(IJBPayerTracker).interfaceId || interfaceId == type(IJBRouterTerminal).interfaceId
+            || interfaceId == type(IJBPayerTracker).interfaceId || interfaceId == type(IJBPermitTerminal).interfaceId
+            || interfaceId == type(IJBRouterTerminal).interfaceId
             || interfaceId == type(IJBRouterTerminalGateway).interfaceId || interfaceId == type(IJBTerminal).interfaceId
             || interfaceId == type(IERC165).interfaceId;
     }
@@ -414,10 +470,44 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
 
-    /// @notice Accept an input token from the gateway's caller.
-    function _acceptFundsFor(address token, uint256 amount) internal returns (uint256 acceptedAmount) {
+    /// @notice Accept an input token from the gateway's resolved ERC-2771 caller.
+    /// @param token The token to accept, or the native-token sentinel.
+    /// @param amount The maximum token amount to pull from the caller.
+    /// @param metadata Metadata which may contain a Permit2 allowance addressed to this gateway.
+    /// @return acceptedAmount The amount which actually arrived after the transfer.
+    function _acceptFundsFor(
+        address token,
+        uint256 amount,
+        bytes calldata metadata
+    )
+        internal
+        returns (uint256 acceptedAmount)
+    {
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;
         if (msg.value != 0) revert JBRouterTerminalGateway_NoMsgValueAllowed(msg.value);
+
+        address sender = _msgSender();
+        (bool exists, bytes memory parsedMetadata) =
+            JBMetadataResolver.getDataFor({id: _PERMIT2_ID, metadata: metadata});
+        if (exists) {
+            JBSingleAllowance memory allowance = abi.decode(parsedMetadata, (JBSingleAllowance));
+            if (amount > allowance.amount) {
+                revert JBRouterTerminalGateway_PermitAllowanceNotEnough({amount: amount, allowance: allowance.amount});
+            }
+
+            IAllowanceTransfer.PermitSingle memory permitSingle = IAllowanceTransfer.PermitSingle({
+                details: IAllowanceTransfer.PermitDetails({
+                    token: token, amount: allowance.amount, expiration: allowance.expiration, nonce: allowance.nonce
+                }),
+                spender: address(this),
+                sigDeadline: allowance.sigDeadline
+            });
+
+            try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
+            catch (bytes memory reason) {
+                emit Permit2AllowanceFailed({token: token, owner: sender, reason: reason, caller: sender});
+            }
+        }
 
         // Snapshot the balance so fee-on-transfer inputs use the amount which actually arrives.
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
@@ -427,7 +517,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         _acceptingToken = true;
 
         // Pull the input only after closing the reentrant measurement window.
-        IERC20(token).safeTransferFrom({from: msg.sender, to: address(this), value: amount});
+        _transferFrom({from: sender, to: address(this), token: token, amount: amount});
         acceptedAmount = IERC20(token).balanceOf(address(this)) - balanceBefore;
 
         // Re-open intake after the post-transfer balance has fixed this call's accepted amount.
@@ -519,7 +609,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         if (success) {
             delete _pendingCallFailureOf[id];
             emit JBRouterTerminalGateway_ProcessPendingCall({
-                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
+                id: id, call: call, beneficiaryTokenCount: count, caller: _msgSender()
             });
             return (false, count);
         }
@@ -536,7 +626,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         delete _pendingCallFailureOf[id];
         _refund(call);
 
-        emit JBRouterTerminalGateway_RefundPendingCall({id: id, call: call, caller: msg.sender});
+        emit JBRouterTerminalGateway_RefundPendingCall({id: id, call: call, caller: _msgSender()});
         return (true, 0);
     }
 
@@ -567,7 +657,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         if (success) {
             delete _pendingCallFailureOf[id];
             emit JBRouterTerminalGateway_ProcessPendingCall({
-                id: id, call: call, beneficiaryTokenCount: count, caller: msg.sender
+                id: id, call: call, beneficiaryTokenCount: count, caller: _msgSender()
             });
             return count;
         }
@@ -584,7 +674,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         bytes32 id = bytes32(++pendingCallCount);
         _pendingCallOf[id] = call;
 
-        emit JBRouterTerminalGateway_QueuePendingCall({id: id, call: call, errorHash: errorHash, caller: msg.sender});
+        emit JBRouterTerminalGateway_QueuePendingCall({id: id, call: call, errorHash: errorHash, caller: _msgSender()});
     }
 
     /// @notice Record a qualified failure, resetting the streak whenever the failure class changes.
@@ -607,7 +697,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             errorHash: errorHash,
             count: count,
             nextAttemptAt: uint256(failedAt) + RETRY_DELAY,
-            caller: msg.sender
+            caller: _msgSender()
         });
     }
 
@@ -645,7 +735,25 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         });
     }
 
+    /// @notice Pull an ERC-20 through direct approval when available, otherwise through Permit2.
+    /// @param from The ERC-2771-resolved token owner.
+    /// @param to The address which receives the token.
+    /// @param token The ERC-20 token to transfer.
+    /// @param amount The token amount to transfer.
+    function _transferFrom(address from, address to, address token, uint256 amount) internal {
+        if (IERC20(token).allowance({owner: from, spender: address(this)}) >= amount) {
+            return IERC20(token).safeTransferFrom({from: from, to: to, value: amount});
+        }
+
+        if (amount > type(uint160).max) revert JBRouterTerminalGateway_AmountOverflow(amount);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
+    }
+
     /// @notice Attempt a project-accounting refund without letting one terminal block an alternate terminal.
+    /// @param call The retained call whose original input must be refunded.
+    /// @param terminal The candidate source-project terminal to credit.
+    /// @return success Whether the candidate accepted and accounted for the complete refund.
     function _tryRefund(JBPendingRouterTerminalCall memory call, IJBTerminal terminal) internal returns (bool success) {
         if (
             address(terminal) == address(0)
@@ -712,8 +820,17 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         }
     }
 
-    /// @notice Resolve the minimum escalating gas budget for a qualified attempt.
-    /// @dev Consecutive gas exhaustion requires 5M, 10M, 15M, then 20M gas. Other failures retain the 5M base.
+    /// @notice Derive the largest call budget which preserves the transaction's accounting reserves.
+    /// @dev Applies the EIP-150 forwarding ratio after reserving gas for transaction overhead and failure accounting.
+    /// @param blockGasLimit The block gas limit from which to derive an executable call budget.
+    /// @return gasLimit The maximum call budget supported by `blockGasLimit`.
+    function _maximumQualifiedCallGas(uint256 blockGasLimit) internal pure returns (uint256 gasLimit) {
+        if (blockGasLimit <= _TRANSACTION_GAS_RESERVE) return 0;
+        return (blockGasLimit - _TRANSACTION_GAS_RESERVE) * 63 / 64;
+    }
+
+    /// @notice Resolve the minimum escalating gas budget for a qualified attempt on the live chain.
+    /// @dev Consecutive gas exhaustion targets 5M, 10M, 15M, then 20M gas, capped by the executable block budget.
     /// @param failure The pending call's current matching failure state.
     /// @param requestedGasLimit The explicit caller-selected budget, or zero to select the required minimum.
     /// @return gasLimit The validated gas budget to forward.
@@ -722,15 +839,42 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         uint256 requestedGasLimit
     )
         internal
+        view
+        returns (uint256 gasLimit)
+    {
+        return _qualifiedGasLimitFor({
+            failure: failure, requestedGasLimit: requestedGasLimit, maximumGasLimit: maximumQualifiedCallGas()
+        });
+    }
+
+    /// @notice Resolve a qualified gas budget against a supplied executable maximum.
+    /// @param failure The pending call's current matching failure state.
+    /// @param requestedGasLimit The explicit caller-selected budget, or zero to select the required minimum.
+    /// @param maximumGasLimit The maximum budget executable under the live block gas limit.
+    /// @return gasLimit The validated gas budget to forward.
+    function _qualifiedGasLimitFor(
+        JBPendingRouterTerminalCallFailure memory failure,
+        uint256 requestedGasLimit,
+        uint256 maximumGasLimit
+    )
+        internal
         pure
         returns (uint256 gasLimit)
     {
+        if (maximumGasLimit < QUALIFIED_CALL_GAS) {
+            revert JBRouterTerminalGateway_BlockGasLimitTooLow({maximum: maximumGasLimit, minimum: QUALIFIED_CALL_GAS});
+        }
+
         uint256 minimum = QUALIFIED_CALL_GAS;
         if (failure.errorHash == _GAS_EXHAUSTED_ERROR_HASH) minimum *= uint256(failure.count) + 1;
+        if (minimum > maximumGasLimit) minimum = maximumGasLimit;
 
         if (requestedGasLimit == 0) return minimum;
         if (requestedGasLimit < minimum) {
             revert JBRouterTerminalGateway_RetryGasLimitTooLow({gasLimit: requestedGasLimit, minimum: minimum});
+        }
+        if (requestedGasLimit > maximumGasLimit) {
+            revert JBRouterTerminalGateway_RetryGasLimitTooHigh({gasLimit: requestedGasLimit, maximum: maximumGasLimit});
         }
         return requestedGasLimit;
     }
@@ -787,7 +931,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     function _requireRetryGas(uint256 gasLimit) internal view {
         uint256 available = gasleft();
         // Include the EIP-150 withholding margin so the requested amount is actually forwarded by `CALL`.
-        uint256 required = gasLimit + gasLimit / 63 + _FAILURE_GAS_RESERVE;
+        uint256 required = gasLimit + (gasLimit + 62) / 63 + _FAILURE_GAS_RESERVE;
         if (available < required) {
             revert JBRouterTerminalGateway_InsufficientRetryGas({available: available, required: required});
         }

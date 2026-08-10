@@ -5,16 +5,20 @@ import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
+import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBSplits} from "@bananapus/core-v6/src/interfaces/IJBSplits.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTerminalStore} from "@bananapus/core-v6/src/interfaces/IJBTerminalStore.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {JBMultiTerminal} from "@bananapus/core-v6/src/JBMultiTerminal.sol";
+import {JBSingleAllowance} from "@bananapus/core-v6/src/structs/JBSingleAllowance.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -429,6 +433,66 @@ contract GatewayTestTerminalStore {
     }
 }
 
+contract GatewayGasHarness is JBRouterTerminalGateway {
+    constructor()
+        JBRouterTerminalGateway(
+            IJBDirectory(address(1)), IPermit2(address(2)), IJBRouterTerminal(address(3)), address(0)
+        )
+    {}
+
+    function gasExhaustedErrorHash() external pure returns (bytes32 errorHash) {
+        return _GAS_EXHAUSTED_ERROR_HASH;
+    }
+
+    function qualifiedGasLimitFor(
+        JBPendingRouterTerminalCallFailure memory failure,
+        uint256 requestedGasLimit,
+        uint256 maximumGasLimit
+    )
+        external
+        pure
+        returns (uint256 gasLimit)
+    {
+        return _qualifiedGasLimitFor({
+            failure: failure, requestedGasLimit: requestedGasLimit, maximumGasLimit: maximumGasLimit
+        });
+    }
+}
+
+contract GatewayTestPermit2 {
+    address public lastOwner;
+    address public lastSpender;
+
+    function permit(address owner, IAllowanceTransfer.PermitSingle calldata permitSingle, bytes calldata) external {
+        lastOwner = owner;
+        lastSpender = permitSingle.spender;
+    }
+
+    function transferFrom(address from, address to, uint160 amount, address token) external {
+        IERC20(token).transferFrom({from: from, to: to, value: amount});
+    }
+}
+
+contract GatewayTestTrustedForwarder {
+    function forward(
+        address target,
+        bytes calldata data,
+        address originalSender
+    )
+        external
+        payable
+        returns (bytes memory result)
+    {
+        (bool success, bytes memory returnData) = target.call{value: msg.value}(abi.encodePacked(data, originalSender));
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(returnData, 0x20), mload(returnData))
+            }
+        }
+        return returnData;
+    }
+}
+
 contract RouterTerminalGatewayFailureTest is Test {
     uint256 internal constant _AMOUNT = 25_003;
     uint256 internal constant _DESTINATION_PROJECT_ID = 1;
@@ -447,7 +511,10 @@ contract RouterTerminalGatewayFailureTest is Test {
         directory = new GatewayTestDirectory();
         router = new GatewayTestRouter();
         gateway = new JBRouterTerminalGateway({
-            directory: IJBDirectory(address(directory)), router: IJBRouterTerminal(address(router))
+            directory: IJBDirectory(address(directory)),
+            permit2: IPermit2(address(0)),
+            router: IJBRouterTerminal(address(router)),
+            trustedForwarder: address(0)
         });
         registry = _registryFor(gateway);
         sourceTerminal = new GatewayTestSourceTerminal();
@@ -563,6 +630,41 @@ contract RouterTerminalGatewayFailureTest is Test {
         );
     }
 
+    function test_chainAwareGasCapBoundsOtherwiseUnexecutableEscalation() public {
+        GatewayGasHarness harness = new GatewayGasHarness();
+        uint256 maximumGasLimit = 11_000_000;
+        JBPendingRouterTerminalCallFailure memory failure = JBPendingRouterTerminalCallFailure({
+            count: 2, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0
+        });
+
+        assertEq(
+            harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 0, maximumGasLimit: maximumGasLimit}),
+            maximumGasLimit,
+            "the live-chain cap should replace an impossible 15M escalation"
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalGateway.JBRouterTerminalGateway_RetryGasLimitTooHigh.selector,
+                maximumGasLimit + 1,
+                maximumGasLimit
+            )
+        );
+        harness.qualifiedGasLimitFor({
+            failure: failure, requestedGasLimit: maximumGasLimit + 1, maximumGasLimit: maximumGasLimit
+        });
+
+        uint256 baseGasLimit = gateway.QUALIFIED_CALL_GAS();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalGateway.JBRouterTerminalGateway_BlockGasLimitTooLow.selector,
+                baseGasLimit - 1,
+                baseGasLimit
+            )
+        );
+        harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 0, maximumGasLimit: baseGasLimit - 1});
+    }
+
     function test_changedErrorResetsMatchingFailureStreak() public {
         _queueFee(address(token));
         gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
@@ -654,6 +756,109 @@ contract RouterTerminalGatewayFailureTest is Test {
         });
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 1, "an undersized custom retry must not advance custody");
+    }
+
+    function test_gatewayPermitFailureFallsBackToDirectAllowance() public {
+        IPermit2 revertingPermit2 = IPermit2(makeAddr("revertingPermit2"));
+        vm.etch(address(revertingPermit2), hex"00");
+        JBRouterTerminalGateway compatibleGateway = new JBRouterTerminalGateway({
+            directory: IJBDirectory(address(directory)),
+            permit2: revertingPermit2,
+            router: IJBRouterTerminal(address(router)),
+            trustedForwarder: address(0)
+        });
+        address payer = makeAddr("payer");
+        token.mint({account: payer, amount: _AMOUNT});
+        vm.prank(payer);
+        token.approve({spender: address(compatibleGateway), value: _AMOUNT});
+
+        JBSingleAllowance memory allowance = JBSingleAllowance({
+            sigDeadline: block.timestamp + 1 hours,
+            // `_AMOUNT` is a fixed test value far below the Permit2 width.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint160(_AMOUNT),
+            expiration: uint48(block.timestamp + 1 hours),
+            nonce: 0,
+            signature: hex"1234"
+        });
+        bytes memory metadata = JBMetadataResolver.addToMetadata(
+            "", JBMetadataResolver.getId("permit2", address(compatibleGateway)), abi.encode(allowance)
+        );
+        bytes memory reason = "invalid permit";
+        vm.mockCallRevert(address(revertingPermit2), bytes(""), reason);
+
+        router.setMode(0);
+        vm.recordLogs();
+        vm.prank(payer);
+        uint256 beneficiaryTokenCount = compatibleGateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: payer,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: metadata
+        });
+
+        bytes32 permitFailureTopic = keccak256("Permit2AllowanceFailed(address,address,bytes,address)");
+        bool sawPermitFailure;
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; i++) {
+            if (
+                logs[i].emitter == address(compatibleGateway) && logs[i].topics[0] == permitFailureTopic
+                    && logs[i].topics[1] == bytes32(uint256(uint160(address(token))))
+                    && logs[i].topics[2] == bytes32(uint256(uint160(payer)))
+            ) {
+                sawPermitFailure = true;
+            }
+        }
+
+        assertEq(beneficiaryTokenCount, _AMOUNT, "direct allowance should survive a failed Permit2 approval");
+        assertTrue(sawPermitFailure, "failed Permit2 approval should remain observable");
+        assertEq(token.balanceOf(address(router)), _AMOUNT, "fallback payment should settle through the router");
+    }
+
+    function test_gatewayPreservesERC2771AndPermit2PaymentSurface() public {
+        GatewayTestPermit2 permit2 = new GatewayTestPermit2();
+        GatewayTestTrustedForwarder forwarder = new GatewayTestTrustedForwarder();
+        JBRouterTerminalGateway compatibleGateway = new JBRouterTerminalGateway({
+            directory: IJBDirectory(address(directory)),
+            permit2: IPermit2(address(permit2)),
+            router: IJBRouterTerminal(address(router)),
+            trustedForwarder: address(forwarder)
+        });
+        address payer = makeAddr("payer");
+        token.mint({account: payer, amount: _AMOUNT});
+        vm.prank(payer);
+        token.approve({spender: address(permit2), value: _AMOUNT});
+
+        JBSingleAllowance memory allowance = JBSingleAllowance({
+            sigDeadline: block.timestamp + 1 hours,
+            // `_AMOUNT` is a fixed test value far below the Permit2 width.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint160(_AMOUNT),
+            expiration: uint48(block.timestamp + 1 hours),
+            nonce: 0,
+            signature: hex"1234"
+        });
+        bytes4 permit2MetadataId = JBMetadataResolver.getId("permit2", address(compatibleGateway));
+        bytes memory metadata = JBMetadataResolver.addToMetadata("", permit2MetadataId, abi.encode(allowance));
+        bytes memory callData = abi.encodeCall(
+            compatibleGateway.pay, (_DESTINATION_PROJECT_ID, address(token), _AMOUNT, payer, 0, "", metadata)
+        );
+
+        router.setMode(0);
+        bytes memory result =
+            forwarder.forward({target: address(compatibleGateway), data: callData, originalSender: payer});
+
+        assertEq(abi.decode(result, (uint256)), _AMOUNT, "forwarded payment should return the router result");
+        assertEq(permit2.lastOwner(), payer, "Permit2 owner must be the ERC-2771 sender");
+        assertEq(permit2.lastSpender(), address(compatibleGateway), "Permit2 must authorize the gateway");
+        assertEq(token.balanceOf(address(router)), _AMOUNT, "Permit2 payment should settle through the router");
+        assertTrue(
+            compatibleGateway.supportsInterface(type(IJBPermitTerminal).interfaceId),
+            "resolved gateway must advertise Permit2"
+        );
     }
 
     function test_failedDirectAddToBalanceRevertsSynchronously() public {
@@ -1173,7 +1378,10 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         JBRouterTerminalRegistry registry = JBRouterTerminalRegistry(_REGISTRY);
         IJBRouterTerminal router = IJBRouterTerminal(address(registry.terminalOf(1)));
         gateway = new JBRouterTerminalGateway({
-            directory: IGatewayDirectoryProvider(address(router)).DIRECTORY(), router: router
+            directory: IGatewayDirectoryProvider(address(router)).DIRECTORY(),
+            permit2: registry.PERMIT2(),
+            router: router,
+            trustedForwarder: registry.trustedForwarder()
         });
 
         // Match deployment: changing the default does not move project 1, then the migration list does so explicitly.
@@ -1184,6 +1392,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         RouterTerminalMigrationLib.migrateProjects({
             registry: registry, terminal: gateway, projectCount: registry.PROJECTS().count(), projectIds: projectIds
         });
+        RouterTerminalMigrationLib.requireMigratedProject({registry: registry, terminal: gateway, projectId: 1});
         vm.stopPrank();
 
         assertEq(address(registry.terminalOf(1)), address(gateway), "deployment migration must repoint fee project");
@@ -1205,6 +1414,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
 
         JBRouterTerminalGateway gateway = _installGateway();
+        assertGe(gateway.maximumQualifiedCallGas(), 20_000_000, "Base must support the complete default gas ladder");
         uint256 gatewayBalanceBefore = IERC20(_USDC).balanceOf(address(gateway));
         uint256 payoutBalanceBefore = IERC20(_USDC).balanceOf(_PAYOUT_BENEFICIARY);
 

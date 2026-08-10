@@ -77,7 +77,7 @@ The shortest useful reading order is:
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 - shape-qualified failed fees and payouts through the gateway become asynchronous pending calls; ordinary caller failures remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
-- gas-exhausted pending routes automatically retry with 5M, 10M, 15M, then 20M gas; `processPendingCallWithGas` may exceed, but cannot undercut, the current step
+- gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable block budget, and `processPendingCallWithGas` must stay between the current step and that cap
 - deployment attempts project 1 plus `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS` without aborting on unauthorized cohorts; each failure emits `RouterTerminalMigrationFailed`
 - an authorized project owner or operator can finish one failed cohort with `script/MigrateProject.s.sol`
 
@@ -150,7 +150,7 @@ script/
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 - the gateway retains original inputs only when the resolved payer self-identifies as a terminal and metadata supplies a nonzero raw source project ID; this is a shape check, not authentication, and ordinary callers or non-zero-minimum payments still revert synchronously
-- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose required budgets escalate from 5M through 20M
+- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable block budget
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths

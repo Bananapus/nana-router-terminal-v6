@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
+import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 
 import {IJBForwardingTerminal} from "./IJBForwardingTerminal.sol";
 import {IJBRouterTerminal} from "./IJBRouterTerminal.sol";
@@ -11,7 +12,7 @@ import {JBPendingRouterTerminalCall} from "../structs/JBPendingRouterTerminalCal
 import {JBPendingRouterTerminalCallFailure} from "../structs/JBPendingRouterTerminalCallFailure.sol";
 
 /// @notice A fail-closed gateway which retains original input tokens when a router-terminal call fails.
-interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJBRouterTerminal {
+interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJBPermitTerminal, IJBRouterTerminal {
     /// @notice Emitted after a retained call succeeds on a permissionless retry.
     /// @param id The pending call identifier.
     /// @param call The call which was processed.
@@ -67,6 +68,10 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @notice The immutable router terminal called by this gateway.
     /// @return router The downstream router terminal.
     function ROUTER() external view returns (IJBRouterTerminal router);
+
+    /// @notice The largest qualified call budget executable under the live chain's block gas limit.
+    /// @return gasLimit The maximum gas which may be forwarded while preserving accounting reserves.
+    function maximumQualifiedCallGas() external view returns (uint256 gasLimit);
 
     /// @notice The total number of pending-call identifiers issued.
     /// @return count The issued identifier count.

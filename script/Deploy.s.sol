@@ -214,8 +214,9 @@ contract DeployScript is Script, Sphinx {
 
         // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
         // failed fee and project-payout routes.
-        JBRouterTerminalGateway gateway =
-            new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({directory: core.directory, router: terminal});
+        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({
+            directory: core.directory, permit2: IPermit2(permit2), router: terminal, trustedForwarder: trustedForwarder
+        });
 
         // Point the registry at the gateway. Existing registries use the same operation when selecting this
         // implementation; no registry bytecode or storage-layout change is required.
@@ -232,6 +233,13 @@ contract DeployScript is Script, Sphinx {
             terminal: IJBTerminal(address(gateway)),
             projectCount: core.projects.count(),
             projectIds: projectIds
+        });
+
+        // Abort unless the fee project actually moved, so a successful deployment cannot leave fee forgiveness live.
+        RouterTerminalMigrationLib.requireMigratedProject({
+            registry: registry,
+            terminal: IJBTerminal(address(gateway)),
+            projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID
         });
     }
 
