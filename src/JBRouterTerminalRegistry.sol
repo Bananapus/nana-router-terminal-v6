@@ -55,11 +55,11 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @notice Thrown when native tokens are sent on a call that does not accept them.
     error JBRouterTerminalRegistry_NoMsgValueAllowed(uint256 value);
 
-    /// @notice Thrown when attempting to process a pending terminal call that does not exist.
-    error JBRouterTerminalRegistry_PendingTerminalCallNotFound(bytes32 id);
-
     /// @notice Thrown when the payment amount exceeds the Permit2 allowance provided in the metadata.
     error JBRouterTerminalRegistry_PermitAllowanceNotEnough(uint256 amount, uint256 allowanceAmount);
+
+    /// @notice Thrown when attempting to process a pending terminal call that does not exist.
+    error JBRouterTerminalRegistry_PendingTerminalCallNotFound(bytes32 id);
 
     /// @notice Thrown when changing a project's terminal after its terminal choice has been permanently locked.
     error JBRouterTerminalRegistry_TerminalLocked(uint256 projectId);
@@ -138,7 +138,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     mapping(uint256 projectId => IJBTerminal) internal _terminalOf;
 
     /// @notice Terminal-originated project payments retained after their downstream forwarding call failed.
-    /// @dev Appended after `_terminalOf` to preserve the registry's established storage layout.
     /// @custom:param id The deterministic identifier derived from the call's immutable routing fields.
     mapping(bytes32 id => JBPendingTerminalCall) internal _pendingTerminalCallOf;
 
@@ -275,13 +274,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return _defaultTerminalHistory.length;
     }
 
-    /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
-    /// @param id The deterministic pending-call identifier.
-    /// @return call The retained terminal call.
-    function pendingTerminalCallOf(bytes32 id) external view override returns (JBPendingTerminalCall memory call) {
-        return _pendingTerminalCallOf[id];
-    }
-
     /// @notice Preview a payment by forwarding the call to the terminal currently resolved for the project.
     /// @dev Uses the project-specific terminal when set, otherwise falls back to `defaultTerminal`.
     /// @param projectId The ID of the project to pay.
@@ -327,6 +319,13 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return _resolvedTerminalOf(projectId);
     }
 
+    /// @notice Return a terminal-originated payment retained after downstream forwarding failed.
+    /// @param id The deterministic pending-call identifier.
+    /// @return call The retained terminal call.
+    function pendingTerminalCallOf(bytes32 id) external view override returns (JBPendingTerminalCall memory call) {
+        return _pendingTerminalCallOf[id];
+    }
+
     //*********************************************************************//
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
@@ -347,30 +346,6 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
     /// @dev `ERC-2771` specifies the context as being a single address (20 bytes).
     function _contextSuffixLength() internal view override(ERC2771Context, Context) returns (uint256) {
         return super._contextSuffixLength();
-    }
-
-    /// @notice The default terminal that applies to a project on fall-through, taking the historical
-    /// setDefaultTerminal snapshots into account so existing projects are not silently rerouted by a later default
-    /// change.
-    /// @param projectId The project to resolve the default for.
-    /// @return terminal The default terminal applicable to this project (zero if none).
-    function _defaultTerminalFor(uint256 projectId) internal view returns (IJBTerminal terminal) {
-        // New projects (created after the most recent setDefaultTerminal) get the current default.
-        if (projectId > defaultTerminalProjectIdThreshold) return defaultTerminal;
-
-        // Older projects walk the history. Each segment covers a half-open range
-        // `(minProjectIdExclusive, maxProjectId]`. The first segment covers every project that already existed when the
-        // first default was set (mapped to that first default, so they route through it); later segments each cover the
-        // cohort issued while their terminal was the active default. A project only resolves to `address(0)` here when
-        // no default has ever been set.
-        uint256 len = _defaultTerminalHistory.length;
-        for (uint256 i; i < len; ++i) {
-            DefaultTerminalSegment storage segment = _defaultTerminalHistory[i];
-            if (projectId > segment.minProjectIdExclusive && projectId <= segment.maxProjectId) {
-                return segment.terminal;
-            }
-        }
-        return IJBTerminal(address(0));
     }
 
     /// @notice Prevent the registry from forwarding straight back into its immediate caller.
@@ -428,9 +403,10 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         return upstream == address(0) ? sender : upstream;
     }
 
-    /// @notice Reject terminal choices that would forward the project back into this registry, directly or
-    /// transitively. Walks up to the depth limit `JBForwardingCheck` enforces so a chain
-    /// registry -> A -> B -> registry cannot be selected as a route.
+    /// @notice Reject terminal choices that would forward the project back into this registry,
+    /// directly or transitively. Walks up to the depth limit `JBForwardingCheck` enforces so a
+    /// chain registry -> A -> B -> registry is caught (the previous one-hop probe missed those
+    /// transitive cycles, letting a project lock itself into a route that always loops).
     /// @param projectId The project to validate forwarding for.
     /// @param terminal The terminal to validate.
     function _requireNonCircularTerminalFor(uint256 projectId, IJBTerminal terminal) internal view {
@@ -441,14 +417,28 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
         }
     }
 
-    /// @notice Resolve the effective terminal for call paths that need to forward into a real terminal.
-    /// @dev `terminalOf`/`defaultTerminalFor` return zero only when no default has ever been set. Transactional
-    /// and passthrough view paths must fail before accepting funds or calling address(0).
-    /// @param projectId The project to resolve the terminal for.
-    /// @return terminal The project-specific terminal or threshold-resolved default.
-    function _requireResolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
-        terminal = _resolvedTerminalOf(projectId);
-        if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
+    /// @notice The default terminal that applies to a project on fall-through, taking the historical
+    /// setDefaultTerminal snapshots into account so existing projects are not silently rerouted by a later default
+    /// change.
+    /// @param projectId The project to resolve the default for.
+    /// @return terminal The default terminal applicable to this project (zero if none).
+    function _defaultTerminalFor(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        // New projects (created after the most recent setDefaultTerminal) get the current default.
+        if (projectId > defaultTerminalProjectIdThreshold) return defaultTerminal;
+
+        // Older projects walk the history. Each segment covers a half-open range
+        // `(minProjectIdExclusive, maxProjectId]`. The first segment covers every project that already existed when the
+        // first default was set (mapped to that first default, so they route through it); later segments each cover the
+        // cohort issued while their terminal was the active default. A project only resolves to `address(0)` here when
+        // no default has ever been set.
+        uint256 len = _defaultTerminalHistory.length;
+        for (uint256 i; i < len; ++i) {
+            DefaultTerminalSegment storage segment = _defaultTerminalHistory[i];
+            if (projectId > segment.minProjectIdExclusive && projectId <= segment.maxProjectId) {
+                return segment.terminal;
+            }
+        }
+        return IJBTerminal(address(0));
     }
 
     /// @notice Resolve the effective terminal for a project. Falls back to the default that was current at the time
@@ -462,6 +452,16 @@ contract JBRouterTerminalRegistry is IJBRouterTerminalRegistry, JBPermissioned, 
 
         // Fall back to the appropriate default for this project's ID cohort.
         if (terminal == IJBTerminal(address(0))) terminal = _defaultTerminalFor(projectId);
+    }
+
+    /// @notice Resolve the effective terminal for call paths that need to forward into a real terminal.
+    /// @dev `terminalOf`/`defaultTerminalFor` return zero only when no default has ever been set. Transactional
+    /// and passthrough view paths must fail before accepting funds or calling address(0).
+    /// @param projectId The project to resolve the terminal for.
+    /// @return terminal The project-specific terminal or threshold-resolved default.
+    function _requireResolvedTerminalOf(uint256 projectId) internal view returns (IJBTerminal terminal) {
+        terminal = _resolvedTerminalOf(projectId);
+        if (terminal == IJBTerminal(address(0))) revert JBRouterTerminalRegistry_TerminalNotSet(projectId);
     }
 
     /// @notice Decode the raw source-project metadata used by core terminal project transfers.

@@ -28,15 +28,6 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param caller The address that called the function.
     event JBRouterTerminalRegistry_LockTerminal(uint256 indexed projectId, address caller);
 
-    /// @notice Emitted after a retained terminal call is successfully retried.
-    /// @param id The deterministic identifier of the processed call.
-    /// @param call The pending call that was processed.
-    /// @param terminal The terminal that received the retained funds.
-    /// @param caller The address that retried the call.
-    event JBRouterTerminalRegistry_ProcessTerminalCall(
-        bytes32 indexed id, JBPendingTerminalCall call, IJBTerminal terminal, address caller
-    );
-
     /// @notice Emitted when a terminal-originated payment is retained after its downstream forwarding call fails.
     /// @param id The deterministic identifier of the pending call.
     /// @param call The pending call that was retained.
@@ -44,6 +35,15 @@ interface IJBRouterTerminalRegistry is IJBTerminal, IJBForwardingTerminal, IJBPa
     /// @param caller The address that originated the registry call.
     event JBRouterTerminalRegistry_QueueTerminalCall(
         bytes32 indexed id, JBPendingTerminalCall call, uint256 amount, address caller
+    );
+
+    /// @notice Emitted after a retained terminal call is successfully retried.
+    /// @param id The deterministic identifier of the processed call.
+    /// @param call The pending call that was processed.
+    /// @param terminal The terminal that received the retained funds.
+    /// @param caller The address that retried the call.
+    event JBRouterTerminalRegistry_ProcessTerminalCall(
+        bytes32 indexed id, JBPendingTerminalCall call, IJBTerminal terminal, address caller
     );
 
     /// @notice Emitted when the default terminal is changed.
