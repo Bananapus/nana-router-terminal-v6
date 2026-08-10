@@ -22,7 +22,43 @@ contract GatewayTestToken is ERC20 {
     constructor() ERC20("Test", "TST") {}
 
     function mint(address account, uint256 amount) external {
+        _mint({account: account, value: amount});
+    }
+}
+
+interface IGatewayRouterCallback {
+    function beforeGatewayRouterPull() external;
+}
+
+interface IGatewayTokenTransferCallback {
+    function beforeGatewayTokenTransfer() external;
+}
+
+contract GatewayCallbackToken is ERC20 {
+    address public callback;
+    address public gateway;
+
+    bool internal _callingBack;
+
+    constructor() ERC20("Callback", "CBK") {}
+
+    function configure(address gatewayAddress, address callbackAddress) external {
+        callback = callbackAddress;
+        gateway = gatewayAddress;
+    }
+
+    function mint(address account, uint256 amount) external {
         _mint(account, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        if (msg.sender == gateway && from == callback && to == gateway && !_callingBack) {
+            _callingBack = true;
+            IGatewayTokenTransferCallback(callback).beforeGatewayTokenTransfer();
+            _callingBack = false;
+        }
+
+        return super.transferFrom({from: from, to: to, value: amount});
     }
 }
 
@@ -35,9 +71,14 @@ contract GatewayTestProjects {
 contract GatewayTestRouter {
     error GatewayTestRouter_FailureA();
     error GatewayTestRouter_FailureB();
+    error GatewayTestRouter_FailureWithArgument(uint256 argument);
 
+    address public beforePullCallback;
+    uint256 public failureArgument;
     uint256 public mode = 1;
     uint256 public received;
+
+    bool internal _callingBeforePull;
 
     receive() external payable {}
 
@@ -74,11 +115,25 @@ contract GatewayTestRouter {
         return amount;
     }
 
+    function setBeforePullCallback(address newCallback) external {
+        beforePullCallback = newCallback;
+    }
+
+    function setFailureArgument(uint256 newArgument) external {
+        failureArgument = newArgument;
+    }
+
     function setMode(uint256 newMode) external {
         mode = newMode;
     }
 
     function _accept(address token, uint256 amount) internal {
+        if (beforePullCallback != address(0) && !_callingBeforePull) {
+            _callingBeforePull = true;
+            IGatewayRouterCallback(beforePullCallback).beforeGatewayRouterPull();
+            _callingBeforePull = false;
+        }
+
         if (token == JBConstants.NATIVE_TOKEN) {
             require(msg.value == amount, "native amount");
         } else {
@@ -100,6 +155,97 @@ contract GatewayTestRouter {
                 return(0, 0)
             }
         }
+        if (mode == 5) revert GatewayTestRouter_FailureWithArgument(failureArgument);
+    }
+}
+
+contract GatewayNestedPayer is IGatewayRouterCallback {
+    uint256 internal constant _SOURCE_PROJECT_ID = 2;
+
+    uint256 public amount;
+    JBRouterTerminalGateway public gateway;
+    GatewayTestRouter public router;
+    GatewayTestToken public token;
+
+    function beforeGatewayRouterPull() external {
+        require(msg.sender == address(router));
+        gateway.pay({
+            projectId: 1,
+            token: address(token),
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+    }
+
+    function configure(
+        JBRouterTerminalGateway gatewayToUse,
+        GatewayTestRouter routerToUse,
+        GatewayTestToken tokenToUse,
+        uint256 amountToUse
+    )
+        external
+    {
+        amount = amountToUse;
+        gateway = gatewayToUse;
+        router = routerToUse;
+        token = tokenToUse;
+        tokenToUse.approve({spender: address(gatewayToUse), value: amountToUse});
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+}
+
+contract GatewayReentrantPayer is IGatewayTokenTransferCallback {
+    uint256 internal constant _SOURCE_PROJECT_ID = 2;
+
+    JBRouterTerminalGateway public gateway;
+    uint256 public reentryAmount;
+    bool public reentryReverted;
+    GatewayCallbackToken public token;
+
+    function attack(JBRouterTerminalGateway gatewayToUse, GatewayCallbackToken tokenToUse, uint256 amount) external {
+        gateway = gatewayToUse;
+        token = tokenToUse;
+        reentryAmount = amount;
+
+        tokenToUse.approve({spender: address(gatewayToUse), value: amount * 2});
+        gatewayToUse.pay({
+            projectId: 1,
+            token: address(tokenToUse),
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+    }
+
+    function beforeGatewayTokenTransfer() external {
+        require(msg.sender == address(token));
+
+        try gateway.pay({
+            projectId: 1,
+            token: address(token),
+            amount: reentryAmount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        }) returns (
+            uint256
+        ) {}
+        catch {
+            reentryReverted = true;
+        }
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 }
 
@@ -304,6 +450,33 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "successful retry should delete pending state");
     }
 
+    function test_callbackTokenCannotOvercreditPooledCustody() public {
+        uint256 attackerAmount = 100;
+        uint256 victimAmount = 1000;
+        GatewayCallbackToken callbackToken = new GatewayCallbackToken();
+        GatewayReentrantPayer attacker = new GatewayReentrantPayer();
+
+        callbackToken.configure({gatewayAddress: address(gateway), callbackAddress: address(attacker)});
+        callbackToken.mint({account: address(sourceTerminal), amount: victimAmount});
+        callbackToken.mint({account: address(attacker), amount: attackerAmount * 2});
+
+        sourceTerminal.payFee({
+            feeTerminal: registry,
+            token: address(callbackToken),
+            amount: victimAmount,
+            sourceProjectId: _SOURCE_PROJECT_ID
+        });
+        attacker.attack({gatewayToUse: gateway, tokenToUse: callbackToken, amount: attackerAmount});
+
+        assertTrue(attacker.reentryReverted(), "nested intake should revert inside the callback");
+        assertEq(gateway.pendingCallCount(), 2, "the callback must not create an over-credited pending call");
+        assertEq(gateway.pendingCallOf(_ID).amount, victimAmount, "victim claim changed");
+        assertEq(gateway.pendingCallOf(bytes32(uint256(2))).amount, attackerAmount, "attacker claim was inflated");
+        assertEq(
+            callbackToken.balanceOf(address(gateway)), victimAmount + attackerAmount, "custody must cover every claim"
+        );
+    }
+
     function test_changedErrorResetsMatchingFailureStreak() public {
         _queueFee(address(token));
         gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
@@ -322,6 +495,61 @@ contract RouterTerminalGatewayFailureTest is Test {
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
         assertEq(gateway.pendingCallFailureOf(_ID).count, 2, "the new matching error can start a fresh streak");
+    }
+
+    function test_dynamicErrorArgumentsDoNotResetMatchingFailureStreak() public {
+        router.setMode(5);
+        router.setFailureArgument(1);
+        _queueFee(address(token));
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
+        assertEq(first.count, 1);
+
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        router.setFailureArgument(2);
+        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        JBPendingRouterTerminalCallFailure memory second = gateway.pendingCallFailureOf(_ID);
+        assertEq(second.count, 2, "arguments from the same custom error must not reset qualification");
+        assertEq(second.errorHash, first.errorHash, "the failure class should encode only the selector");
+    }
+
+    function test_failedDirectAddToBalanceRevertsSynchronously() public {
+        token.mint(address(this), _AMOUNT);
+        token.approve(address(gateway), _AMOUNT);
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.addToBalanceOf({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            shouldReturnHeldFees: false,
+            memo: "",
+            metadata: ""
+        });
+
+        assertEq(gateway.pendingCallCount(), 0, "ordinary add-to-balance failure must not be retained");
+        assertEq(token.balanceOf(address(this)), _AMOUNT, "revert should restore the payer's token");
+    }
+
+    function test_failedDirectPayRevertsSynchronously() public {
+        token.mint(address(this), _AMOUNT);
+        token.approve(address(gateway), _AMOUNT);
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+
+        assertEq(gateway.pendingCallCount(), 0, "ordinary zero-minimum pay failure must not be retained");
+        assertEq(token.balanceOf(address(this)), _AMOUNT, "revert should restore the payer's token");
     }
 
     function test_finalChangedErrorResetsWithoutRefunding() public {
@@ -359,30 +587,6 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         assertTrue(wasRefunded);
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
-        assertEq(token.balanceOf(address(gateway)), 0);
-    }
-
-    function test_finalMatchingErrorRefundsDirectPayer() public {
-        token.mint(address(this), _AMOUNT);
-        token.approve(address(gateway), _AMOUNT);
-        gateway.pay({
-            projectId: _DESTINATION_PROJECT_ID,
-            token: address(token),
-            amount: _AMOUNT,
-            beneficiary: address(this),
-            minReturnedTokens: 0,
-            memo: "",
-            metadata: ""
-        });
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(this));
-        assertFalse(gateway.pendingCallOf(_ID).refundToProject);
-        _qualifyWithMatchingFailures({id: _ID, metadata: ""});
-        vm.warp(block.timestamp + gateway.RETRY_DELAY());
-
-        (bool wasRefunded,) = gateway.finalizePendingCall({id: _ID, memo: "", metadata: ""});
-
-        assertTrue(wasRefunded);
-        assertEq(token.balanceOf(address(this)), _AMOUNT, "direct payer should reclaim original input");
         assertEq(token.balanceOf(address(gateway)), 0);
     }
 
@@ -506,6 +710,31 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(router)), _AMOUNT, "only first pending input should settle");
     }
 
+    function test_nestedSameTokenRouteRestoresOuterRouterAllowance() public {
+        uint256 nestedAmount = 1000;
+        GatewayNestedPayer nestedPayer = new GatewayNestedPayer();
+        token.mint({account: address(nestedPayer), amount: nestedAmount});
+        nestedPayer.configure({
+            gatewayToUse: gateway, routerToUse: router, tokenToUse: token, amountToUse: nestedAmount
+        });
+
+        router.setMode(0);
+        router.setBeforePullCallback(address(nestedPayer));
+        sourceTerminal.sendPayout({
+            terminal: registry,
+            destinationProjectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            sourceProjectId: _SOURCE_PROJECT_ID,
+            preferAddToBalance: false
+        });
+
+        assertFalse(sourceTerminal.payoutWasNullified());
+        assertEq(gateway.pendingCallCount(), 0, "nested route must not erase the outer Router allowance");
+        assertEq(token.balanceOf(address(router)), _AMOUNT + nestedAmount, "both same-token routes should settle");
+        assertEq(token.balanceOf(address(gateway)), 0);
+    }
+
     function test_nonzeroMinimumStillRevertsSynchronously() public {
         token.mint(address(this), _AMOUNT);
         token.approve(address(gateway), _AMOUNT);
@@ -568,6 +797,25 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0);
         assertEq(gateway.pendingCallOf(_ID).refundTo, address(0));
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
+    }
+
+    function test_terminalCallWithoutSourceProjectRevertsSynchronously() public {
+        vm.startPrank(address(sourceTerminal));
+        token.approve(address(gateway), _AMOUNT);
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(sourceTerminal),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+        vm.stopPrank();
+
+        assertEq(gateway.pendingCallCount(), 0, "malformed terminal metadata must not create direct-refund custody");
+        assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT, "revert should restore terminal funds");
     }
 
     function test_threeMatchingFailuresAdvanceQualification() public {

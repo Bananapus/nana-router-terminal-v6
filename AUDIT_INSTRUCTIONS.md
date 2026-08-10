@@ -49,7 +49,7 @@ The router terminal:
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
 
-The gateway selected by the registry takes custody before calling the immutable Router. Failed zero-minimum calls become permissionlessly retryable; refunds require a time-separated matching-error streak and one final matching failure.
+The gateway selected by the registry takes custody before calling the immutable Router. Only failed calls from a verified source-project terminal become permissionlessly retryable; ordinary caller failures remain synchronous. Refunds require a time-separated matching-selector streak and one final matching failure.
 
 ## Roles and privileges
 
@@ -81,7 +81,7 @@ The gateway selected by the registry takes custody before calling the immutable 
 5. Pending custody is conserved.
    Each pending amount remains in the gateway's original input token until the exact call settles or an atomic refund credits its fixed recipient.
 6. Error changes block finalization.
-   Qualification advances only for the same bounded fingerprint; any changed retry or final error resets the streak.
+   Qualification advances only for the same error selector; encoded arguments are ignored and any changed retry or final selector resets the streak.
 
 ## Attack surfaces
 
@@ -90,7 +90,7 @@ The gateway selected by the registry takes custody before calling the immutable 
 - V4 unlock callback and swap settlement
 - pool discovery and best-path selection
 - registry allowlist and lock behavior
-- gateway gas reservation, bounded return-data handling, retry timing, reentrancy, and refund rollback
+- gateway gas reservation, selector-bounded return-data handling, retry timing, reentrancy, nested allowances, and refund rollback
 
 ## Verification
 

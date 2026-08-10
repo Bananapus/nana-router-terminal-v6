@@ -37,7 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
-| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains failed zero-minimum calls, and manages autonomous retry or refund. |
+| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains failed terminal-originated calls, and manages autonomous retry or refund. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
@@ -75,7 +75,7 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
-- zero-minimum failures through the gateway become asynchronous pending calls; retry calldata must reproduce the original memo and metadata
+- failed terminal-originated fees and payouts through the gateway become asynchronous pending calls; ordinary caller failures remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
 
 ## Where state lives
@@ -144,8 +144,8 @@ script/
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
-- the gateway retains original inputs only for failed `addToBalanceOf` calls and failed `pay` calls whose `minReturnedTokens` is zero; non-zero-minimum failures still revert synchronously
-- three identical five-million-gas failures separated by one day qualify a pending call for a final attempt after another day; any changed error fingerprint resets the streak
+- the gateway retains original inputs only when a verified source-project terminal supplies the raw source project ID; ordinary callers and non-zero-minimum payments still revert synchronously
+- three failures with the same error selector and five-million-gas budget, separated by one day, qualify a pending call for a final attempt after another day; encoded error arguments do not reset the streak
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths

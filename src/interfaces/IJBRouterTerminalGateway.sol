@@ -23,7 +23,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @notice Emitted when a failed router-terminal call is retained for retry.
     /// @param id The pending call identifier.
     /// @param call The retained call.
-    /// @param errorHash The bounded fingerprint of the initial downstream error.
+    /// @param errorHash The selector-level fingerprint of the initial downstream error.
     /// @param caller The account whose call was retained.
     event JBRouterTerminalGateway_QueuePendingCall(
         bytes32 indexed id, JBPendingRouterTerminalCall call, bytes32 errorHash, address caller
@@ -31,15 +31,15 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Emitted when a qualified retry fails.
     /// @param id The pending call identifier.
-    /// @param errorHash The bounded downstream error fingerprint.
-    /// @param count The consecutive qualified attempts with this exact fingerprint.
+    /// @param errorHash The selector-level downstream error fingerprint.
+    /// @param count The consecutive qualified attempts with this error selector.
     /// @param nextAttemptAt The earliest timestamp of the next qualified attempt.
     /// @param caller The account which attempted the call.
     event JBRouterTerminalGateway_RecordTerminalCallFailure(
         bytes32 indexed id, bytes32 indexed errorHash, uint32 count, uint256 nextAttemptAt, address caller
     );
 
-    /// @notice Emitted when a consistently failing call is returned to its payer or source project.
+    /// @notice Emitted when a consistently failing call is returned to its source project.
     /// @param id The pending call identifier.
     /// @param call The refunded call.
     /// @param caller The account which finalized the refund.
@@ -77,7 +77,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return call The retained call.
     function pendingCallOf(bytes32 id) external view returns (JBPendingRouterTerminalCall memory call);
 
-    /// @notice Make one final qualified attempt, refunding only if its fingerprint still matches the qualified streak.
+    /// @notice Make one final qualified attempt, refunding only if its error selector matches the qualified streak.
     /// @param id The pending call identifier.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.

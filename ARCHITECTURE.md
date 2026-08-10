@@ -8,7 +8,7 @@ The router is intentionally heuristic. It does not search every possible route f
 
 ## System overview
 
-`JBRouterTerminal` is a terminal-shaped route executor, not an accounting source of truth. `JBRouterTerminalGateway` is the fail-closed implementation selected by `JBRouterTerminalRegistry`: it owns the outer atomic boundary around a Router call and retains the original input if that call fails. The registry remains a stable project-facing proxy and is unchanged by this mechanism. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
+`JBRouterTerminal` is a terminal-shaped route executor, not an accounting source of truth. `JBRouterTerminalGateway` is the fail-closed implementation selected by `JBRouterTerminalRegistry`: it owns the outer atomic boundary around a Router call and retains failed input only for verified source-project terminal calls. The registry remains a stable project-facing proxy and is unchanged by this mechanism. `JBPayRouteResolver` expands preview candidates without forcing the main router contract to carry all preview complexity inline.
 
 Final accounting still happens in the downstream terminal selected through `nana-core-v6`.
 
@@ -19,7 +19,8 @@ Final accounting still happens in the downstream terminal selected through `nana
 - buyback-hook preview scoring must distinguish executable floors from diagnostics
 - refund behavior is part of correctness, not only UX
 - a failed gateway attempt rolls back every swap and downstream call before the original input is retained
-- qualified failure streaks advance only on identical bounded error fingerprints; a changed fingerprint resets the streak
+- qualified failure streaks advance on identical error selectors; encoded arguments are ignored and a changed selector resets the streak
+- callback-capable ERC-20 inputs cannot nest another intake inside the gateway's balance-delta measurement
 - registry locking prevents silent migration to untrusted router implementations
 - `addToBalanceOf` final hops reject ERC-20 receipt shortfalls; `pay` cannot rely on terminal balance deltas because pay hooks can consume tokens during settlement
 - recursive project-token cashout routing is intentionally bounded
@@ -64,19 +65,20 @@ router pay call
 registry forwards original input to gateway
   -> gateway calls immutable router inside one fallible external-call boundary
   -> success: route settles synchronously
-  -> failure: every inner transfer/swap rolls back and gateway retains the original input token
+  -> ordinary caller failure: the call reverts synchronously
+  -> verified source-terminal failure: every inner transfer/swap rolls back and gateway retains the original input token
   -> anyone may retry with the original memo and metadata and at least the qualified gas budget
-  -> matching errors: advance at most once per day
-  -> changed error: reset the streak to one and keep retrying
+  -> matching error selectors: advance at most once per day, regardless of encoded arguments
+  -> changed selector: reset the streak to one and keep retrying
   -> after three matches and one more day: one final qualified attempt
        -> success: settle
-       -> changed error: reset and retain
-       -> same error: atomically refund the payer or source project's terminal
+       -> changed selector: reset and retain
+       -> same selector: atomically refund the source project's terminal
 ```
 
 ## Accounting model
 
-The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of failed calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic refund; they are never reported as project surplus by the gateway.
+The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of failed terminal-originated calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic source-project refund; they are never reported as project surplus by the gateway.
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 
@@ -89,6 +91,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - the router's "best route" claim is only as strong as its bounded discovery set and external-terminal safety checks
 - recursive cashout behavior, preferred-token handling, and one-shot source overrides are tightly coupled
 - a refund to a source project deletes pending state before interaction and relies on transaction rollback to restore state and custody if the source terminal rejects it
+- the gateway closes only its inbound balance-delta window against reentrancy and restores nested Router allowances so legitimate downstream forwarding hooks remain composable
 - retry and final attempts forward exactly `QUALIFIED_CALL_GAS`; entrypoint attempts dynamically reserve `_FAILURE_GAS_RESERVE` for durable queueing
 
 ## Safe change guide

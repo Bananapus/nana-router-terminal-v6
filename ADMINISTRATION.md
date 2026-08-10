@@ -36,7 +36,7 @@
 | `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and the default fallback for NEW projects only. `setDefaultTerminal` snapshots the outgoing default into `_defaultTerminalHistory` so projects with ID <= `defaultTerminalProjectIdThreshold` continue to resolve against the default that was current when their cohort was active. |
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
-| `JBRouterTerminalGateway` | `processPendingCall(...)`, `finalizePendingCall(...)` | Anyone | Applies immutable gas, delay, and matching-error rules; no caller can choose the refund recipient |
+| `JBRouterTerminalGateway` | `processPendingCall(...)`, `finalizePendingCall(...)` | Anyone | Applies immutable gas, delay, and matching-selector rules; no caller can choose the refund recipient |
 
 ## Immutable and one-way
 
@@ -76,7 +76,7 @@
 - project operators cannot set a terminal that the registry does not allow
 - router maintainers cannot tune routing heuristics or constructor immutables post-deploy
 - there is no pause surface in the registry or router
-- no administrator can accelerate a pending refund, waive matching-error requirements, alter its source project, or redirect escrow
+- no administrator can accelerate a pending refund, waive matching-selector requirements, alter its source project, or redirect escrow
 
 ## Source map
 

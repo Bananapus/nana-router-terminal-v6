@@ -26,7 +26,7 @@ This is a V5-to-V6 migration changelog, not a package release log or commit hist
 - The router terminal inherits the broader `IJBTerminal` surface and supports V6 preview flows.
 - The router can cash out JB project tokens as part of a route. Unclaimed credit inputs are not a direct router input; users should materialize credits first.
 - Registry defaults are thresholded by project ID and expose history so changing the default does not silently reroute older projects.
-- The deployed Registry target can be a fail-closed Gateway which atomically calls the Router and retains failed zero-minimum calls without changing Registry code.
+- The deployed Registry target can be a fail-closed Gateway which atomically calls the Router and retains failed terminal-originated fees and payouts without changing Registry code.
 - Metadata purposes use V6 lifecycle names: router metadata should use `pay` and `cashOut`, keyed to the router address.
 
 ## ABI, Event, and Error Changes

@@ -61,6 +61,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - quotes are stale or liquidity moved before execution
 - permit, allowance, or refund handling breaks mid-route
 - metadata is valid for the destination terminal but not for route-discovery assumptions
+- a failed ordinary user route reverts synchronously instead of becoming pending custody
 
 **Postconditions**
 - the router converts the user's asset into the terminal's accepted asset and forwards the payment
@@ -132,7 +133,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Actor:** any keeper, frontend, or interested account.
 
-**Intent:** settle a failed zero-minimum route without forgiving a fee or nullifying a project payout.
+**Intent:** settle a failed terminal-originated route without forgiving a fee or nullifying a project payout.
 
 **Preconditions**
 - the Gateway emitted `JBRouterTerminalGateway_QueuePendingCall`
@@ -140,11 +141,11 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Main Flow**
 1. Anyone calls `processPendingCall` with the pending ID and original data.
-2. A successful attempt settles immediately. A failed, five-million-gas attempt records its error fingerprint.
+2. A successful attempt settles immediately. A failed, five-million-gas attempt records its error selector without encoded arguments.
 3. Wait at least one day between qualified failures.
-4. If an error changes, the count resets to one and retries continue.
+4. If the selector changes, the count resets to one and retries continue; changed arguments for the same selector do not reset.
 5. After three matching failures and one more day, anyone calls `finalizePendingCall`.
-6. The final attempt settles if possible, resets on a changed error, or atomically refunds the fixed payer/source project after the same error.
+6. The final attempt settles if possible, resets on a changed selector, or atomically refunds the fixed source project after the same selector.
 
 **Failure Modes**
 - underfunded retries revert without advancing qualification
@@ -152,7 +153,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - a source terminal rejects the refund, reverting finalization and preserving pending custody
 
 **Postconditions**
-- the original input is either settled, still represented by pending state, or credited back to its predetermined payer/project
+- the original input is either settled, still represented by pending state, or credited back to its predetermined source project
 
 ## Trust boundaries
 

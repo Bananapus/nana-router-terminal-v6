@@ -9,7 +9,6 @@ import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSp
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
@@ -52,7 +51,10 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Thrown when ordinary processing is attempted after a call has qualified for finalization.
     error JBRouterTerminalGateway_PendingCallRequiresFinalization(bytes32 id);
 
-    /// @notice Thrown when a `pay` call with a non-zero minimum cannot be settled synchronously.
+    /// @notice Thrown when a callback-capable token re-enters the inbound balance-delta measurement.
+    error JBRouterTerminalGateway_ReentrantTokenTransfer(address token);
+
+    /// @notice Thrown when a call which is not eligible for retention cannot be settled synchronously.
     error JBRouterTerminalGateway_RouteFailed(bytes32 errorHash);
 
     /// @notice Thrown when the immutable router is the zero address.
@@ -77,9 +79,6 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
     /// @notice Gas retained around an attempted route for cleanup and durable failure accounting.
     uint256 internal constant _FAILURE_GAS_RESERVE = 750_000;
-
-    /// @notice The maximum amount of return data included in a bounded failure fingerprint.
-    uint256 internal constant _MAX_ERROR_DATA_LENGTH = 256;
 
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
@@ -109,6 +108,9 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // ------------------- transient stored properties ------------------- //
     //*********************************************************************//
 
+    /// @notice Whether an ERC-20 transfer is inside its inbound balance-delta measurement.
+    bool internal transient _acceptingToken;
+
     /// @notice The original payer propagated into the downstream router during an active attempt.
     address public transient override originalPayer;
 
@@ -136,7 +138,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     /// @notice Empty implementation because accounting contexts are delegated to `ROUTER`.
     function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
 
-    /// @notice Route an add-to-balance call, retaining its original input if the atomic router call fails.
+    /// @notice Route an add-to-balance call, retaining failed input only for a verified source-project terminal.
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -168,10 +170,14 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         });
 
         (bool success, bytes32 errorHash,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
-        if (!success) _queue({call: call, errorHash: errorHash});
+        if (success) return;
+
+        // Ordinary callers retain synchronous failure semantics; only source-project terminals enter escrow.
+        if (!call.refundToProject) revert JBRouterTerminalGateway_RouteFailed(errorHash);
+        _queue({call: call, errorHash: errorHash});
     }
 
-    /// @notice Make one final qualified attempt, refunding only after the same matching error is reproduced.
+    /// @notice Make one final qualified attempt, refunding only after the same error selector is reproduced.
     function finalizePendingCall(
         bytes32 id,
         string calldata memo,
@@ -220,7 +226,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         return 0;
     }
 
-    /// @notice Route a payment, retaining its original input if a zero-minimum atomic router call fails.
+    /// @notice Route a payment, retaining failed zero-minimum input only for a verified source-project terminal.
     function pay(
         uint256 projectId,
         address token,
@@ -257,7 +263,10 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
-        if (minReturnedTokens != 0) revert JBRouterTerminalGateway_RouteFailed(errorHash);
+        // Preserve minimums and ordinary caller semantics instead of turning user payments into asynchronous custody.
+        if (minReturnedTokens != 0 || !call.refundToProject) {
+            revert JBRouterTerminalGateway_RouteFailed(errorHash);
+        }
         _queue({call: call, errorHash: errorHash});
     }
 
@@ -423,9 +432,19 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;
         if (msg.value != 0) revert JBRouterTerminalGateway_NoMsgValueAllowed(msg.value);
 
+        // Snapshot the balance so fee-on-transfer inputs use the amount which actually arrives.
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
+        // Keep callback-capable tokens from nesting another intake inside this balance-delta measurement.
+        if (_acceptingToken) revert JBRouterTerminalGateway_ReentrantTokenTransfer(token);
+        _acceptingToken = true;
+
+        // Pull the input only after closing the reentrant measurement window.
         IERC20(token).safeTransferFrom({from: msg.sender, to: address(this), value: amount});
-        return IERC20(token).balanceOf(address(this)) - balanceBefore;
+        acceptedAmount = IERC20(token).balanceOf(address(this)) - balanceBefore;
+
+        // Re-open intake after the post-transfer balance has fixed this call's accepted amount.
+        _acceptingToken = false;
     }
 
     /// @notice Attempt a retained call atomically against the immutable router.
@@ -451,15 +470,20 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             );
         }
 
+        uint256 previousAllowance;
         uint256 value;
         if (call.token == JBConstants.NATIVE_TOKEN) {
             value = call.amount;
         } else {
+            // Preserve an enclosing same-token attempt's allowance across legitimate nested forwarding hooks.
+            previousAllowance = IERC20(call.token).allowance({owner: address(this), spender: address(ROUTER)});
             IERC20(call.token).forceApprove({spender: address(ROUTER), value: call.amount});
         }
 
         if (gasLimit == 0) {
             uint256 available = gasleft();
+            // A zero-gas attempt keeps an underfunded source-terminal call inside the custody boundary; ordinary
+            // callers still revert below instead of entering escrow.
             if (available > _FAILURE_GAS_RESERVE) gasLimit = available - _FAILURE_GAS_RESERVE;
         } else {
             _requireRetryGas(gasLimit);
@@ -473,7 +497,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
 
         originalPayer = previousPayer;
         if (call.token != JBConstants.NATIVE_TOKEN) {
-            IERC20(call.token).forceApprove({spender: address(ROUTER), value: 0});
+            // Restore rather than clear so a nested route cannot clobber its enclosing Router pull.
+            IERC20(call.token).forceApprove({spender: address(ROUTER), value: previousAllowance});
         }
     }
 
@@ -485,7 +510,7 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         emit JBRouterTerminalGateway_QueuePendingCall({id: id, call: call, errorHash: errorHash, caller: msg.sender});
     }
 
-    /// @notice Record a qualified failure, resetting the streak whenever the fingerprint changes.
+    /// @notice Record a qualified failure, resetting the streak whenever the error selector changes.
     function _recordFailure(
         bytes32 id,
         bytes32 errorHash,
@@ -509,17 +534,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         });
     }
 
-    /// @notice Refund a finalized call in its original input token.
+    /// @notice Refund a finalized call into its predetermined source project's terminal balance.
     function _refund(JBPendingRouterTerminalCall memory call) internal {
-        if (!call.refundToProject) {
-            if (call.token == JBConstants.NATIVE_TOKEN) {
-                Address.sendValue(payable(call.refundTo), call.amount);
-            } else {
-                IERC20(call.token).safeTransfer({to: call.refundTo, value: call.amount});
-            }
-            return;
-        }
-
         uint256 value;
         if (call.token == JBConstants.NATIVE_TOKEN) {
             value = call.amount;
@@ -545,9 +561,8 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
     // ----------------------- internal helpers -------------------------- //
     //*********************************************************************//
 
-    /// @notice Call the router while hashing only bounded return data so a reverting sink cannot bomb the catch path.
-    /// @dev The fingerprint hashes the full return-data length and its first 256 bytes. Standard Solidity errors are
-    /// matched exactly; oversized adversarial errors are matched by this bounded canonical representation.
+    /// @notice Call the router while matching failures by selector without copying encoded error arguments.
+    /// @dev Empty and short return data are hashed as-is. Return data at least four bytes long is matched by selector.
     function _boundedCall(
         address target,
         uint256 value,
@@ -557,8 +572,6 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
         internal
         returns (bool success, bytes32 errorHash, uint256 result)
     {
-        uint256 maxErrorDataLength = _MAX_ERROR_DATA_LENGTH;
-
         assembly ("memory-safe") {
             let ptr := mload(0x40)
             success := call(gasLimit, target, value, add(data, 0x20), mload(data), ptr, 0x20)
@@ -567,12 +580,11 @@ contract JBRouterTerminalGateway is IJBRouterTerminalGateway {
             if and(success, gt(size, 0x1f)) { result := mload(ptr) }
 
             let copySize := size
-            if gt(copySize, maxErrorDataLength) { copySize := maxErrorDataLength }
+            if gt(copySize, 4) { copySize := 4 }
 
-            mstore(ptr, size)
-            returndatacopy(add(ptr, 0x20), 0, copySize)
-            errorHash := keccak256(ptr, add(copySize, 0x20))
-            mstore(0x40, add(add(ptr, 0x20), maxErrorDataLength))
+            returndatacopy(ptr, 0, copySize)
+            errorHash := keccak256(ptr, copySize)
+            mstore(0x40, add(ptr, 0x20))
         }
     }
 

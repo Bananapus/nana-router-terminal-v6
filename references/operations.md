@@ -15,7 +15,7 @@
 - If you edit preview behavior, verify route ranking still normalizes buyback-hook hints and still agrees with execution.
 - If you edit refund or partial-fill handling, verify baseline snapshots and destination-terminal receipt enforcement together.
 - If you touch Permit2 or metadata parsing, verify the corresponding interfaces and structs in `src/interfaces/` and `src/structs/` together with the fork tests.
-- If you edit Gateway failure handling, verify exact fingerprint resets, one-day windows, fixed-gas qualification, final-attempt success, and atomic refund rollback together.
+- If you edit Gateway failure handling, verify selector-level resets, one-day windows, fixed-gas qualification, terminal-only retention, callback-token intake, nested allowances, final-attempt success, and atomic refund rollback together.
 
 ## Common failure modes
 
