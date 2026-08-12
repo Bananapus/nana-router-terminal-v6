@@ -11,7 +11,7 @@ import {IJBRouterTerminal} from "./IJBRouterTerminal.sol";
 import {JBPendingRouterTerminalCall} from "../structs/JBPendingRouterTerminalCall.sol";
 import {JBPendingRouterTerminalCallFailure} from "../structs/JBPendingRouterTerminalCallFailure.sol";
 
-/// @notice A fail-closed gateway which retains original input tokens when a router-terminal call fails.
+/// @notice A fail-closed gateway which retains source-project-opted input tokens when a router-terminal call fails.
 interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJBPermitTerminal, IJBRouterTerminal {
     /// @notice Emitted after a retained call succeeds on a permissionless retry.
     /// @param id The pending call identifier.

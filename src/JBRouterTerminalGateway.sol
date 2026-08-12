@@ -197,7 +197,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Empty implementation because accounting contexts are delegated to `ROUTER`.
     function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
 
-    /// @notice Route an add-to-balance call, retaining failed input only for a shape-qualified project refund.
+    /// @notice Route an add-to-balance call, retaining failed input only when source-project metadata opts in.
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -222,7 +222,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             preferAddToBalance: true,
             projectId: projectId,
             refundTo: refundTo,
-            refundToProject: sourceProjectId != 0 && _isTerminal(refundTo),
+            refundToProject: sourceProjectId != 0,
             shouldReturnHeldFees: shouldReturnHeldFees,
             sourceProjectId: sourceProjectId,
             token: token
@@ -231,7 +231,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         (bool success, bytes32 errorHash,,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
-        // Ordinary callers retain synchronous failure semantics; only shape-qualified project refunds enter escrow.
+        // Calls without an explicit source project retain synchronous failure semantics.
         if (!call.refundToProject) revert JBRouterTerminalGateway_RouteFailed(errorHash);
         _queue({call: call, errorHash: errorHash});
     }
@@ -268,7 +268,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         return 0;
     }
 
-    /// @notice Route a payment, retaining failed zero-minimum input only for a shape-qualified project refund.
+    /// @notice Route a payment, retaining failed zero-minimum input only when source-project metadata opts in.
     function pay(
         uint256 projectId,
         address token,
@@ -295,7 +295,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             preferAddToBalance: false,
             projectId: projectId,
             refundTo: refundTo,
-            refundToProject: sourceProjectId != 0 && _isTerminal(refundTo),
+            refundToProject: sourceProjectId != 0,
             shouldReturnHeldFees: false,
             sourceProjectId: sourceProjectId,
             token: token
@@ -305,7 +305,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
-        // Preserve minimums and ordinary caller semantics instead of turning user payments into asynchronous custody.
+        // Preserve minimums and calls without source-project opt-in instead of silently expanding custody.
         if (minReturnedTokens != 0 || !call.refundToProject) {
             revert JBRouterTerminalGateway_RouteFailed(errorHash);
         }
@@ -882,22 +882,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     //*********************************************************************//
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
-
-    /// @notice Test whether an address identifies itself as a Juicebox terminal through ERC-165.
-    /// @dev This is a shape check, not authentication. Any contract can self-assert interface support.
-    function _isTerminal(address account) internal view returns (bool) {
-        if (account.code.length == 0) return false;
-        (bool success, bytes memory data) =
-            account.staticcall{gas: 30_000}(abi.encodeCall(IERC165.supportsInterface, (type(IJBTerminal).interfaceId)));
-        if (!success || data.length < 32) return false;
-
-        // Require the canonical ABI encoding without letting a malformed boolean revert the enclosing payment.
-        uint256 supported;
-        assembly ("memory-safe") {
-            supported := mload(add(data, 0x20))
-        }
-        return supported == 1;
-    }
 
     /// @notice Require a pending call and verify its original memo and metadata.
     function _requirePendingCall(

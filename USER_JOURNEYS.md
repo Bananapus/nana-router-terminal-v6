@@ -133,7 +133,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Actor:** any keeper, frontend, or interested account.
 
-**Intent:** settle a failed terminal-originated route without forgiving a fee or nullifying a project payout.
+**Intent:** settle a failed source-project-opted route without forgiving a fee or nullifying a project payout.
 
 **Preconditions**
 - the Gateway emitted `JBRouterTerminalGateway_QueuePendingCall`

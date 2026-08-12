@@ -37,7 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
-| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains shape-qualified failed calls, and manages autonomous retry or refund. |
+| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains source-project-opted failed calls, and manages autonomous retry or refund. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
@@ -75,7 +75,7 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
-- shape-qualified failed fees and payouts through the gateway become asynchronous pending calls; ordinary caller failures remain synchronous
+- failed calls carrying an exact raw source project ID become asynchronous pending calls; calls without that opt-in remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
 - gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable block budget, and `processPendingCallWithGas` must stay between the current step and that cap
 - deployment attempts project 1 plus `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS` without aborting on unauthorized cohorts; each failure emits `RouterTerminalMigrationFailed`
@@ -149,7 +149,7 @@ script/
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
-- the gateway retains original inputs only when the resolved payer self-identifies as a terminal and metadata supplies a nonzero raw source project ID; this is a shape check, not authentication, and ordinary callers or non-zero-minimum payments still revert synchronously
+- the gateway treats exact 32-byte metadata encoding a nonzero raw source project ID as an explicit project-refund escrow opt-in; calls without it and non-zero-minimum payments still revert synchronously
 - three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable block budget
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal

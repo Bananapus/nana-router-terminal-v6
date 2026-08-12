@@ -49,7 +49,7 @@ The router terminal:
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
 
-The gateway selected by the registry takes custody before calling the immutable Router. Only failed calls with a nonzero raw source project ID whose resolved payer self-asserts `IJBTerminal` support become permissionlessly retryable; this is a forgeable shape check, not terminal authentication. Ordinary caller failures remain synchronous. Refunds require a time-separated matching-selector streak and one final matching failure.
+The gateway selected by the registry takes custody before calling the immutable Router. Exact 32-byte metadata encoding a nonzero raw source project ID explicitly opts a failed zero-minimum call into permissionless recovery; this fixes the named project as the eventual refund creditor without authenticating the payer. Calls without that opt-in and all non-zero-minimum failures remain synchronous. Refunds require a time-separated matching-selector streak and one final matching failure.
 
 ## Roles and privileges
 

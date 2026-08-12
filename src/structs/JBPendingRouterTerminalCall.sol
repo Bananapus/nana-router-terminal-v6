@@ -7,10 +7,10 @@ pragma solidity ^0.8.0;
 /// @custom:member minReturnedTokens The minimum project-token count required by a routed `pay` call.
 /// @custom:member preferAddToBalance Whether the call settles through `addToBalanceOf` instead of `pay`.
 /// @custom:member projectId The destination project ID.
-/// @custom:member refundTo The original payer, or source terminal for a project-originated call.
-/// @custom:member refundToProject Whether a terminal refund should credit `sourceProjectId`.
+/// @custom:member refundTo The original payer, preferred as a refund terminal when registered for the source project.
+/// @custom:member refundToProject Whether an eventual refund should credit `sourceProjectId`.
 /// @custom:member shouldReturnHeldFees The held-fee preference of a routed `addToBalanceOf` call.
-/// @custom:member sourceProjectId The project whose terminal originated the retained call.
+/// @custom:member sourceProjectId The project named by metadata as the eventual refund creditor.
 /// @custom:member token The original input token retained by the gateway.
 struct JBPendingRouterTerminalCall {
     uint256 amount;

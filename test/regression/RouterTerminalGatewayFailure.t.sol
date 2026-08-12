@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBFeelessAddresses} from "@bananapus/core-v6/src/interfaces/IJBFeelessAddresses.sol";
-import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBPermissions} from "@bananapus/core-v6/src/interfaces/IJBPermissions.sol";
 import {IJBPermitTerminal} from "@bananapus/core-v6/src/interfaces/IJBPermitTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
@@ -79,6 +78,31 @@ contract GatewayDirtyERC165Payer {
         assembly ("memory-safe") {
             mstore(0, 2)
             return(0, 32)
+        }
+    }
+}
+
+/// @notice Models an immutable protocol contract which catches and forgives a failed fee payment.
+contract GatewayProtocolFeePayer {
+    bool public feeWasForgiven;
+
+    function payFee(IJBTerminal feeTerminal, address token, uint256 amount, uint256 sourceProjectId) external {
+        if (token != JBConstants.NATIVE_TOKEN) IERC20(token).approve({spender: address(feeTerminal), value: amount});
+
+        try feeTerminal.pay{value: token == JBConstants.NATIVE_TOKEN ? amount : 0}({
+            projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID,
+            token: token,
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(sourceProjectId)
+        }) returns (
+            uint256
+        ) {
+            feeWasForgiven = false;
+        } catch {
+            feeWasForgiven = true;
         }
     }
 }
@@ -685,14 +709,13 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallFailureOf(_ID).count, 2, "the new matching error can start a fresh streak");
     }
 
-    function test_dirtyERC165ResponseCannotRevertTerminalClassification() public {
+    function test_dirtyERC165ResponseDoesNotAffectSourceProjectRetention() public {
         GatewayDirtyERC165Payer payer = new GatewayDirtyERC165Payer();
         token.mint({account: address(payer), amount: _AMOUNT});
 
         vm.startPrank(address(payer));
         token.approve({spender: address(gateway), value: _AMOUNT});
-        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
-        gateway.pay({
+        uint256 beneficiaryTokenCount = gateway.pay({
             projectId: _DESTINATION_PROJECT_ID,
             token: address(token),
             amount: _AMOUNT,
@@ -703,8 +726,10 @@ contract RouterTerminalGatewayFailureTest is Test {
         });
         vm.stopPrank();
 
-        assertEq(gateway.pendingCallCount(), 0, "malformed ERC-165 data must not qualify for retention");
-        assertEq(token.balanceOf(address(payer)), _AMOUNT, "synchronous revert must restore the payer's input");
+        assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
+        assertEq(gateway.pendingCallCount(), 1, "payer ERC-165 behavior must not affect explicit retention");
+        assertEq(gateway.pendingCallOf(_ID).refundTo, address(payer), "original payer should remain observable");
+        assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
     }
 
     function test_dynamicErrorArgumentsDoNotResetMatchingFailureStreak() public {
@@ -1176,6 +1201,32 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0);
     }
 
+    /// @notice Raw source-project metadata opts a non-terminal protocol payer into project-accounting retention.
+    function test_nonTerminalPayerWithSourceProjectMetadataIsRetained() public {
+        GatewayProtocolFeePayer payer = new GatewayProtocolFeePayer();
+        token.mint({account: address(payer), amount: _AMOUNT});
+
+        payer.payFee({
+            feeTerminal: registry, token: address(token), amount: _AMOUNT, sourceProjectId: _SOURCE_PROJECT_ID
+        });
+
+        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
+        assertFalse(payer.feeWasForgiven(), "Gateway custody must stay outside the protocol payer's catch boundary");
+        assertEq(call.refundTo, address(payer), "registry should preserve the non-terminal protocol payer");
+        assertTrue(call.refundToProject, "raw source-project metadata should opt into project accounting refund");
+        assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
+        assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
+
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        (bool wasRefunded,) =
+            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+
+        assertTrue(wasRefunded, "matching failures should refund the named source project");
+        assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT, "project should be credited");
+        assertEq(token.balanceOf(address(gateway)), 0, "refunded custody should clear");
+    }
+
     function test_nonzeroMinimumStillRevertsSynchronously() public {
         token.mint(address(this), _AMOUNT);
         token.approve(address(gateway), _AMOUNT);
@@ -1283,8 +1334,8 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "custody must remain intact");
     }
 
-    /// @notice Pins the current core terminal's payer shape and the Registry-to-Gateway propagation it relies on.
-    function test_realCoreMultiTerminalPreservesSourceTerminalRetention() public {
+    /// @notice Pins Registry propagation of the real core terminal as the preferred refund target.
+    function test_realCoreMultiTerminalPropagatesPreferredRefundTarget() public {
         JBMultiTerminal multiTerminal = new JBMultiTerminal({
             feelessAddresses: IJBFeelessAddresses(address(0)),
             permissions: IJBPermissions(address(0)),
@@ -1296,12 +1347,6 @@ contract RouterTerminalGatewayFailureTest is Test {
             trustedForwarder: address(0)
         });
 
-        (bool payerTrackerSuccess, bytes memory payerTrackerData) =
-            address(multiTerminal).staticcall(abi.encodeCall(IJBPayerTracker.originalPayer, ()));
-        assertFalse(
-            payerTrackerSuccess && payerTrackerData.length >= 32,
-            "core terminal payer tracking changed; review retained-call propagation"
-        );
         assertTrue(multiTerminal.supportsInterface(type(IJBTerminal).interfaceId));
 
         token.mint({account: address(multiTerminal), amount: _AMOUNT});
@@ -1321,7 +1366,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
         assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
         assertEq(call.refundTo, address(multiTerminal), "registry must preserve the source terminal as refund target");
-        assertTrue(call.refundToProject, "current core terminal shape should qualify for project refund");
+        assertTrue(call.refundToProject, "raw source-project metadata should qualify for project refund");
         assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
     }
