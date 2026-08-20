@@ -195,9 +195,25 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     //*********************************************************************//
 
     /// @notice Empty implementation because accounting contexts are delegated to `ROUTER`.
-    function addAccountingContextsFor(uint256, JBAccountingContext[] calldata) external override {}
+    /// @param projectId The ID of the project whose accounting contexts would otherwise be configured.
+    /// @param accountingContexts Ignored because the immutable router derives accounting contexts at runtime.
+    function addAccountingContextsFor(
+        uint256 projectId,
+        JBAccountingContext[] calldata accountingContexts
+    )
+        external
+        override
+    {}
 
     /// @notice Route an add-to-balance call, retaining failed input only when source-project metadata opts in.
+    /// @dev The opt-in is metadata which is exactly 32 bytes encoding a nonzero raw source project ID. Calls without
+    /// the opt-in revert synchronously when the routed attempt fails.
+    /// @param projectId The ID of the destination project.
+    /// @param token The address of the token to pay in.
+    /// @param amount The amount of tokens to send.
+    /// @param shouldReturnHeldFees Whether held fees should be returned based on the amount added.
+    /// @param memo A memo to pass along to the emitted event.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format, or exactly 32 bytes naming the source project.
     function addToBalanceOf(
         uint256 projectId,
         address token,
@@ -237,6 +253,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Make one final qualified attempt, refunding only after the same failure class is reproduced.
+    /// @dev Callable permissionlessly once `FINALIZATION_FAILURE_COUNT` matching failures have accumulated and the
+    /// retry delay has elapsed. A changed failure class resets the streak instead of refunding.
+    /// @param id The pending call identifier.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return wasRefunded Whether the retained input was refunded.
+    /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCall(
         bytes32 id,
         string calldata memo,
@@ -250,6 +273,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
+    /// @dev Behaves like `finalizePendingCall` but forwards a caller-selected budget, which must satisfy the pending
+    /// call's escalating minimum and fit under the live chain's executable block budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return wasRefunded Whether the retained input was refunded.
+    /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCallWithGas(
         bytes32 id,
         uint256 gasLimit,
@@ -264,11 +295,37 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Empty implementation because the gateway only escrows retained calls, not project balances.
-    function migrateBalanceOf(uint256, address, IJBTerminal) external pure override returns (uint256 balance) {
+    /// @param projectId The project whose balance migration was requested.
+    /// @param token The token whose balance migration was requested.
+    /// @param to The destination terminal that would receive migrated funds.
+    /// @return balance Always returns 0 because the gateway does not hold project balances.
+    function migrateBalanceOf(
+        uint256 projectId,
+        address token,
+        IJBTerminal to
+    )
+        external
+        pure
+        override
+        returns (uint256 balance)
+    {
+        projectId;
+        token;
+        to;
         return 0;
     }
 
     /// @notice Route a payment, retaining failed zero-minimum input only when source-project metadata opts in.
+    /// @dev Retention requires `minReturnedTokens == 0` and metadata which is exactly 32 bytes encoding a nonzero raw
+    /// source project ID. All other failed payments revert synchronously.
+    /// @param projectId The ID of the destination project to pay.
+    /// @param token The address of the token to pay with.
+    /// @param amount The amount of tokens to send.
+    /// @param beneficiary The address to receive any tokens minted by the destination project.
+    /// @param minReturnedTokens The minimum number of destination project tokens expected in return.
+    /// @param memo A memo to pass along to the emitted event.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format, or exactly 32 bytes naming the source project.
+    /// @return beneficiaryTokenCount The number of tokens minted for the beneficiary.
     function pay(
         uint256 projectId,
         address token,
@@ -313,6 +370,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Make a permissionless attempt using the default qualified gas budget.
+    /// @dev Once `FINALIZATION_FAILURE_COUNT` matching failures have accumulated, further attempts must go through
+    /// `finalizePendingCall`.
+    /// @param id The pending call identifier.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCall(
         bytes32 id,
         string calldata memo,
@@ -326,6 +389,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Make a permissionless attempt with an expanded qualified gas budget.
+    /// @dev Behaves like `processPendingCall` but forwards a caller-selected budget, which must satisfy the pending
+    /// call's escalating minimum and fit under the live chain's executable block budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCallWithGas(
         bytes32 id,
         uint256 gasLimit,
@@ -344,6 +414,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     //*********************************************************************//
 
     /// @notice Delegate the accounting-context lookup to the immutable router.
+    /// @param projectId The ID of the project to get the accounting context for.
+    /// @param token The address of the token to get the accounting context for.
+    /// @return context The accounting context reported by the immutable router.
     function accountingContextForTokenOf(
         uint256 projectId,
         address token
@@ -351,17 +424,29 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         external
         view
         override
-        returns (JBAccountingContext memory)
+        returns (JBAccountingContext memory context)
     {
         return ROUTER.accountingContextForTokenOf({projectId: projectId, token: token});
     }
 
     /// @notice Delegate the accounting-context lookup to the immutable router.
-    function accountingContextsOf(uint256 projectId) external view override returns (JBAccountingContext[] memory) {
+    /// @param projectId The project whose accounting contexts were requested.
+    /// @return contexts The accounting contexts reported by the immutable router.
+    function accountingContextsOf(uint256 projectId)
+        external
+        view
+        override
+        returns (JBAccountingContext[] memory contexts)
+    {
         return ROUTER.accountingContextsOf(projectId);
     }
 
     /// @notice Delegate the surplus lookup to the immutable router.
+    /// @param projectId The project whose surplus was requested.
+    /// @param tokens The token set the caller wanted surplus measured against.
+    /// @param decimals The fixed-point precision the caller wanted the surplus returned in.
+    /// @param currency The currency the caller wanted the surplus returned in.
+    /// @return surplus The surplus reported by the immutable router.
     function currentSurplusOf(
         uint256 projectId,
         address[] calldata tokens,
@@ -371,12 +456,15 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         external
         view
         override
-        returns (uint256)
+        returns (uint256 surplus)
     {
         return ROUTER.currentSurplusOf({projectId: projectId, tokens: tokens, decimals: decimals, currency: currency});
     }
 
     /// @notice Delegate best-pool discovery to the immutable router.
+    /// @param normalizedTokenIn The input token (wrapped if native).
+    /// @param normalizedTokenOut The output token (wrapped if native).
+    /// @return pool The best pool found by the immutable router.
     function discoverBestPool(
         address normalizedTokenIn,
         address normalizedTokenOut
@@ -390,6 +478,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Delegate V3 pool discovery to the immutable router.
+    /// @param normalizedTokenIn The input token (wrapped if native).
+    /// @param normalizedTokenOut The output token (wrapped if native).
+    /// @return pool The V3 pool with the highest liquidity found by the immutable router.
     function discoverPool(
         address normalizedTokenIn,
         address normalizedTokenOut
@@ -403,6 +494,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Return a retained call's consecutive matching failure state.
+    /// @param id The pending call identifier.
+    /// @return failure The matching failure state.
     function pendingCallFailureOf(bytes32 id)
         external
         view
@@ -413,11 +506,22 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Return a call retained after its atomic router attempt failed.
+    /// @param id The pending call identifier.
+    /// @return call The retained call.
     function pendingCallOf(bytes32 id) external view override returns (JBPendingRouterTerminalCall memory call) {
         return _pendingCallOf[id];
     }
 
     /// @notice Delegate payment previewing to the immutable router.
+    /// @param projectId The ID of the destination project to pay.
+    /// @param token The token to provide to the router.
+    /// @param amount The amount of tokens which would be sent.
+    /// @param beneficiary The address which would receive any tokens minted by the destination project.
+    /// @param metadata Bytes in `JBMetadataResolver`'s format.
+    /// @return ruleset The destination project's ruleset the payment would be made under.
+    /// @return beneficiaryTokenCount The number of tokens which would be minted for the beneficiary.
+    /// @return reservedTokenCount The number of tokens which would be reserved by the destination project.
+    /// @return hookSpecifications The pay hooks the destination project's ruleset would invoke.
     function previewPayFor(
         uint256 projectId,
         address token,
@@ -441,7 +545,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Return the immutable concrete router reached by this forwarding gateway.
-    function terminalOf(uint256) external view override returns (IJBTerminal terminal) {
+    /// @param projectId Ignored because every project forwards to the same immutable router.
+    /// @return terminal The immutable router terminal.
+    function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
+        projectId;
         return ROUTER;
     }
 
@@ -525,6 +632,16 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Attempt a retained call atomically against the immutable router.
+    /// @dev Scopes an exact router allowance and the transient `originalPayer` around the bounded call, restoring any
+    /// enclosing values so nested forwarding hooks cannot clobber their outer attempt.
+    /// @param call The call to attempt.
+    /// @param memo The memo to pass along to the router.
+    /// @param metadata The metadata to pass along to the router.
+    /// @param gasLimit The gas to forward, or zero to forward all remaining gas minus the failure-accounting reserve.
+    /// @return success Whether the router call succeeded.
+    /// @return errorHash The selector-level fingerprint of the failure, if any.
+    /// @return beneficiaryTokenCount The project tokens returned by a successful `pay` call.
+    /// @return gasExhausted Whether a failed call consumed its complete forwarded budget with no error data.
     function _attempt(
         JBPendingRouterTerminalCall memory call,
         string calldata memo,
@@ -583,6 +700,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Finalize a retained call using a caller-selected qualified gas budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, or zero to select the required minimum.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return wasRefunded Whether the retained input was refunded.
+    /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function _finalizePendingCall(
         bytes32 id,
         uint256 gasLimit,
@@ -631,6 +754,11 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Process a retained call using a caller-selected qualified gas budget.
+    /// @param id The pending call identifier.
+    /// @param gasLimit The gas to forward, or zero to select the required minimum.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function _processPendingCall(
         bytes32 id,
         uint256 gasLimit,
@@ -670,6 +798,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Queue a failed call while retaining its original input token.
+    /// @param call The call to retain.
+    /// @param errorHash The selector-level fingerprint of the initial downstream error.
     function _queue(JBPendingRouterTerminalCall memory call, bytes32 errorHash) internal {
         bytes32 id = bytes32(++pendingCallCount);
         _pendingCallOf[id] = call;
@@ -678,6 +808,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Record a qualified failure, resetting the streak whenever the failure class changes.
+    /// @param id The pending call identifier.
+    /// @param errorHash The selector-level or gas-exhaustion failure-class fingerprint.
+    /// @param previous The pending call's failure state before this attempt.
     function _recordFailure(
         bytes32 id,
         bytes32 errorHash,
@@ -702,6 +835,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Refund a finalized call through an active source-project accounting terminal.
+    /// @dev Prefers the still-registered original source terminal, then the token's current primary terminal, then any
+    /// other registered non-circular terminal. Reverts if every candidate rejects the refund.
+    /// @param call The retained call whose original input must be refunded.
     function _refund(JBPendingRouterTerminalCall memory call) internal {
         IJBTerminal originalTerminal = IJBTerminal(call.refundTo);
 
@@ -790,6 +926,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
     /// @notice Call the router while matching failures by selector without copying encoded error arguments.
     /// @dev Empty and short return data are hashed as-is. Return data at least four bytes long is matched by selector.
+    /// @param target The address to call.
+    /// @param value The native-token value to send with the call.
+    /// @param gasLimit The gas to forward to the call.
+    /// @param data The calldata to send.
+    /// @return success Whether the call succeeded.
+    /// @return errorHash The selector-level fingerprint of the failure, if any.
+    /// @return result The first return word of a successful call.
+    /// @return gasExhausted Whether a failed call consumed its complete forwarded budget with no error data.
     function _boundedCall(
         address target,
         uint256 value,
@@ -884,6 +1028,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     //*********************************************************************//
 
     /// @notice Require a pending call and verify its original memo and metadata.
+    /// @param id The pending call identifier.
+    /// @param memo The memo which must match the memo bound by the pending call.
+    /// @param metadata The metadata which must match the metadata bound by the pending call.
+    /// @return call The retained call.
     function _requirePendingCall(
         bytes32 id,
         string calldata memo,
@@ -903,6 +1051,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Require the retry delay to have elapsed.
+    /// @param id The pending call identifier.
+    /// @param lastFailureAt The timestamp of the pending call's latest qualified failure.
     function _requireReady(bytes32 id, uint48 lastFailureAt) internal view {
         uint256 nextAttemptAt = uint256(lastFailureAt) + RETRY_DELAY;
         // forge-lint: disable-next-line(block-timestamp)
@@ -912,6 +1062,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Require enough gas to forward a qualified attempt while retaining the failure-accounting reserve.
+    /// @param gasLimit The gas which must be forwardable by `CALL` after the EIP-150 withholding margin.
     function _requireRetryGas(uint256 gasLimit) internal view {
         uint256 available = gasleft();
         // Include the EIP-150 withholding margin so the requested amount is actually forwarded by `CALL`.
@@ -922,6 +1073,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Resolve an upstream payer exposed by a forwarding caller.
+    /// @param fallback_ The payer to use when the caller does not expose an upstream payer.
+    /// @return payer The forwarding caller's `originalPayer` when nonzero, otherwise `fallback_`.
     function _resolveOriginalPayer(address fallback_) internal view returns (address payer) {
         if (msg.sender.code.length != 0) {
             try IJBPayerTracker(msg.sender).originalPayer() returns (address original) {
@@ -932,6 +1085,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Decode the raw source-project metadata used by core terminal fees and project payouts.
+    /// @param metadata The metadata to decode, which opts in only when it is exactly 32 bytes.
+    /// @return sourceProjectId The decoded source project ID, or zero when the metadata is not an opt-in.
     function _sourceProjectIdFrom(bytes calldata metadata) internal pure returns (uint256 sourceProjectId) {
         if (metadata.length != 32) return 0;
         assembly ("memory-safe") {
