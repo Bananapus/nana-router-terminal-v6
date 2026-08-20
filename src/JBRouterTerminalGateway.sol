@@ -45,8 +45,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Thrown when the live block gas limit cannot support the minimum qualified call budget.
     error JBRouterTerminalGateway_BlockGasLimitTooLow(uint256 maximum, uint256 minimum);
 
-    /// @notice Thrown when retry calldata does not match the data retained with a pending call.
-    error JBRouterTerminalGateway_CallDataMismatch(bytes32 expectedHash, bytes32 actualHash);
+    /// @notice Thrown when a supplied call, memo, and metadata do not match a pending call's stored commitment.
+    error JBRouterTerminalGateway_CallDataMismatch(bytes32 expectedCommitment, bytes32 actualCommitment);
 
     /// @notice Thrown when a qualified attempt was not supplied enough gas.
     error JBRouterTerminalGateway_InsufficientRetryGas(uint256 available, uint256 required);
@@ -150,8 +150,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Qualified failure state for each retained call.
     mapping(bytes32 id => JBPendingRouterTerminalCallFailure) internal _pendingCallFailureOf;
 
-    /// @notice Calls whose original input tokens are retained by this gateway.
-    mapping(bytes32 id => JBPendingRouterTerminalCall) internal _pendingCallOf;
+    /// @notice The hash commitment binding each retained call, its memo, and its metadata.
+    /// @dev Only the commitment is stored so the gas-constrained queue path writes a single slot. Retriers supply the
+    /// full call from the queue event and are authenticated against this hash.
+    mapping(bytes32 id => bytes32) internal _pendingCallCommitmentOf;
 
     //*********************************************************************//
     // ------------------- transient stored properties ------------------- //
@@ -239,7 +241,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             // forge-lint: disable-next-line(unsafe-typecast)
             amount: uint224(amount),
             beneficiary: address(0),
-            callDataHash: keccak256(abi.encode(memo, metadata)),
             preferAddToBalance: true,
             // forge-lint: disable-next-line(unsafe-typecast)
             projectId: uint64(projectId),
@@ -255,19 +256,22 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
         // Calls without an explicit source project retain synchronous failure semantics.
         if (sourceProjectId == 0) revert JBRouterTerminalGateway_RouteFailed(errorHash);
-        _queue({call: call, errorHash: errorHash});
+        _queue({call: call, memo: memo, metadata: metadata, errorHash: errorHash});
     }
 
     /// @notice Make one final qualified attempt, refunding only after the same failure class is reproduced.
     /// @dev Callable permissionlessly once `FINALIZATION_FAILURE_COUNT` matching failures have accumulated and the
-    /// retry delay has elapsed. A changed failure class resets the streak instead of refunding.
+    /// retry delay has elapsed. A changed failure class resets the streak instead of refunding. The supplied call,
+    /// memo, and metadata are read from the queue event and authenticated against the stored commitment.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return wasRefunded Whether the retained input was refunded.
     /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         string calldata memo,
         bytes calldata metadata
     )
@@ -275,13 +279,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
-        return _finalizePendingCall({id: id, gasLimit: 0, memo: memo, metadata: metadata});
+        return _finalizePendingCall({id: id, call: call, gasLimit: 0, memo: memo, metadata: metadata});
     }
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
     /// @dev Behaves like `finalizePendingCall` but forwards a caller-selected budget, which must satisfy the pending
     /// call's escalating minimum and fit under the live chain's executable block budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
@@ -289,6 +294,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCallWithGas(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
@@ -297,7 +303,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
-        return _finalizePendingCall({id: id, gasLimit: gasLimit, memo: memo, metadata: metadata});
+        return _finalizePendingCall({id: id, call: call, gasLimit: gasLimit, memo: memo, metadata: metadata});
     }
 
     /// @notice Empty implementation because the gateway only escrows retained calls, not project balances.
@@ -356,7 +362,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             // forge-lint: disable-next-line(unsafe-typecast)
             amount: uint224(amount),
             beneficiary: beneficiary,
-            callDataHash: keccak256(abi.encode(memo, metadata)),
             preferAddToBalance: false,
             // forge-lint: disable-next-line(unsafe-typecast)
             projectId: uint64(projectId),
@@ -374,18 +379,21 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (minReturnedTokens != 0 || sourceProjectId == 0) {
             revert JBRouterTerminalGateway_RouteFailed(errorHash);
         }
-        _queue({call: call, errorHash: errorHash});
+        _queue({call: call, memo: memo, metadata: metadata, errorHash: errorHash});
     }
 
     /// @notice Make a permissionless attempt using the default qualified gas budget.
     /// @dev Once `FINALIZATION_FAILURE_COUNT` matching failures have accumulated, further attempts must go through
-    /// `finalizePendingCall`.
+    /// `finalizePendingCall`. The supplied call, memo, and metadata are read from the queue event and authenticated
+    /// against the stored commitment.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         string calldata memo,
         bytes calldata metadata
     )
@@ -393,19 +401,21 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        return _processPendingCall({id: id, gasLimit: 0, memo: memo, metadata: metadata});
+        return _processPendingCall({id: id, call: call, gasLimit: 0, memo: memo, metadata: metadata});
     }
 
     /// @notice Make a permissionless attempt with an expanded qualified gas budget.
     /// @dev Behaves like `processPendingCall` but forwards a caller-selected budget, which must satisfy the pending
     /// call's escalating minimum and fit under the live chain's executable block budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCallWithGas(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
@@ -414,7 +424,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        return _processPendingCall({id: id, gasLimit: gasLimit, memo: memo, metadata: metadata});
+        return _processPendingCall({id: id, call: call, gasLimit: gasLimit, memo: memo, metadata: metadata});
     }
 
     //*********************************************************************//
@@ -513,11 +523,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         return _pendingCallFailureOf[id];
     }
 
-    /// @notice Return a call retained after its atomic router attempt failed.
+    /// @notice Return the hash commitment of a call retained after its atomic router attempt failed.
+    /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
     /// @param id The pending call identifier.
-    /// @return call The retained call.
-    function pendingCallOf(bytes32 id) external view override returns (JBPendingRouterTerminalCall memory call) {
-        return _pendingCallOf[id];
+    /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
+    function pendingCallCommitmentOf(bytes32 id) external view override returns (bytes32 commitment) {
+        return _pendingCallCommitmentOf[id];
     }
 
     /// @notice Delegate payment previewing to the immutable router.
@@ -712,6 +723,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
     /// @notice Finalize a retained call using a caller-selected qualified gas budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, authenticated against the stored commitment.
     /// @param gasLimit The gas to forward, or zero to select the required minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
@@ -719,6 +731,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function _finalizePendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
@@ -726,7 +739,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
-        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
+        bytes32 commitment = _requirePendingCall({id: id, call: call, memo: memo, metadata: metadata});
         JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
 
         if (failure.count < FINALIZATION_FAILURE_COUNT) {
@@ -735,7 +748,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
         gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
-        delete _pendingCallOf[id];
+        delete _pendingCallCommitmentOf[id];
 
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
@@ -752,7 +765,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
         if (errorHash != failure.errorHash) {
-            _pendingCallOf[id] = call;
+            _pendingCallCommitmentOf[id] = commitment;
             _recordFailure({id: id, errorHash: errorHash, previous: failure});
             return (false, 0);
         }
@@ -766,12 +779,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
     /// @notice Process a retained call using a caller-selected qualified gas budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, authenticated against the stored commitment.
     /// @param gasLimit The gas to forward, or zero to select the required minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function _processPendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
@@ -779,7 +794,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (uint256 beneficiaryTokenCount)
     {
-        JBPendingRouterTerminalCall memory call = _requirePendingCall({id: id, memo: memo, metadata: metadata});
+        bytes32 commitment = _requirePendingCall({id: id, call: call, memo: memo, metadata: metadata});
         JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
 
         if (failure.count >= FINALIZATION_FAILURE_COUNT) {
@@ -788,7 +803,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (failure.count != 0) _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
         gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
-        delete _pendingCallOf[id];
+        delete _pendingCallCommitmentOf[id];
 
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
@@ -804,18 +819,31 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // Gas exhaustion advances only after the failure state has enforced the next larger budget.
         if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
-        _pendingCallOf[id] = call;
+        _pendingCallCommitmentOf[id] = commitment;
         _recordFailure({id: id, errorHash: errorHash, previous: failure});
     }
 
-    /// @notice Queue a failed call while retaining its original input token.
+    /// @notice Queue a failed call, retaining its original input token behind a single-slot hash commitment.
+    /// @dev The full call, memo, and metadata are emitted rather than stored so the gas-constrained queue path writes
+    /// one storage slot; retriers read them back from the event.
     /// @param call The call to retain.
+    /// @param memo The original memo bound into the commitment.
+    /// @param metadata The original metadata bound into the commitment.
     /// @param errorHash The selector-level fingerprint of the initial downstream error.
-    function _queue(JBPendingRouterTerminalCall memory call, bytes32 errorHash) internal {
+    function _queue(
+        JBPendingRouterTerminalCall memory call,
+        string calldata memo,
+        bytes calldata metadata,
+        bytes32 errorHash
+    )
+        internal
+    {
         bytes32 id = bytes32(++pendingCallCount);
-        _pendingCallOf[id] = call;
+        _pendingCallCommitmentOf[id] = _commitmentOf({call: call, memo: memo, metadata: metadata});
 
-        emit JBRouterTerminalGateway_QueuePendingCall({id: id, call: call, errorHash: errorHash, caller: _msgSender()});
+        emit JBRouterTerminalGateway_QueuePendingCall({
+            id: id, call: call, memo: memo, metadata: metadata, errorHash: errorHash, caller: _msgSender()
+        });
     }
 
     /// @notice Record a qualified failure, resetting the streak whenever the failure class changes.
@@ -1038,26 +1066,30 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
 
-    /// @notice Require a pending call and verify its original memo and metadata.
+    /// @notice Require a pending call and authenticate the supplied call, memo, and metadata against its commitment.
     /// @param id The pending call identifier.
-    /// @param memo The memo which must match the memo bound by the pending call.
-    /// @param metadata The metadata which must match the metadata bound by the pending call.
-    /// @return call The retained call.
+    /// @param call The retained call as supplied by the retrier.
+    /// @param memo The memo which must match the memo bound into the commitment.
+    /// @param metadata The metadata which must match the metadata bound into the commitment.
+    /// @return commitment The authenticated commitment stored under `id`.
     function _requirePendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         string calldata memo,
         bytes calldata metadata
     )
         internal
         view
-        returns (JBPendingRouterTerminalCall memory call)
+        returns (bytes32 commitment)
     {
-        call = _pendingCallOf[id];
-        if (call.refundTo == address(0)) revert JBRouterTerminalGateway_PendingCallNotFound(id);
+        commitment = _pendingCallCommitmentOf[id];
+        if (commitment == bytes32(0)) revert JBRouterTerminalGateway_PendingCallNotFound(id);
 
-        bytes32 actualHash = keccak256(abi.encode(memo, metadata));
-        if (actualHash != call.callDataHash) {
-            revert JBRouterTerminalGateway_CallDataMismatch({expectedHash: call.callDataHash, actualHash: actualHash});
+        bytes32 actualCommitment = _commitmentOf({call: call, memo: memo, metadata: metadata});
+        if (actualCommitment != commitment) {
+            revert JBRouterTerminalGateway_CallDataMismatch({
+                expectedCommitment: commitment, actualCommitment: actualCommitment
+            });
         }
     }
 
@@ -1081,6 +1113,23 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (available < required) {
             revert JBRouterTerminalGateway_InsufficientRetryGas({available: available, required: required});
         }
+    }
+
+    /// @notice Hash a retained call together with its original memo and metadata into its stored commitment.
+    /// @param call The retained call.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return commitment The commitment binding the call, memo, and metadata.
+    function _commitmentOf(
+        JBPendingRouterTerminalCall memory call,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        internal
+        pure
+        returns (bytes32 commitment)
+    {
+        return keccak256(abi.encode(call, memo, metadata));
     }
 
     /// @notice Require a value to fit the width its retained-call field can represent.

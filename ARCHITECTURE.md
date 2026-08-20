@@ -78,7 +78,7 @@ registry forwards original input to gateway
 
 ## Accounting model
 
-The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of source-project-opted failed calls. Those tokens are liabilities represented one-for-one by `pendingCallOf(id)` until successful settlement or atomic source-project refund; they are never reported as project surplus by the gateway. The opt-in does not authenticate the payer: any caller can supply exact raw source-project metadata, but it can escrow only its own input and fixes the named project as the refund creditor.
+The Router and Registry do not own project balances. The Gateway can persistently escrow only the original inputs of source-project-opted failed calls. Those tokens are liabilities represented one-for-one by `pendingCallCommitmentOf(id)` — a single-slot hash binding the call, memo, and metadata, all of which the queue event emits for permissionless retriers to supply back — until successful settlement or atomic source-project refund; they are never reported as project surplus by the gateway. The opt-in does not authenticate the payer: any caller can supply exact raw source-project metadata, but it can escrow only its own input and fixes the named project as the refund creditor.
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 

@@ -560,16 +560,92 @@ contract RouterTerminalGatewayFailureTest is Test {
         vm.deal(address(sourceTerminal), _AMOUNT);
     }
 
-    function _qualifyWithMatchingFailures() internal {
-        _qualifyWithMatchingFailures({id: _ID, metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+    /// @notice The commitment the gateway stores for `call` queued with an empty memo and raw source metadata.
+    function _commitmentOf(JBPendingRouterTerminalCall memory call) internal pure returns (bytes32 commitment) {
+        return keccak256(abi.encode(call, string(""), abi.encodePacked(uint256(call.sourceProjectId))));
     }
 
-    function _qualifyWithMatchingFailures(bytes32 id, bytes memory metadata) internal {
-        gateway.processPendingCall({id: id, memo: "", metadata: metadata});
+    /// @notice The retained-call shape queued by the default fee fixture.
+    function _feeCall() internal view returns (JBPendingRouterTerminalCall memory call) {
+        return _feeCall({paymentToken: address(token), amount: _AMOUNT, payer: address(sourceTerminal)});
+    }
+
+    function _feeCall(
+        address paymentToken,
+        uint256 amount,
+        address payer
+    )
+        internal
+        pure
+        returns (JBPendingRouterTerminalCall memory call)
+    {
+        return JBPendingRouterTerminalCall({
+            // Test amounts are fixed values far below the retained-call widths.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint224(amount),
+            preferAddToBalance: false,
+            shouldReturnHeldFees: false,
+            beneficiary: payer,
+            projectId: uint64(JBConstants.FEE_BENEFICIARY_PROJECT_ID),
+            refundTo: payer,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            sourceProjectId: uint64(_SOURCE_PROJECT_ID),
+            token: paymentToken
+        });
+    }
+
+    function _finalize(
+        bytes32 id,
+        JBPendingRouterTerminalCall memory call
+    )
+        internal
+        returns (bool wasRefunded, uint256 beneficiaryTokenCount)
+    {
+        return gateway.finalizePendingCall({
+            id: id, call: call, memo: "", metadata: abi.encodePacked(uint256(call.sourceProjectId))
+        });
+    }
+
+    /// @notice The retained-call shape queued by the payout fixture.
+    function _payoutCall(
+        address paymentToken,
+        bool preferAddToBalance
+    )
+        internal
+        view
+        returns (JBPendingRouterTerminalCall memory call)
+    {
+        return JBPendingRouterTerminalCall({
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint224(_AMOUNT),
+            preferAddToBalance: preferAddToBalance,
+            shouldReturnHeldFees: false,
+            beneficiary: preferAddToBalance ? address(0) : address(sourceTerminal),
+            // forge-lint: disable-next-line(unsafe-typecast)
+            projectId: uint64(_DESTINATION_PROJECT_ID),
+            refundTo: address(sourceTerminal),
+            // forge-lint: disable-next-line(unsafe-typecast)
+            sourceProjectId: uint64(_SOURCE_PROJECT_ID),
+            token: paymentToken
+        });
+    }
+
+    function _process(bytes32 id, JBPendingRouterTerminalCall memory call) internal returns (uint256 count) {
+        return gateway.processPendingCall({
+            id: id, call: call, memo: "", metadata: abi.encodePacked(uint256(call.sourceProjectId))
+        });
+    }
+
+    function _qualifyWithMatchingFailures() internal {
+        _qualifyWithMatchingFailures(_feeCall());
+    }
+
+    function _qualifyWithMatchingFailures(JBPendingRouterTerminalCall memory call) internal {
+        _process(_ID, call);
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        gateway.processPendingCall({id: id, memo: "", metadata: metadata});
+        _process(_ID, call);
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        gateway.processPendingCall({id: id, memo: "", metadata: metadata});
+        _process(_ID, call);
     }
 
     function _queueFee(address paymentToken) internal {
@@ -597,10 +673,11 @@ contract RouterTerminalGatewayFailureTest is Test {
             feeTerminal: registry, token: address(token), amount: amount, sourceProjectId: sourceProjectId
         });
 
-        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
+        JBPendingRouterTerminalCall memory call =
+            _feeCall({paymentToken: address(token), amount: amount, payer: address(sourceTerminal)});
+        call.sourceProjectId = sourceProjectId;
         assertFalse(sourceTerminal.feeWasForgiven());
-        assertEq(call.amount, amount);
-        assertEq(call.sourceProjectId, sourceProjectId);
+        assertEq(gateway.pendingCallCommitmentOf(_ID), _commitmentOf(call), "commitment must bind the retained fee");
         assertEq(token.balanceOf(address(gateway)), amount);
         assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT);
         assertEq(token.balanceOf(address(registry)), 0);
@@ -618,13 +695,17 @@ contract RouterTerminalGatewayFailureTest is Test {
         });
 
         assertFalse(sourceTerminal.payoutWasNullified(), "gateway should absorb add-to-balance failure");
-        assertTrue(gateway.pendingCallOf(_ID).preferAddToBalance, "pending operation should remain add-to-balance");
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(_payoutCall(address(token), true)),
+            "pending operation should remain add-to-balance"
+        );
 
         router.setMode(0);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _payoutCall(address(token), true));
 
         assertEq(token.balanceOf(address(router)), _AMOUNT, "retry should settle the payout");
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "successful retry should delete pending state");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0), "successful retry should delete pending state");
     }
 
     function test_callbackTokenCannotOvercreditPooledCustody() public {
@@ -647,8 +728,20 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         assertTrue(attacker.reentryReverted(), "nested intake should revert inside the callback");
         assertEq(gateway.pendingCallCount(), 2, "the callback must not create an over-credited pending call");
-        assertEq(gateway.pendingCallOf(_ID).amount, victimAmount, "victim claim changed");
-        assertEq(gateway.pendingCallOf(bytes32(uint256(2))).amount, attackerAmount, "attacker claim was inflated");
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(
+                _feeCall({paymentToken: address(callbackToken), amount: victimAmount, payer: address(sourceTerminal)})
+            ),
+            "victim claim changed"
+        );
+        assertEq(
+            gateway.pendingCallCommitmentOf(bytes32(uint256(2))),
+            _commitmentOf(
+                _feeCall({paymentToken: address(callbackToken), amount: attackerAmount, payer: address(attacker)})
+            ),
+            "attacker claim was inflated"
+        );
         assertEq(
             callbackToken.balanceOf(address(gateway)), victimAmount + attackerAmount, "custody must cover every claim"
         );
@@ -691,21 +784,21 @@ contract RouterTerminalGatewayFailureTest is Test {
 
     function test_changedErrorResetsMatchingFailureStreak() public {
         _queueFee(address(token));
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
         assertEq(first.count, 1);
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         router.setMode(2);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         JBPendingRouterTerminalCallFailure memory changed = gateway.pendingCallFailureOf(_ID);
         assertEq(changed.count, 1, "a different exact error must restart qualification");
         assertNotEq(changed.errorHash, first.errorHash, "different custom errors must have different fingerprints");
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
         assertEq(gateway.pendingCallFailureOf(_ID).count, 2, "the new matching error can start a fresh streak");
     }
 
@@ -728,7 +821,11 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
         assertEq(gateway.pendingCallCount(), 1, "payer ERC-165 behavior must not affect explicit retention");
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(payer), "original payer should remain observable");
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(_feeCall({paymentToken: address(token), amount: _AMOUNT, payer: address(payer)})),
+            "original payer should remain observable"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
     }
 
@@ -736,14 +833,14 @@ contract RouterTerminalGatewayFailureTest is Test {
         router.setMode(5);
         router.setFailureArgument(1);
         _queueFee(address(token));
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
         assertEq(first.count, 1);
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         router.setFailureArgument(2);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         JBPendingRouterTerminalCallFailure memory second = gateway.pendingCallFailureOf(_ID);
         assertEq(second.count, 2, "arguments from the same custom error must not reset qualification");
@@ -754,30 +851,31 @@ contract RouterTerminalGatewayFailureTest is Test {
         _queueFee(address(token));
         router.setMode(7);
 
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 1, "the exhausted base budget should start escalation");
-        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "gas exhaustion must preserve custody");
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID), _commitmentOf(_feeCall()), "gas exhaustion must preserve custody"
+        );
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        uint256 beneficiaryTokenCount =
-            gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        uint256 beneficiaryTokenCount = _process(_ID, _feeCall());
 
         assertEq(beneficiaryTokenCount, _AMOUNT, "the automatically expanded retry should settle the healthy route");
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "settled retry must clear pending state");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0), "settled retry must clear pending state");
         assertEq(token.balanceOf(address(gateway)), 0, "settled retry must consume custody");
     }
 
     function test_gasExhaustionRequiresEscalatedCustomBudget() public {
         router.setMode(3);
         _queueFee(address(token));
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         uint256 baseGasLimit = gateway.QUALIFIED_CALL_GAS();
         vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RetryGasLimitTooLow.selector);
         gateway.processPendingCallWithGas({
-            id: _ID, gasLimit: baseGasLimit, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+            id: _ID, call: _feeCall(), gasLimit: baseGasLimit, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
         });
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 1, "an undersized custom retry must not advance custody");
@@ -930,8 +1028,7 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         router.setMode(2);
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         JBPendingRouterTerminalCallFailure memory changed = gateway.pendingCallFailureOf(_ID);
         assertFalse(wasRefunded, "changed failure must remain retryable");
@@ -950,11 +1047,10 @@ contract RouterTerminalGatewayFailureTest is Test {
             sourceProjectId: _SOURCE_PROJECT_ID,
             preferAddToBalance: true
         });
-        _qualifyWithMatchingFailures();
+        _qualifyWithMatchingFailures(_payoutCall(address(token), true));
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _payoutCall(address(token), true));
 
         assertTrue(wasRefunded);
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
@@ -966,15 +1062,14 @@ contract RouterTerminalGatewayFailureTest is Test {
         _qualifyWithMatchingFailures();
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
-        (bool wasRefunded, uint256 beneficiaryTokenCount) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded, uint256 beneficiaryTokenCount) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "same final error should authorize refund");
         assertEq(beneficiaryTokenCount, 0);
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT, "project should be credited");
         assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT, "source terminal should reclaim the input token");
         assertEq(token.balanceOf(address(gateway)), 0, "gateway custody should clear");
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "pending state should clear");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0), "pending state should clear");
     }
 
     function test_finalMatchingNativePayoutErrorRefundsOriginalProject() public {
@@ -986,11 +1081,10 @@ contract RouterTerminalGatewayFailureTest is Test {
             sourceProjectId: _SOURCE_PROJECT_ID,
             preferAddToBalance: true
         });
-        _qualifyWithMatchingFailures();
+        _qualifyWithMatchingFailures(_payoutCall(JBConstants.NATIVE_TOKEN, true));
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _payoutCall(JBConstants.NATIVE_TOKEN, true));
 
         assertTrue(wasRefunded);
         assertEq(
@@ -1008,10 +1102,12 @@ contract RouterTerminalGatewayFailureTest is Test {
         sourceTerminal.setRejectRefund(true);
 
         vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RefundFailed.selector);
-        gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _finalize(_ID, _feeCall());
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 3, "failed refund must preserve qualification");
-        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "failed refund must restore pending state");
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID), _commitmentOf(_feeCall()), "failed refund must restore pending state"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "failed refund must preserve custody");
     }
 
@@ -1026,8 +1122,7 @@ contract RouterTerminalGatewayFailureTest is Test {
             projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(primaryTerminal))
         });
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "current primary terminal should accept the autonomous fallback");
         assertEq(primaryTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
@@ -1052,8 +1147,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         terminals[1] = IJBTerminal(address(alternativeTerminal));
         directory.setTerminalsOf({projectId: _SOURCE_PROJECT_ID, terminals: terminals});
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "the registered non-circular terminal should receive the refund");
         assertEq(alternativeTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
@@ -1073,8 +1167,7 @@ contract RouterTerminalGatewayFailureTest is Test {
             projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(primaryTerminal))
         });
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "removed source terminal should be replaced by the current primary");
         assertEq(
@@ -1089,8 +1182,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
         router.setMode(0);
 
-        (bool wasRefunded, uint256 beneficiaryTokenCount) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded, uint256 beneficiaryTokenCount) = _finalize(_ID, _feeCall());
 
         assertFalse(wasRefunded);
         assertEq(beneficiaryTokenCount, _AMOUNT);
@@ -1125,8 +1217,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         _qualifyWithMatchingFailures();
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "matching explicit empty reverts should qualify");
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
@@ -1136,23 +1227,22 @@ contract RouterTerminalGatewayFailureTest is Test {
         router.setMode(3);
         _queueFee(address(token));
 
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
         JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
         assertEq(first.count, 1, "the first exhausted qualified budget should start the streak");
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
         JBPendingRouterTerminalCallFailure memory second = gateway.pendingCallFailureOf(_ID);
         assertEq(second.count, 2, "the second exhausted, larger budget should continue the streak");
         assertEq(second.errorHash, first.errorHash, "gas exhaustion must have one stable failure fingerprint");
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
         assertEq(gateway.pendingCallFailureOf(_ID).count, 3, "the third larger budget should qualify finalization");
 
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
         assertTrue(wasRefunded, "four escalating exhausted budgets should prove the sink and release custody");
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
@@ -1168,10 +1258,14 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), _AMOUNT * 2);
 
         router.setMode(0);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0), "first pending call should settle");
-        assertEq(gateway.pendingCallOf(bytes32(uint256(2))).amount, _AMOUNT, "second pending call should remain");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0), "first pending call should settle");
+        assertEq(
+            gateway.pendingCallCommitmentOf(bytes32(uint256(2))),
+            _commitmentOf(_feeCall()),
+            "second pending call should remain"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "second pending input must remain in custody");
         assertEq(token.balanceOf(address(router)), _AMOUNT, "only first pending input should settle");
     }
@@ -1210,17 +1304,19 @@ contract RouterTerminalGatewayFailureTest is Test {
             feeTerminal: registry, token: address(token), amount: _AMOUNT, sourceProjectId: _SOURCE_PROJECT_ID
         });
 
-        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
+        JBPendingRouterTerminalCall memory call =
+            _feeCall({paymentToken: address(token), amount: _AMOUNT, payer: address(payer)});
         assertFalse(payer.feeWasForgiven(), "Gateway custody must stay outside the protocol payer's catch boundary");
-        assertEq(call.refundTo, address(payer), "registry should preserve the non-terminal protocol payer");
-        assertTrue(call.sourceProjectId != 0, "raw source-project metadata should opt into project accounting refund");
-        assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(call),
+            "registry should preserve the non-terminal protocol payer and its source-project opt-in"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
 
-        _qualifyWithMatchingFailures();
+        _qualifyWithMatchingFailures(call);
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
-        (bool wasRefunded,) =
-            gateway.finalizePendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        (bool wasRefunded,) = _finalize(_ID, call);
 
         assertTrue(wasRefunded, "matching failures should refund the named source project");
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT, "project should be credited");
@@ -1250,7 +1346,9 @@ contract RouterTerminalGatewayFailureTest is Test {
         _queueFee(address(token));
 
         vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_CallDataMismatch.selector);
-        gateway.processPendingCall({id: _ID, memo: "changed", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        gateway.processPendingCall({
+            id: _ID, call: _feeCall(), memo: "changed", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT);
@@ -1258,10 +1356,10 @@ contract RouterTerminalGatewayFailureTest is Test {
 
     function test_processRequiresDelayBetweenQualifiedFailures() public {
         _queueFee(address(token));
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_PendingCallNotReady.selector);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 1);
     }
@@ -1272,7 +1370,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
         vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_PendingCallRequiresFinalization.selector);
-        gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        _process(_ID, _feeCall());
 
         assertEq(gateway.pendingCallFailureOf(_ID).count, 3);
     }
@@ -1281,13 +1379,12 @@ contract RouterTerminalGatewayFailureTest is Test {
         _queueFee(address(token));
         router.setMode(0);
 
-        uint256 beneficiaryTokenCount =
-            gateway.processPendingCall({id: _ID, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)});
+        uint256 beneficiaryTokenCount = _process(_ID, _feeCall());
 
         assertEq(beneficiaryTokenCount, _AMOUNT);
         assertEq(token.balanceOf(address(router)), _AMOUNT);
         assertEq(token.balanceOf(address(gateway)), 0);
-        assertEq(gateway.pendingCallOf(_ID).refundTo, address(0));
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0));
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
     }
 
@@ -1345,13 +1442,14 @@ contract RouterTerminalGatewayFailureTest is Test {
     function test_underfundedRetryCannotAdvanceQualification() public {
         _queueFee(address(token));
 
-        bytes memory data =
-            abi.encodeCall(gateway.processPendingCall, (_ID, "", bytes(abi.encodePacked(_SOURCE_PROJECT_ID))));
+        bytes memory data = abi.encodeCall(
+            gateway.processPendingCall, (_ID, _feeCall(), "", bytes(abi.encodePacked(_SOURCE_PROJECT_ID)))
+        );
         (bool success,) = address(gateway).call{gas: gateway.QUALIFIED_CALL_GAS() + 100_000}(data);
 
         assertFalse(success, "underfunded retry must revert");
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0, "underfunded retry must not qualify");
-        assertEq(gateway.pendingCallOf(_ID).amount, _AMOUNT, "pending call must remain intact");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), _commitmentOf(_feeCall()), "pending call must remain intact");
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "custody must remain intact");
     }
 
@@ -1384,11 +1482,17 @@ contract RouterTerminalGatewayFailureTest is Test {
         });
         vm.stopPrank();
 
-        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
+        JBPendingRouterTerminalCall memory call =
+            _feeCall({paymentToken: address(token), amount: _AMOUNT, payer: address(multiTerminal)});
+        // forge-lint: disable-next-line(unsafe-typecast)
+        call.projectId = uint64(_DESTINATION_PROJECT_ID);
+        call.beneficiary = address(this);
         assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
-        assertEq(call.refundTo, address(multiTerminal), "registry must preserve the source terminal as refund target");
-        assertTrue(call.sourceProjectId != 0, "raw source-project metadata should qualify for project refund");
-        assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(call),
+            "registry must preserve the source terminal as refund target"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
     }
 
@@ -1412,13 +1516,13 @@ contract RouterTerminalGatewayFailureTest is Test {
     function test_routerGatewayRetainsFailedFeeWithoutChangingRegistry() public {
         _queueFee(address(token));
 
-        JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
         assertFalse(sourceTerminal.feeWasForgiven(), "gateway must not cross the source terminal's catch boundary");
         assertEq(gateway.pendingCallCount(), 1, "failed fee should be retained as pending");
-        assertEq(call.amount, _AMOUNT);
-        assertEq(call.refundTo, address(sourceTerminal), "registry should propagate the source terminal");
-        assertTrue(call.sourceProjectId != 0, "terminal-shaped fee payer should qualify for project accounting refund");
-        assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
+        assertEq(
+            gateway.pendingCallCommitmentOf(_ID),
+            _commitmentOf(_feeCall()),
+            "registry should propagate the source terminal and its source-project opt-in"
+        );
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "gateway should retain the original input token");
         assertEq(token.balanceOf(address(registry)), 0, "unchanged registry must remain stateless");
         assertEq(token.balanceOf(address(router)), 0, "failed router pull must roll back");
@@ -1439,6 +1543,9 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         keccak256("FeeReverted(uint256,address,uint256,uint256,bytes,address)");
     bytes32 internal constant _PROCESS_FEE_TOPIC =
         keccak256("ProcessFee(uint256,address,uint256,bool,address,address)");
+    bytes32 internal constant _QUEUE_PENDING_CALL_TOPIC = keccak256(
+        "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint224,bool,bool,address,uint64,address,uint64,address),string,bytes,bytes32,address)"
+    );
 
     function _installGateway() internal returns (JBRouterTerminalGateway gateway) {
         JBRouterTerminalRegistry registry = JBRouterTerminalRegistry(_REGISTRY);
@@ -1490,27 +1597,40 @@ contract RouterTerminalGatewayBaseForkTest is Test {
 
         bool sawFeeReverted;
         bool sawProcessFee;
+        JBPendingRouterTerminalCall memory pending;
+        string memory pendingMemo;
+        bytes memory pendingMetadata;
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].topics[0] == _FEE_REVERTED_TOPIC) sawFeeReverted = true;
             if (logs[i].topics[0] == _PROCESS_FEE_TOPIC) sawProcessFee = true;
+            // Recover the retained call the way a permissionless retrier would: from the queue event.
+            if (logs[i].topics[0] == _QUEUE_PENDING_CALL_TOPIC && logs[i].emitter == address(gateway)) {
+                (pending, pendingMemo, pendingMetadata,,) =
+                    abi.decode(logs[i].data, (JBPendingRouterTerminalCall, string, bytes, bytes32, address));
+            }
         }
         assertFalse(sawFeeReverted, "fee was forgiven");
         assertTrue(sawProcessFee, "source terminal did not recognize gateway custody");
 
-        JBPendingRouterTerminalCall memory pending = gateway.pendingCallOf(bytes32(uint256(1)));
         assertEq(pending.amount, 25_003, "fee was not retained");
         assertEq(pending.token, _USDC, "gateway did not retain the original input token");
         assertEq(pending.refundTo, _MULTI_TERMINAL, "source terminal was not propagated");
         assertTrue(pending.sourceProjectId != 0, "fee refund should return through source project accounting");
         assertEq(pending.sourceProjectId, 9, "source project metadata was not retained");
+        assertEq(
+            gateway.pendingCallCommitmentOf(bytes32(uint256(1))),
+            keccak256(abi.encode(pending, pendingMemo, pendingMetadata)),
+            "stored commitment must match the queue event"
+        );
         assertEq(IERC20(_USDC).balanceOf(address(gateway)) - gatewayBalanceBefore, 25_003, "custody mismatch");
         assertEq(IERC20(_USDC).balanceOf(_PAYOUT_BENEFICIARY) - payoutBalanceBefore, 975_118, "payout changed");
 
-        uint256 beneficiaryTokenCount =
-            gateway.processPendingCall({id: bytes32(uint256(1)), memo: "", metadata: abi.encodePacked(uint256(9))});
+        uint256 beneficiaryTokenCount = gateway.processPendingCall({
+            id: bytes32(uint256(1)), call: pending, memo: pendingMemo, metadata: pendingMetadata
+        });
         assertGt(beneficiaryTokenCount, 0, "retry did not mint fee-project tokens");
-        assertEq(gateway.pendingCallOf(bytes32(uint256(1))).refundTo, address(0), "retry remained pending");
+        assertEq(gateway.pendingCallCommitmentOf(bytes32(uint256(1))), bytes32(0), "retry remained pending");
         assertEq(IERC20(_USDC).balanceOf(address(gateway)), gatewayBalanceBefore, "retry did not consume fee");
     }
 

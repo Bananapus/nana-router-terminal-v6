@@ -222,14 +222,30 @@ contract RouterTerminalFeeCashOutForkTest is Test {
             uint256 beneficiaryBalanceBefore,
             uint256 reclaimAmount
         ) = _cashOutUnroutableToken();
-        (bool sawFeeReverted, bool sawProcessFee) = _feeEventsIn(vm.getRecordedLogs());
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (bool sawFeeReverted, bool sawProcessFee) = _feeEventsIn(logs);
 
-        JBPendingRouterTerminalCall memory pending = routerTerminalGateway.pendingCallOf(bytes32(uint256(1)));
+        // Recover the retained call the way a permissionless retrier would: from the queue event.
+        bytes32 queueTopic = keccak256(
+            "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint224,bool,bool,address,uint64,address,uint64,address),string,bytes,bytes32,address)"
+        );
+        JBPendingRouterTerminalCall memory pending;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == queueTopic && logs[i].emitter == address(routerTerminalGateway)) {
+                (pending,,,,) = abi.decode(logs[i].data, (JBPendingRouterTerminalCall, string, bytes, bytes32, address));
+            }
+        }
+
         assertGt(pending.amount, 0, "cash-out fee should be retained");
         assertEq(pending.token, address(tokenToReclaim), "gateway retained the wrong fee token");
         assertEq(pending.sourceProjectId, cashOutProjectId, "cash-out project ID was not propagated");
         assertEq(pending.refundTo, address(jbMultiTerminal), "cash-out terminal was not preserved for refunds");
         assertTrue(pending.sourceProjectId != 0, "cash-out fee should qualify for a project refund");
+        assertNotEq(
+            routerTerminalGateway.pendingCallCommitmentOf(bytes32(uint256(1))),
+            bytes32(0),
+            "queued fee must store a commitment"
+        );
         assertEq(tokenToReclaim.balanceOf(address(routerTerminalGateway)), pending.amount, "custody mismatch");
         assertEq(tokenToReclaim.balanceOf(address(routerTerminal)), 0, "failed Router route retained fee tokens");
         assertEq(tokenToReclaim.balanceOf(payer) - beneficiaryBalanceBefore, reclaimAmount, "cash out changed");

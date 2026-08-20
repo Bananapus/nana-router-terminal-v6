@@ -23,12 +23,21 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     );
 
     /// @notice Emitted when a failed router-terminal call is retained for retry.
+    /// @dev Only a hash commitment over `call`, `memo`, and `metadata` is stored; retriers read them from this event
+    /// and supply them back to `processPendingCall` or `finalizePendingCall`.
     /// @param id The pending call identifier.
     /// @param call The retained call.
+    /// @param memo The original memo bound into the commitment.
+    /// @param metadata The original metadata bound into the commitment.
     /// @param errorHash The selector-level fingerprint of the initial downstream error.
     /// @param caller The account whose call was retained.
     event JBRouterTerminalGateway_QueuePendingCall(
-        bytes32 indexed id, JBPendingRouterTerminalCall call, bytes32 errorHash, address caller
+        bytes32 indexed id,
+        JBPendingRouterTerminalCall call,
+        string memo,
+        bytes metadata,
+        bytes32 errorHash,
+        address caller
     );
 
     /// @notice Emitted when a qualified retry fails.
@@ -82,19 +91,22 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return failure The matching failure state.
     function pendingCallFailureOf(bytes32 id) external view returns (JBPendingRouterTerminalCallFailure memory failure);
 
-    /// @notice Return a router call retained after its first attempt failed.
+    /// @notice Return the hash commitment of a router call retained after its first attempt failed.
+    /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
     /// @param id The pending call identifier.
-    /// @return call The retained call.
-    function pendingCallOf(bytes32 id) external view returns (JBPendingRouterTerminalCall memory call);
+    /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
+    function pendingCallCommitmentOf(bytes32 id) external view returns (bytes32 commitment);
 
     /// @notice Make one final qualified attempt with the gas budget required by its failure state.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return wasRefunded Whether the retained input was refunded.
     /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         string calldata memo,
         bytes calldata metadata
     )
@@ -103,6 +115,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
@@ -110,6 +123,7 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return beneficiaryTokenCount The project tokens returned if the final `pay` attempt succeeded.
     function finalizePendingCallWithGas(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata
@@ -119,11 +133,13 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Make a permissionless attempt with the gas budget required by its failure state.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCall(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         string calldata memo,
         bytes calldata metadata
     )
@@ -132,12 +148,14 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Make a gas-qualified, permissionless attempt with an expanded gas budget.
     /// @param id The pending call identifier.
+    /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
     /// @param memo The original memo bound by the pending call.
     /// @param metadata The original metadata bound by the pending call.
     /// @return beneficiaryTokenCount The project tokens returned if a routed `pay` succeeds.
     function processPendingCallWithGas(
         bytes32 id,
+        JBPendingRouterTerminalCall calldata call,
         uint256 gasLimit,
         string calldata memo,
         bytes calldata metadata

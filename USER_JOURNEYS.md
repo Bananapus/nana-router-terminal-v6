@@ -140,7 +140,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 - the caller can reproduce the original memo and metadata from transaction calldata
 
 **Main Flow**
-1. Anyone calls `processPendingCall` with the pending ID and original data.
+1. Anyone calls `processPendingCall` with the pending ID and the original call, memo, and metadata from the queue event; the gateway authenticates them against its stored hash commitment.
 2. A successful attempt settles immediately. A failed attempt records its selector-level class without encoded arguments.
 3. Wait at least one day between qualified failures.
 4. If the selector changes, the count resets to one and retries continue; changed arguments for the same selector do not reset.
