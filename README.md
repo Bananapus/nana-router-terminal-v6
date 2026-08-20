@@ -149,7 +149,8 @@ script/
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
-- the gateway treats exact 32-byte metadata encoding a nonzero raw source project ID as an explicit project-refund escrow opt-in; calls without it and non-zero-minimum payments still revert synchronously
+- the gateway treats exact 32-byte metadata encoding a nonzero raw source project ID no wider than `uint64` as an explicit project-refund escrow opt-in; calls without it, wider coincidental 32-byte words, and non-zero-minimum payments still revert synchronously
+- retained calls are stored as a single hash commitment; the queue event emits the full call, memo, and metadata, and retriers supply them back to `processPendingCall`/`finalizePendingCall` where a hash match authenticates them
 - three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable block budget
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal

@@ -49,7 +49,7 @@ The router terminal:
 
 The registry chooses which router terminal instance a project uses and whether that choice is locked.
 
-The gateway selected by the registry takes custody before calling the immutable Router. Exact 32-byte metadata encoding a nonzero raw source project ID explicitly opts a failed zero-minimum call into permissionless recovery; this fixes the named project as the eventual refund creditor without authenticating the payer. Calls without that opt-in and all non-zero-minimum failures remain synchronous. Refunds require a time-separated matching-selector streak and one final matching failure.
+The gateway selected by the registry takes custody before calling the immutable Router. Exact 32-byte metadata encoding a nonzero raw source project ID no wider than `uint64` explicitly opts a failed zero-minimum call into permissionless recovery; this fixes the named project as the eventual refund creditor without authenticating the payer. Calls without that opt-in, wider coincidental 32-byte words, and all non-zero-minimum failures remain synchronous. Retained calls are stored as a single hash commitment binding the call, memo, and metadata; the queue event emits all three, and retriers supply them back for hash authentication. Refunds require a time-separated matching-selector streak and one final matching failure.
 
 ## Roles and privileges
 

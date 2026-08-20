@@ -137,14 +137,14 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 
 **Preconditions**
 - the Gateway emitted `JBRouterTerminalGateway_QueuePendingCall`
-- the caller can reproduce the original memo and metadata from transaction calldata
+- the caller can reproduce the original call, memo, and metadata, all of which that event emits
 
 **Main Flow**
 1. Anyone calls `processPendingCall` with the pending ID and the original call, memo, and metadata from the queue event; the gateway authenticates them against its stored hash commitment.
 2. A successful attempt settles immediately. A failed attempt records its selector-level class without encoded arguments.
 3. Wait at least one day between qualified failures.
 4. If the selector changes, the count resets to one and retries continue; changed arguments for the same selector do not reset.
-5. After three matching failures and one more day, anyone calls `finalizePendingCall`.
+5. After three matching failures and one more day, anyone calls `finalizePendingCall` with the same event-sourced call, memo, and metadata.
 6. Complete-budget gas exhaustion automatically raises the required budget from 5M to 10M to 15M, with 20M required for the final attempt.
 7. The final attempt settles if possible, resets on a changed class, or atomically refunds the fixed source project after the same class.
 

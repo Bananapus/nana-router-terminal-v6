@@ -334,10 +334,10 @@ Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPermitTermin
 ### `src/JBRouterTerminalGateway.sol`
 
 - Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`, `_GAS_EXHAUSTED_ERROR_HASH`.
-- Immutable: `ROUTER`.
+- Immutable: `DIRECTORY`, `PERMIT2`, `ROUTER`.
 - Stored: `pendingCallCount`, `_pendingCallCommitmentOf`, `_pendingCallFailureOf`; transient: `_acceptingToken`, `originalPayer`.
 - Entry points: `addToBalanceOf`, `finalizePendingCall`, `pay`, `processPendingCall`.
-- Critical helpers: `_attempt`, `_boundedCall`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`.
+- Critical helpers: `_attempt`, `_boundedCall`, `_checkFitsIn`, `_commitmentOf`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_sourceProjectIdFrom`.
 
 ### `src/JBPayRouteResolver.sol`
 

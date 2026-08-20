@@ -36,7 +36,7 @@
 | `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and the default fallback for NEW projects only. `setDefaultTerminal` snapshots the outgoing default into `_defaultTerminalHistory` so projects with ID <= `defaultTerminalProjectIdThreshold` continue to resolve against the default that was current when their cohort was active. |
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
-| `JBRouterTerminalGateway` | `processPendingCall(...)`, `finalizePendingCall(...)` | Anyone | Applies immutable gas, delay, and matching-selector rules; no caller can choose the refund recipient |
+| `JBRouterTerminalGateway` | `processPendingCall(...)`, `finalizePendingCall(...)` | Anyone | Callers supply the queue event's call, memo, and metadata, authenticated by hash commitment; immutable gas, delay, and matching-selector rules apply and no caller can choose the refund recipient |
 
 ## Immutable and one-way
 
