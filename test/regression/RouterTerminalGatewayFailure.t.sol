@@ -589,7 +589,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         result.setDefaultTerminal(terminal);
     }
 
-    function testFuzz_failedFeeConservesOriginalInput(uint128 amount, uint96 sourceProjectId) public {
+    function testFuzz_failedFeeConservesOriginalInput(uint128 amount, uint64 sourceProjectId) public {
         vm.assume(amount != 0 && sourceProjectId != 0);
         token.mint(address(sourceTerminal), amount);
 
@@ -1213,7 +1213,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
         assertFalse(payer.feeWasForgiven(), "Gateway custody must stay outside the protocol payer's catch boundary");
         assertEq(call.refundTo, address(payer), "registry should preserve the non-terminal protocol payer");
-        assertTrue(call.refundToProject, "raw source-project metadata should opt into project accounting refund");
+        assertTrue(call.sourceProjectId != 0, "raw source-project metadata should opt into project accounting refund");
         assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
 
@@ -1310,6 +1310,27 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT, "revert should restore terminal funds");
     }
 
+    function test_wideSourceProjectWordIsNotAnEscrowOptIn() public {
+        // A coincidental 32-byte payload wider than core's `uint64` project-ID width (a hash, a packed address)
+        // must keep synchronous failure semantics instead of entering custody aimed at an unissuable project.
+        vm.startPrank(address(sourceTerminal));
+        token.approve(address(gateway), _AMOUNT);
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(sourceTerminal),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(uint256(type(uint64).max) + 1)
+        });
+        vm.stopPrank();
+
+        assertEq(gateway.pendingCallCount(), 0, "wide metadata word must not create custody");
+        assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT, "revert should restore terminal funds");
+    }
+
     function test_threeMatchingFailuresAdvanceQualification() public {
         _queueFee(address(token));
         _qualifyWithMatchingFailures();
@@ -1366,7 +1387,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         JBPendingRouterTerminalCall memory call = gateway.pendingCallOf(_ID);
         assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
         assertEq(call.refundTo, address(multiTerminal), "registry must preserve the source terminal as refund target");
-        assertTrue(call.refundToProject, "raw source-project metadata should qualify for project refund");
+        assertTrue(call.sourceProjectId != 0, "raw source-project metadata should qualify for project refund");
         assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "retained input must remain fully collateralized");
     }
@@ -1396,7 +1417,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallCount(), 1, "failed fee should be retained as pending");
         assertEq(call.amount, _AMOUNT);
         assertEq(call.refundTo, address(sourceTerminal), "registry should propagate the source terminal");
-        assertTrue(call.refundToProject, "terminal-shaped fee payer should qualify for project accounting refund");
+        assertTrue(call.sourceProjectId != 0, "terminal-shaped fee payer should qualify for project accounting refund");
         assertEq(call.sourceProjectId, _SOURCE_PROJECT_ID);
         assertEq(token.balanceOf(address(gateway)), _AMOUNT, "gateway should retain the original input token");
         assertEq(token.balanceOf(address(registry)), 0, "unchanged registry must remain stateless");
@@ -1481,7 +1502,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         assertEq(pending.amount, 25_003, "fee was not retained");
         assertEq(pending.token, _USDC, "gateway did not retain the original input token");
         assertEq(pending.refundTo, _MULTI_TERMINAL, "source terminal was not propagated");
-        assertTrue(pending.refundToProject, "fee refund should return through source project accounting");
+        assertTrue(pending.sourceProjectId != 0, "fee refund should return through source project accounting");
         assertEq(pending.sourceProjectId, 9, "source project metadata was not retained");
         assertEq(IERC20(_USDC).balanceOf(address(gateway)) - gatewayBalanceBefore, 25_003, "custody mismatch");
         assertEq(IERC20(_USDC).balanceOf(_PAYOUT_BENEFICIARY) - payoutBalanceBefore, 975_118, "payout changed");

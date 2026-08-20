@@ -54,6 +54,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Thrown when native tokens are sent on an ERC20 call.
     error JBRouterTerminalGateway_NoMsgValueAllowed(uint256 value);
 
+    /// @notice Thrown when a value exceeds the width its retained-call field can represent.
+    error JBRouterTerminalGateway_OverflowAlert(uint256 value, uint256 limit);
+
     /// @notice Thrown when a pending call has not accumulated enough matching failures to be finalized.
     error JBRouterTerminalGateway_PendingCallNotFinalizable(bytes32 id, uint32 failureCount);
 
@@ -226,29 +229,32 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         payable
         override
     {
+        _checkFitsIn({value: projectId, limit: type(uint64).max});
         address refundTo = _resolveOriginalPayer(_msgSender());
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-        uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
+        _checkFitsIn({value: amount, limit: type(uint224).max});
+        uint64 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
-            amount: amount,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint224(amount),
             beneficiary: address(0),
             callDataHash: keccak256(abi.encode(memo, metadata)),
-            minReturnedTokens: 0,
             preferAddToBalance: true,
-            projectId: projectId,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            projectId: uint64(projectId),
             refundTo: refundTo,
-            refundToProject: sourceProjectId != 0,
             shouldReturnHeldFees: shouldReturnHeldFees,
             sourceProjectId: sourceProjectId,
             token: token
         });
 
-        (bool success, bytes32 errorHash,,) = _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
+        (bool success, bytes32 errorHash,,) =
+            _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
         // Calls without an explicit source project retain synchronous failure semantics.
-        if (!call.refundToProject) revert JBRouterTerminalGateway_RouteFailed(errorHash);
+        if (sourceProjectId == 0) revert JBRouterTerminalGateway_RouteFailed(errorHash);
         _queue({call: call, errorHash: errorHash});
     }
 
@@ -340,30 +346,32 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
+        _checkFitsIn({value: projectId, limit: type(uint64).max});
         address refundTo = _resolveOriginalPayer(_msgSender());
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-        uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
+        _checkFitsIn({value: amount, limit: type(uint224).max});
+        uint64 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
-            amount: amount,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount: uint224(amount),
             beneficiary: beneficiary,
             callDataHash: keccak256(abi.encode(memo, metadata)),
-            minReturnedTokens: minReturnedTokens,
             preferAddToBalance: false,
-            projectId: projectId,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            projectId: uint64(projectId),
             refundTo: refundTo,
-            refundToProject: sourceProjectId != 0,
             shouldReturnHeldFees: false,
             sourceProjectId: sourceProjectId,
             token: token
         });
 
         (bool success, bytes32 errorHash, uint256 count,) =
-            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: 0});
+            _attempt({call: call, minReturnedTokens: minReturnedTokens, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
         // Preserve minimums and calls without source-project opt-in instead of silently expanding custody.
-        if (minReturnedTokens != 0 || !call.refundToProject) {
+        if (minReturnedTokens != 0 || sourceProjectId == 0) {
             revert JBRouterTerminalGateway_RouteFailed(errorHash);
         }
         _queue({call: call, errorHash: errorHash});
@@ -635,6 +643,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @dev Scopes an exact router allowance and the transient `originalPayer` around the bounded call, restoring any
     /// enclosing values so nested forwarding hooks cannot clobber their outer attempt.
     /// @param call The call to attempt.
+    /// @param minReturnedTokens The minimum project-token count required by a routed `pay` call. Always zero for
+    /// retries because nonzero-minimum payments are never retained.
     /// @param memo The memo to pass along to the router.
     /// @param metadata The metadata to pass along to the router.
     /// @param gasLimit The gas to forward, or zero to forward all remaining gas minus the failure-accounting reserve.
@@ -644,6 +654,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @return gasExhausted Whether a failed call consumed its complete forwarded budget with no error data.
     function _attempt(
         JBPendingRouterTerminalCall memory call,
+        uint256 minReturnedTokens,
         string calldata memo,
         bytes calldata metadata,
         uint256 gasLimit
@@ -660,7 +671,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         } else {
             routerCall = abi.encodeCall(
                 IJBTerminal.pay,
-                (call.projectId, call.token, call.amount, call.beneficiary, call.minReturnedTokens, memo, metadata)
+                (call.projectId, call.token, call.amount, call.beneficiary, minReturnedTokens, memo, metadata)
             );
         }
 
@@ -727,7 +738,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         delete _pendingCallOf[id];
 
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
-            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: gasLimit});
+            _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
 
         if (success) {
             delete _pendingCallFailureOf[id];
@@ -780,7 +791,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         delete _pendingCallOf[id];
 
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
-            _attempt({call: call, memo: memo, metadata: metadata, gasLimit: gasLimit});
+            _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
 
         if (success) {
             delete _pendingCallFailureOf[id];
@@ -1072,6 +1083,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         }
     }
 
+    /// @notice Require a value to fit the width its retained-call field can represent.
+    /// @param value The value to check.
+    /// @param limit The maximum value the field can represent.
+    function _checkFitsIn(uint256 value, uint256 limit) internal pure {
+        if (value > limit) revert JBRouterTerminalGateway_OverflowAlert({value: value, limit: limit});
+    }
+
     /// @notice Resolve an upstream payer exposed by a forwarding caller.
     /// @param fallback_ The payer to use when the caller does not expose an upstream payer.
     /// @return payer The forwarding caller's `originalPayer` when nonzero, otherwise `fallback_`.
@@ -1085,12 +1103,18 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Decode the raw source-project metadata used by core terminal fees and project payouts.
+    /// @dev Words wider than core's `uint64` project-ID width (hashes, packed addresses, and other coincidental
+    /// 32-byte payloads) are not opt-ins, so such calls keep synchronous failure semantics instead of entering escrow.
     /// @param metadata The metadata to decode, which opts in only when it is exactly 32 bytes.
     /// @return sourceProjectId The decoded source project ID, or zero when the metadata is not an opt-in.
-    function _sourceProjectIdFrom(bytes calldata metadata) internal pure returns (uint256 sourceProjectId) {
+    function _sourceProjectIdFrom(bytes calldata metadata) internal pure returns (uint64 sourceProjectId) {
         if (metadata.length != 32) return 0;
+        uint256 word;
         assembly ("memory-safe") {
-            sourceProjectId := calldataload(metadata.offset)
+            word := calldataload(metadata.offset)
         }
+        if (word > type(uint64).max) return 0;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint64(word);
     }
 }

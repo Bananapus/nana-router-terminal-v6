@@ -229,7 +229,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         assertEq(pending.token, address(tokenToReclaim), "gateway retained the wrong fee token");
         assertEq(pending.sourceProjectId, cashOutProjectId, "cash-out project ID was not propagated");
         assertEq(pending.refundTo, address(jbMultiTerminal), "cash-out terminal was not preserved for refunds");
-        assertTrue(pending.refundToProject, "cash-out fee should qualify for a project refund");
+        assertTrue(pending.sourceProjectId != 0, "cash-out fee should qualify for a project refund");
         assertEq(tokenToReclaim.balanceOf(address(routerTerminalGateway)), pending.amount, "custody mismatch");
         assertEq(tokenToReclaim.balanceOf(address(routerTerminal)), 0, "failed Router route retained fee tokens");
         assertEq(tokenToReclaim.balanceOf(payer) - beneficiaryBalanceBefore, reclaimAmount, "cash out changed");
