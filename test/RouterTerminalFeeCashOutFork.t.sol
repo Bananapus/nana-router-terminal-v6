@@ -227,7 +227,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
 
         // Recover the retained call the way a permissionless retrier would: from the queue event.
         bytes32 queueTopic = keccak256(
-            "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint224,bool,bool,address,uint64,address,uint64,address),string,bytes,bytes32,address)"
+            "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint256,bool,bool,address,uint256,address,uint256,address),string,bytes,bytes32,address)"
         );
         JBPendingRouterTerminalCall memory pending;
         for (uint256 i; i < logs.length; ++i) {

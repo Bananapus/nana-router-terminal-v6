@@ -580,16 +580,13 @@ contract RouterTerminalGatewayFailureTest is Test {
         returns (JBPendingRouterTerminalCall memory call)
     {
         return JBPendingRouterTerminalCall({
-            // Test amounts are fixed values far below the retained-call widths.
-            // forge-lint: disable-next-line(unsafe-typecast)
-            amount: uint224(amount),
+            amount: amount,
             preferAddToBalance: false,
             shouldReturnHeldFees: false,
             beneficiary: payer,
-            projectId: uint64(JBConstants.FEE_BENEFICIARY_PROJECT_ID),
+            projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID,
             refundTo: payer,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            sourceProjectId: uint64(_SOURCE_PROJECT_ID),
+            sourceProjectId: _SOURCE_PROJECT_ID,
             token: paymentToken
         });
     }
@@ -616,16 +613,13 @@ contract RouterTerminalGatewayFailureTest is Test {
         returns (JBPendingRouterTerminalCall memory call)
     {
         return JBPendingRouterTerminalCall({
-            // forge-lint: disable-next-line(unsafe-typecast)
-            amount: uint224(_AMOUNT),
+            amount: _AMOUNT,
             preferAddToBalance: preferAddToBalance,
             shouldReturnHeldFees: false,
             beneficiary: preferAddToBalance ? address(0) : address(sourceTerminal),
-            // forge-lint: disable-next-line(unsafe-typecast)
-            projectId: uint64(_DESTINATION_PROJECT_ID),
+            projectId: _DESTINATION_PROJECT_ID,
             refundTo: address(sourceTerminal),
-            // forge-lint: disable-next-line(unsafe-typecast)
-            sourceProjectId: uint64(_SOURCE_PROJECT_ID),
+            sourceProjectId: _SOURCE_PROJECT_ID,
             token: paymentToken
         });
     }
@@ -1484,8 +1478,7 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         JBPendingRouterTerminalCall memory call =
             _feeCall({paymentToken: address(token), amount: _AMOUNT, payer: address(multiTerminal)});
-        // forge-lint: disable-next-line(unsafe-typecast)
-        call.projectId = uint64(_DESTINATION_PROJECT_ID);
+        call.projectId = _DESTINATION_PROJECT_ID;
         call.beneficiary = address(this);
         assertEq(beneficiaryTokenCount, 0, "failed route should be retained");
         assertEq(
@@ -1544,7 +1537,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
     bytes32 internal constant _PROCESS_FEE_TOPIC =
         keccak256("ProcessFee(uint256,address,uint256,bool,address,address)");
     bytes32 internal constant _QUEUE_PENDING_CALL_TOPIC = keccak256(
-        "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint224,bool,bool,address,uint64,address,uint64,address),string,bytes,bytes32,address)"
+        "JBRouterTerminalGateway_QueuePendingCall(bytes32,(uint256,bool,bool,address,uint256,address,uint256,address),string,bytes,bytes32,address)"
     );
 
     function _installGateway() internal returns (JBRouterTerminalGateway gateway) {

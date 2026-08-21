@@ -54,9 +54,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Thrown when native tokens are sent on an ERC20 call.
     error JBRouterTerminalGateway_NoMsgValueAllowed(uint256 value);
 
-    /// @notice Thrown when a value exceeds the width its retained-call field can represent.
-    error JBRouterTerminalGateway_OverflowAlert(uint256 value, uint256 limit);
-
     /// @notice Thrown when a pending call has not accumulated enough matching failures to be finalized.
     error JBRouterTerminalGateway_PendingCallNotFinalizable(bytes32 id, uint32 failureCount);
 
@@ -181,17 +178,25 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     )
         ERC2771Context(trustedForwarder)
     {
+        // Both are load-bearing and unchangeable afterwards: without a router there is nothing to forward into, and
+        // without a directory a retained call could never be refunded to its source project.
         if (address(directory) == address(0) || address(router) == address(0)) {
             revert JBRouterTerminalGateway_ZeroAddress();
         }
-        // Refuse an installation whose chain cannot execute even the base recovery attempt.
+
+        // Refuse an installation whose chain cannot execute even the base recovery attempt. Custody would still be
+        // takeable while every path out of it reverted.
         uint256 maximumGasLimit = _maximumQualifiedCallGas(block.gaslimit);
         if (maximumGasLimit < QUALIFIED_CALL_GAS) {
             revert JBRouterTerminalGateway_BlockGasLimitTooLow({maximum: maximumGasLimit, minimum: QUALIFIED_CALL_GAS});
         }
+
         DIRECTORY = directory;
         PERMIT2 = permit2;
         ROUTER = router;
+
+        // Namespace the Permit2 metadata ID to this address so allowances signed for the Router or Registry are not
+        // consumed here, and vice versa.
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
     }
 
@@ -231,31 +236,39 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         payable
         override
     {
-        _checkFitsIn({value: projectId, limit: type(uint64).max});
+        // Resolve the upstream payer before taking custody, because a forwarding caller only exposes it for the
+        // duration of its own call. This address becomes the preferred refund terminal if the route never settles.
         address refundTo = _resolveOriginalPayer(_msgSender());
+
+        // Take custody up front so a later Router failure rolls back to this token rather than to a swapped one. The
+        // amount is re-measured from the balance delta, which is what a fee-on-transfer input actually delivered.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-        _checkFitsIn({value: amount, limit: type(uint224).max});
-        uint64 sourceProjectId = _sourceProjectIdFrom(metadata);
+
+        // Read the escrow opt-in. Zero means this caller never asked for custody and expects a synchronous revert.
+        uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
-            // forge-lint: disable-next-line(unsafe-typecast)
-            amount: uint224(amount),
+            amount: amount,
+            // Add-to-balance has no beneficiary; the destination project's balance is the sole recipient.
             beneficiary: address(0),
             preferAddToBalance: true,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            projectId: uint64(projectId),
+            projectId: projectId,
             refundTo: refundTo,
             shouldReturnHeldFees: shouldReturnHeldFees,
             sourceProjectId: sourceProjectId,
             token: token
         });
 
+        // Try the route inside this transaction first. Nothing is retained when it settles.
         (bool success, bytes32 errorHash,,) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
         // Calls without an explicit source project retain synchronous failure semantics.
         if (sourceProjectId == 0) revert JBRouterTerminalGateway_RouteFailed(errorHash);
+
+        // The opt-in was given, so absorb the failure instead of bubbling it into the caller's catch boundary. The
+        // input stays in custody and recovery becomes permissionless.
         _queue({call: call, memo: memo, metadata: metadata, errorHash: errorHash});
     }
 
@@ -352,33 +365,43 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         override
         returns (uint256 beneficiaryTokenCount)
     {
-        _checkFitsIn({value: projectId, limit: type(uint64).max});
+        // Resolve the upstream payer before taking custody, because a forwarding caller only exposes it for the
+        // duration of its own call. This address becomes the preferred refund terminal if the route never settles.
         address refundTo = _resolveOriginalPayer(_msgSender());
+
+        // Take custody up front so a later Router failure rolls back to this token rather than to a swapped one. The
+        // amount is re-measured from the balance delta, which is what a fee-on-transfer input actually delivered.
         amount = _acceptFundsFor({token: token, amount: amount, metadata: metadata});
-        _checkFitsIn({value: amount, limit: type(uint224).max});
-        uint64 sourceProjectId = _sourceProjectIdFrom(metadata);
+
+        // Read the escrow opt-in. Zero means this caller never asked for custody and expects a synchronous revert.
+        uint256 sourceProjectId = _sourceProjectIdFrom(metadata);
 
         JBPendingRouterTerminalCall memory call = JBPendingRouterTerminalCall({
-            // forge-lint: disable-next-line(unsafe-typecast)
-            amount: uint224(amount),
+            amount: amount,
             beneficiary: beneficiary,
             preferAddToBalance: false,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            projectId: uint64(projectId),
+            projectId: projectId,
             refundTo: refundTo,
+            // Held-fee handling belongs to add-to-balance; a payment never asks for it.
             shouldReturnHeldFees: false,
             sourceProjectId: sourceProjectId,
             token: token
         });
 
+        // Try the route inside this transaction first, honoring the caller's minimum. Nothing is retained when it
+        // settles, and the minimum is only ever enforced here because retained calls always carry a zero minimum.
         (bool success, bytes32 errorHash, uint256 count,) =
             _attempt({call: call, minReturnedTokens: minReturnedTokens, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
-        // Preserve minimums and calls without source-project opt-in instead of silently expanding custody.
+        // Preserve minimums and calls without source-project opt-in instead of silently expanding custody. A caller
+        // who priced a minimum is asking to fail now rather than to be settled later at an unknown rate.
         if (minReturnedTokens != 0 || sourceProjectId == 0) {
             revert JBRouterTerminalGateway_RouteFailed(errorHash);
         }
+
+        // The opt-in was given, so absorb the failure instead of bubbling it into the caller's catch boundary. The
+        // input stays in custody and recovery becomes permissionless.
         _queue({call: call, memo: memo, metadata: metadata, errorHash: errorHash});
     }
 
@@ -563,7 +586,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         });
     }
 
-    /// @notice Return the immutable concrete router reached by this forwarding gateway.
+    /// @notice Return the terminal this gateway forwards into.
+    /// @dev One hop only, never the end of the chain. `JBForwardingCheck` walks forwarders link by link to detect
+    /// cycles, so naming a terminal further downstream would hide the router from that walk and let a route that
+    /// returns to the router read as non-circular.
     /// @param projectId Ignored because every project forwards to the same immutable router.
     /// @return terminal The immutable router terminal.
     function terminalOf(uint256 projectId) external view override returns (IJBTerminal terminal) {
@@ -609,14 +635,25 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (uint256 acceptedAmount)
     {
+        // Native input arrives with the call itself, so the delivered amount is simply what was attached.
         if (token == JBConstants.NATIVE_TOKEN) return msg.value;
+
+        // An ERC-20 call has no use for attached native tokens, and accepting them would strand value the gateway
+        // has no pending record for.
         if (msg.value != 0) revert JBRouterTerminalGateway_NoMsgValueAllowed(msg.value);
 
+        // Resolve the owner through ERC-2771 so a meta-transaction pulls from the signer, not the forwarder.
         address sender = _msgSender();
+
+        // Metadata may carry a Permit2 allowance addressed to this gateway. The ID is namespaced to this address, so
+        // an allowance signed for the Router or Registry is not visible here and is left untouched.
         (bool exists, bytes memory parsedMetadata) =
             JBMetadataResolver.getDataFor({id: _PERMIT2_ID, metadata: metadata});
         if (exists) {
             JBSingleAllowance memory allowance = abi.decode(parsedMetadata, (JBSingleAllowance));
+
+            // Refuse to pull more than the signer authorized, rather than letting the transfer below silently draw on
+            // a pre-existing allowance the signer did not intend for this payment.
             if (amount > allowance.amount) {
                 revert JBRouterTerminalGateway_PermitAllowanceNotEnough({amount: amount, allowance: allowance.amount});
             }
@@ -625,10 +662,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
                 details: IAllowanceTransfer.PermitDetails({
                     token: token, amount: allowance.amount, expiration: allowance.expiration, nonce: allowance.nonce
                 }),
+                // The gateway spends the allowance itself; it never delegates the pull to the Router.
                 spender: address(this),
                 sigDeadline: allowance.sigDeadline
             });
 
+            // A failed permit is not fatal: the signer may already hold a direct allowance, or have had this nonce
+            // consumed by an earlier transaction. Record the reason and let the transfer below decide.
             try PERMIT2.permit({owner: sender, permitSingle: permitSingle, signature: allowance.signature}) {}
             catch (bytes memory reason) {
                 emit Permit2AllowanceFailed({token: token, owner: sender, reason: reason, caller: sender});
@@ -638,7 +678,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // Snapshot the balance so fee-on-transfer inputs use the amount which actually arrives.
         uint256 balanceBefore = IERC20(token).balanceOf(address(this));
 
-        // Keep callback-capable tokens from nesting another intake inside this balance-delta measurement.
+        // Keep callback-capable tokens from nesting another intake inside this balance-delta measurement. Without
+        // this, a token that calls back mid-transfer could have a second deposit land between the snapshot and the
+        // reading below, so both calls would measure it and custody would owe more than it holds.
         if (_acceptingToken) revert JBRouterTerminalGateway_ReentrantTokenTransfer(token);
         _acceptingToken = true;
 
@@ -673,6 +715,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (bool success, bytes32 errorHash, uint256 beneficiaryTokenCount, bool gasExhausted)
     {
+        // Rebuild the exact terminal call the payer originally made, so a retry days later is indistinguishable from
+        // the first attempt apart from its gas budget.
         bytes memory routerCall;
         if (call.preferAddToBalance) {
             routerCall = abi.encodeCall(
@@ -689,8 +733,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         uint256 previousAllowance;
         uint256 value;
         if (call.token == JBConstants.NATIVE_TOKEN) {
+            // Native input is handed over with the call; there is no allowance to manage.
             value = call.amount;
         } else {
+            // Approve exactly this attempt's amount so a Router bug cannot reach the rest of pooled custody.
             // Preserve an enclosing same-token attempt's allowance across legitimate nested forwarding hooks.
             previousAllowance = IERC20(call.token).allowance({owner: address(this), spender: address(ROUTER)});
             IERC20(call.token).forceApprove({spender: address(ROUTER), value: call.amount});
@@ -699,15 +745,21 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (gasLimit == 0) {
             uint256 available = gasleft();
             // A zero-gas attempt keeps an underfunded retention-qualified call inside the custody boundary; ordinary
-            // callers still revert below instead of entering escrow.
+            // callers still revert below instead of entering escrow. Withholding the reserve is what guarantees this
+            // frame survives the callee's failure with enough gas left to record it durably.
             if (available > _FAILURE_GAS_RESERVE) gasLimit = available - _FAILURE_GAS_RESERVE;
         } else {
+            // A qualified attempt must be a genuine test of the route. Anything below the base budget would fail for
+            // lack of gas rather than for a real reason, letting a cheap caller manufacture failure evidence.
             if (gasLimit < QUALIFIED_CALL_GAS) {
                 revert JBRouterTerminalGateway_RetryGasLimitTooLow({gasLimit: gasLimit, minimum: QUALIFIED_CALL_GAS});
             }
             _requireRetryGas(gasLimit);
         }
 
+        // Expose the original payer to the Router for the duration of the call so residue and refunds reach whoever
+        // funded the input, not this gateway. Save and restore around it because a nested forwarding hook may run
+        // its own attempt inside this one.
         address previousPayer = originalPayer;
         originalPayer = call.refundTo;
 
@@ -739,20 +791,30 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (bool wasRefunded, uint256 beneficiaryTokenCount)
     {
+        // Authenticate the caller-supplied call against the stored commitment before acting on any of its fields.
         bytes32 commitment = _requirePendingCall({id: id, call: call, memo: memo, metadata: metadata});
         JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
 
+        // Refunding is only justified once the route has proven itself broken the same way three times over three
+        // days. Anything less is still ordinary retry territory.
         if (failure.count < FINALIZATION_FAILURE_COUNT) {
             revert JBRouterTerminalGateway_PendingCallNotFinalizable({id: id, failureCount: failure.count});
         }
+
+        // Space this attempt a day from the last so the evidence spans changing chain conditions rather than one
+        // unlucky block.
         _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
         gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
+        // Clear the pending record before interacting, so a re-entrant caller finds nothing to claim twice. Every exit
+        // below either settles, rewrites it, or reverts the whole transaction and restores it.
         delete _pendingCallCommitmentOf[id];
 
+        // Retained calls always carry a zero minimum, so the final attempt has no slippage floor of its own.
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
 
+        // A late success is still a success: the payment lands where it was always headed and nothing is refunded.
         if (success) {
             delete _pendingCallFailureOf[id];
             emit JBRouterTerminalGateway_ProcessPendingCall({
@@ -764,12 +826,16 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // Gas exhaustion is its own stable failure class, so each matching retry must use a larger budget.
         if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
+        // A different failure than the qualifying streak means the route changed. That is new information, not the
+        // confirmation a refund requires, so restore the pending call and start the evidence over.
         if (errorHash != failure.errorHash) {
             _pendingCallCommitmentOf[id] = commitment;
             _recordFailure({id: id, errorHash: errorHash, previous: failure});
             return (false, 0);
         }
 
+        // The same failure reproduced under a qualified budget. Treat the destination as unreachable and return the
+        // input to the project that was named when custody was taken.
         delete _pendingCallFailureOf[id];
         _refund(call);
 
@@ -794,20 +860,30 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (uint256 beneficiaryTokenCount)
     {
+        // Authenticate the caller-supplied call against the stored commitment before acting on any of its fields.
         bytes32 commitment = _requirePendingCall({id: id, call: call, memo: memo, metadata: metadata});
         JBPendingRouterTerminalCallFailure memory failure = _pendingCallFailureOf[id];
 
+        // Once the streak qualifies, the next attempt is the one that can release custody, so it must run through
+        // the finalizer where a matching failure refunds instead of silently adding a fourth identical data point.
         if (failure.count >= FINALIZATION_FAILURE_COUNT) {
             revert JBRouterTerminalGateway_PendingCallRequiresFinalization(id);
         }
+
+        // The first attempt after queuing runs immediately; every counted one after it waits a day so the streak
+        // spans changing chain conditions rather than one unlucky block.
         if (failure.count != 0) _requireReady({id: id, lastFailureAt: failure.lastFailureAt});
         gasLimit = _qualifiedGasLimit({failure: failure, requestedGasLimit: gasLimit});
 
+        // Clear the pending record before interacting, so a re-entrant caller finds nothing to claim twice. Every exit
+        // below either settles, rewrites it, or reverts the whole transaction and restores it.
         delete _pendingCallCommitmentOf[id];
 
+        // Retained calls always carry a zero minimum, so a retry has no slippage floor of its own.
         (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: gasLimit});
 
+        // The route recovered — settle into the destination and drop the failure history with the pending record.
         if (success) {
             delete _pendingCallFailureOf[id];
             emit JBRouterTerminalGateway_ProcessPendingCall({
@@ -819,6 +895,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // Gas exhaustion advances only after the failure state has enforced the next larger budget.
         if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
+        // Still failing, so restore custody and fold this attempt into the streak that governs the next budget.
         _pendingCallCommitmentOf[id] = commitment;
         _recordFailure({id: id, errorHash: errorHash, previous: failure});
     }
@@ -838,7 +915,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     )
         internal
     {
+        // A monotonic counter keeps each retained call's custody isolated, so two identical failed fees from the same
+        // project never collide into one claim.
         bytes32 id = bytes32(++pendingCallCount);
+
+        // This runs in the gas the failed route left behind, so store only the hash. The event below carries
+        // everything a retrier needs to reconstruct and re-present the call.
         _pendingCallCommitmentOf[id] = _commitmentOf({call: call, memo: memo, metadata: metadata});
 
         emit JBRouterTerminalGateway_QueuePendingCall({
@@ -857,7 +939,11 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     )
         internal
     {
+        // Only an unbroken run of the same failure justifies giving up on a route, so a changed class restarts the
+        // count at this attempt rather than carrying forward evidence about a failure mode that no longer occurs.
         uint32 count = errorHash == previous.errorHash ? previous.count + 1 : 1;
+
+        // Day-scale spacing is the only thing this timestamp gates, so validator-scale drift cannot matter.
         // forge-lint: disable-next-line(block-timestamp)
         uint48 failedAt = uint48(block.timestamp);
 
@@ -878,6 +964,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// other registered non-circular terminal. Reverts if every candidate rejects the refund.
     /// @param call The retained call whose original input must be refunded.
     function _refund(JBPendingRouterTerminalCall memory call) internal {
+        // Every candidate below is credited through project accounting, never by raw transfer, so the refund lands as
+        // recorded project balance rather than as tokens sitting above a terminal's books.
         IJBTerminal originalTerminal = IJBTerminal(call.refundTo);
 
         // Prefer the source terminal while it remains registered for the project, preserving the original destination.
@@ -905,6 +993,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             if (_tryRefund({call: call, terminal: terminal})) return;
         }
 
+        // Nothing accepted the refund. Revert so custody, the pending record, and the qualifying streak all roll back
+        // intact and the attempt can be repeated once the project's terminals change.
         revert JBRouterTerminalGateway_RefundFailed({
             originalTerminal: address(originalTerminal), primaryTerminal: address(primaryTerminal)
         });
@@ -916,10 +1006,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @param token The ERC-20 token to transfer.
     /// @param amount The token amount to transfer.
     function _transferFrom(address from, address to, address token, uint256 amount) internal {
+        // A direct allowance is the cheaper path and the one most payers already hold, so try it before Permit2.
         if (IERC20(token).allowance({owner: from, spender: address(this)}) >= amount) {
             return IERC20(token).safeTransferFrom({from: from, to: to, value: amount});
         }
 
+        // Permit2 settles in 160 bits, so a wider amount cannot be pulled through it at all. Reject rather than
+        // truncate, which would move less than the payment the caller asked to make.
         if (amount > type(uint160).max) revert JBRouterTerminalGateway_AmountOverflow(amount);
         // forge-lint: disable-next-line(unsafe-typecast)
         PERMIT2.transferFrom({from: from, to: to, amount: uint160(amount), token: token});
@@ -930,6 +1023,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @param terminal The candidate source-project terminal to credit.
     /// @return success Whether the candidate accepted and accounted for the complete refund.
     function _tryRefund(JBPendingRouterTerminalCall memory call, IJBTerminal terminal) internal returns (bool success) {
+        // Skip a candidate whose forwarding chain leads back here: crediting it would hand custody straight back to
+        // this gateway as a fresh unrecorded deposit rather than reaching the project's books.
         if (
             address(terminal) == address(0)
                 || JBForwardingCheck.isCircularTerminal({
@@ -943,9 +1038,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (call.token == JBConstants.NATIVE_TOKEN) {
             value = call.amount;
         } else {
+            // Approve exactly this refund so a rejecting candidate is left with no standing claim on custody.
             IERC20(call.token).forceApprove({spender: address(terminal), value: call.amount});
         }
 
+        // Call low-level so one uncooperative terminal reverting cannot abort the search across the remaining
+        // candidates. The caller reverts only if every one of them fails.
         (success,) = address(terminal).call{value: value}(
             abi.encodeCall(
                 IJBTerminal.addToBalanceOf,
@@ -982,18 +1080,26 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (bool success, bytes32 errorHash, uint256 result, bool gasExhausted)
     {
+        // Assembly keeps the callee's return data from being copied into memory wholesale, so a failing route cannot
+        // inflate this frame's memory cost and consume the reserve that the failure accounting depends on.
         assembly ("memory-safe") {
             let ptr := mload(0x40)
             let gasBefore := gas()
+
+            // Bound the call so a route that runs away on gas fails here rather than taking the whole transaction.
             success := call(gasLimit, target, value, add(data, 0x20), mload(data), ptr, 0x20)
             let gasSpent := sub(gasBefore, gas())
 
+            // Only a full word is a usable `pay` result; a shorter return cannot be a token count.
             let size := returndatasize()
             if and(success, gt(size, 0x1f)) { result := mload(ptr) }
 
             // A failed call with no error data which consumed its complete budget is an unqualified gas exhaustion.
             gasExhausted := and(iszero(success), and(iszero(size), iszero(lt(gasSpent, gasLimit))))
 
+            // Fingerprint only the selector. Custom errors embed dynamic arguments — amounts, addresses, block
+            // numbers — that differ between otherwise identical failures, and hashing those would make every attempt
+            // look like a new failure class and reset the streak forever.
             let copySize := size
             if gt(copySize, 4) { copySize := 4 }
 
@@ -1008,7 +1114,11 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @param blockGasLimit The block gas limit from which to derive an executable call budget.
     /// @return gasLimit The maximum call budget supported by `blockGasLimit`.
     function _maximumQualifiedCallGas(uint256 blockGasLimit) internal pure returns (uint256 gasLimit) {
+        // A chain whose whole block cannot cover the reserve can execute no qualified attempt at all.
         if (blockGasLimit <= _TRANSACTION_GAS_RESERVE) return 0;
+
+        // Reserve room for transaction overhead and durable failure accounting, then apply the 63/64 rule so the
+        // remainder is gas a `CALL` can actually forward rather than gas the caller merely holds.
         return (blockGasLimit - _TRANSACTION_GAS_RESERVE) * 63 / 64;
     }
 
@@ -1044,15 +1154,25 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         pure
         returns (uint256 gasLimit)
     {
+        // Without room for the base budget there is no such thing as a qualified attempt on this chain, so refuse
+        // rather than let an underpowered call masquerade as evidence the route is broken.
         if (maximumGasLimit < QUALIFIED_CALL_GAS) {
             revert JBRouterTerminalGateway_BlockGasLimitTooLow({maximum: maximumGasLimit, minimum: QUALIFIED_CALL_GAS});
         }
 
+        // Repeating a budget that already ran out proves nothing new, so each consecutive exhaustion demands a step
+        // larger one. Other failure classes are about the route itself and stay at the base budget.
         uint256 minimum = QUALIFIED_CALL_GAS;
         if (failure.errorHash == _GAS_EXHAUSTED_ERROR_HASH) minimum *= uint256(failure.count) + 1;
+
+        // The ladder stops at whatever the chain can actually execute; demanding more would strand the call.
         if (minimum > maximumGasLimit) minimum = maximumGasLimit;
 
+        // Zero means the caller wants whatever the failure state currently requires.
         if (requestedGasLimit == 0) return minimum;
+
+        // Floor and ceiling both matter: below the minimum an attempt is not a fair test of the route, and above the
+        // executable maximum it can never be included in a block.
         if (requestedGasLimit < minimum) {
             revert JBRouterTerminalGateway_RetryGasLimitTooLow({gasLimit: requestedGasLimit, minimum: minimum});
         }
@@ -1082,9 +1202,12 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         view
         returns (bytes32 commitment)
     {
+        // A zero commitment means nothing is pending here: never queued, already settled, or already refunded.
         commitment = _pendingCallCommitmentOf[id];
         if (commitment == bytes32(0)) revert JBRouterTerminalGateway_PendingCallNotFound(id);
 
+        // Everything about the call arrived from an untrusted caller, so re-derive the hash and require an exact
+        // match. This is what stops a retrier from redirecting the beneficiary, the amount, or the refund creditor.
         bytes32 actualCommitment = _commitmentOf({call: call, memo: memo, metadata: metadata});
         if (actualCommitment != commitment) {
             revert JBRouterTerminalGateway_CallDataMismatch({
@@ -1132,17 +1255,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         return keccak256(abi.encode(call, memo, metadata));
     }
 
-    /// @notice Require a value to fit the width its retained-call field can represent.
-    /// @param value The value to check.
-    /// @param limit The maximum value the field can represent.
-    function _checkFitsIn(uint256 value, uint256 limit) internal pure {
-        if (value > limit) revert JBRouterTerminalGateway_OverflowAlert({value: value, limit: limit});
-    }
-
     /// @notice Resolve an upstream payer exposed by a forwarding caller.
     /// @param fallback_ The payer to use when the caller does not expose an upstream payer.
     /// @return payer The forwarding caller's `originalPayer` when nonzero, otherwise `fallback_`.
     function _resolveOriginalPayer(address fallback_) internal view returns (address payer) {
+        // The Registry forwards on a payer's behalf, so asking it who it is acting for recovers the terminal or
+        // protocol payer that actually funded the input. Probe defensively: most callers are not forwarders, and a
+        // caller that answers badly must degrade to itself rather than take the payment down.
         if (msg.sender.code.length != 0) {
             try IJBPayerTracker(msg.sender).originalPayer() returns (address original) {
                 if (original != address(0)) return original;
@@ -1152,18 +1271,21 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Decode the raw source-project metadata used by core terminal fees and project payouts.
-    /// @dev Words wider than core's `uint64` project-ID width (hashes, packed addresses, and other coincidental
-    /// 32-byte payloads) are not opt-ins, so such calls keep synchronous failure semantics instead of entering escrow.
+    /// @dev Core's fee and payout paths send exactly `abi.encodePacked(sourceProjectId)`, so anything of another
+    /// length was never an opt-in. `JBMetadataResolver`-formatted metadata is longer and is therefore ignored here.
     /// @param metadata The metadata to decode, which opts in only when it is exactly 32 bytes.
     /// @return sourceProjectId The decoded source project ID, or zero when the metadata is not an opt-in.
-    function _sourceProjectIdFrom(bytes calldata metadata) internal pure returns (uint64 sourceProjectId) {
+    function _sourceProjectIdFrom(bytes calldata metadata) internal pure returns (uint256 sourceProjectId) {
         if (metadata.length != 32) return 0;
-        uint256 word;
+
         assembly ("memory-safe") {
-            word := calldataload(metadata.offset)
+            sourceProjectId := calldataload(metadata.offset)
         }
-        if (word > type(uint64).max) return 0;
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint64(word);
+
+        // A word too large to be an issued project ID is a coincidence — a hash, a packed address, a bitfield — not
+        // a
+        // request for custody. Reject it so such calls keep synchronous failure semantics instead of escrowing funds
+        // against a project that can never be minted to receive them. `uint64` is core's own project-ID width.
+        if (sourceProjectId > type(uint64).max) return 0;
     }
 }

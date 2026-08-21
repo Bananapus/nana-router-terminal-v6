@@ -337,7 +337,7 @@ Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPermitTermin
 - Immutable: `DIRECTORY`, `PERMIT2`, `ROUTER`.
 - Stored: `pendingCallCount`, `_pendingCallCommitmentOf`, `_pendingCallFailureOf`; transient: `_acceptingToken`, `originalPayer`.
 - Entry points: `addToBalanceOf`, `finalizePendingCall`, `pay`, `processPendingCall`.
-- Critical helpers: `_attempt`, `_boundedCall`, `_checkFitsIn`, `_commitmentOf`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_sourceProjectIdFrom`.
+- Critical helpers: `_attempt`, `_boundedCall`, `_commitmentOf`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_sourceProjectIdFrom`.
 
 ### `src/JBPayRouteResolver.sol`
 

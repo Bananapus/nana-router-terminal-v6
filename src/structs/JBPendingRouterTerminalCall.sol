@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/// @dev Retained calls are stored only as a hash commitment over this struct and the original memo and metadata, so
-/// this shape is an ABI surface rather than a storage layout. Retriers supply the full call, which is authenticated
-/// against the commitment. Amounts use core's `uint224` fee-accounting width and project IDs use core's `uint64`
-/// split/permission width. A retained call always has a nonzero `sourceProjectId` and a zero `minReturnedTokens`, so
-/// neither an opt-in flag nor a minimum is carried.
+/// @dev Retained calls are never written to storage — only a hash commitment over this struct and the original memo
+/// and metadata is. This shape is therefore an ABI surface, where every field is word-padded regardless of its
+/// declared width, so the members keep the same widths as the terminal arguments they mirror. A retained call always
+/// has a nonzero `sourceProjectId` and a zero `minReturnedTokens`, so neither an opt-in flag nor a minimum is carried.
 /// @custom:member amount The original input-token amount retained by the gateway.
 /// @custom:member preferAddToBalance Whether the call settles through `addToBalanceOf` instead of `pay`.
 /// @custom:member shouldReturnHeldFees The held-fee preference of a routed `addToBalanceOf` call.
@@ -15,12 +14,12 @@ pragma solidity ^0.8.0;
 /// @custom:member sourceProjectId The project named by metadata as the eventual refund creditor.
 /// @custom:member token The original input token retained by the gateway.
 struct JBPendingRouterTerminalCall {
-    uint224 amount;
+    uint256 amount;
     bool preferAddToBalance;
     bool shouldReturnHeldFees;
     address beneficiary;
-    uint64 projectId;
+    uint256 projectId;
     address refundTo;
-    uint64 sourceProjectId;
+    uint256 sourceProjectId;
     address token;
 }
