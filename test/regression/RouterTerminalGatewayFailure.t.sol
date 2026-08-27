@@ -468,6 +468,10 @@ contract GatewayGasHarness is JBRouterTerminalGateway {
         return _GAS_EXHAUSTED_ERROR_HASH;
     }
 
+    function maximumQualifiedCallGasFor(uint256 blockGasLimit) external pure returns (uint256 gasLimit) {
+        return _maximumQualifiedCallGas(blockGasLimit);
+    }
+
     function qualifiedGasLimitFor(
         JBPendingRouterTerminalCallFailure memory failure,
         uint256 requestedGasLimit,
@@ -739,6 +743,28 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(
             callbackToken.balanceOf(address(gateway)), victimAmount + attackerAmount, "custody must cover every claim"
         );
+    }
+
+    function test_transactionGasCapBoundsFinalRungOnLargeBlockChains() public {
+        GatewayGasHarness harness = new GatewayGasHarness();
+        // Ethereum mainnet: 60M blocks but EIP-7825 caps one transaction at 2^24 gas.
+        uint256 maximumGasLimit = harness.maximumQualifiedCallGasFor(60_000_000);
+        assertEq(
+            maximumGasLimit, uint256(16_777_216 - 1_500_000) * 63 / 64, "ceiling must follow the per-transaction cap"
+        );
+        assertEq(
+            harness.maximumQualifiedCallGasFor(16_777_216), maximumGasLimit, "a cap-sized block yields the same ceiling"
+        );
+        assertLt(harness.maximumQualifiedCallGasFor(10_000_000), maximumGasLimit, "smaller blocks still bind");
+
+        // The finalization rung (count 3 -> 20M target) must clip to something a transaction can carry.
+        JBPendingRouterTerminalCallFailure memory failure = JBPendingRouterTerminalCallFailure({
+            count: 3, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0
+        });
+        uint256 rung =
+            harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 0, maximumGasLimit: maximumGasLimit});
+        assertEq(rung, maximumGasLimit, "the 20M rung must clip to the ceiling");
+        assertLt(rung + (rung + 62) / 63 + 750_000, 16_777_216, "the clipped rung must satisfy _requireRetryGas");
     }
 
     function test_chainAwareGasCapBoundsOtherwiseUnexecutableEscalation() public {
@@ -1358,6 +1384,98 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallFailureOf(_ID).count, 1);
     }
 
+    function test_erc20PayWithMsgValueReverts() public {
+        token.mint(address(this), _AMOUNT);
+        token.approve(address(gateway), _AMOUNT);
+        vm.deal(address(this), 1 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalGateway.JBRouterTerminalGateway_NoMsgValueAllowed.selector, 1)
+        );
+        gateway.pay{value: 1}({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+        assertEq(address(gateway).balance, 0, "stray native value must never be accepted alongside an ERC-20");
+    }
+
+    function test_finalizeBeforeThreeMatchingFailuresReverts() public {
+        _queueFee(address(token));
+        _process(_ID, _feeCall());
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalGateway.JBRouterTerminalGateway_PendingCallNotFinalizable.selector, _ID, uint32(1)
+            )
+        );
+        _finalize(_ID, _feeCall());
+
+        assertEq(gateway.pendingCallCommitmentOf(_ID), _commitmentOf(_feeCall()), "custody must remain pending");
+        assertEq(token.balanceOf(address(gateway)), _AMOUNT, "an early finalize must not move custody");
+    }
+
+    function test_finalizeWithGasSettlesQualifiedCall() public {
+        _queueFee(address(token));
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        router.setMode(0);
+
+        (bool wasRefunded, uint256 beneficiaryTokenCount) = gateway.finalizePendingCallWithGas({
+            id: _ID,
+            call: _feeCall(),
+            memo: "",
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID)),
+            gasLimit: gateway.QUALIFIED_CALL_GAS() + 1
+        });
+
+        assertFalse(wasRefunded, "a recovered route settles rather than refunds");
+        assertEq(beneficiaryTokenCount, _AMOUNT);
+        assertEq(token.balanceOf(address(router)), _AMOUNT, "the explicit-gas final attempt must deliver custody");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0));
+        assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
+    }
+
+    function test_optedInPayWithNonzeroMinimumStillRevertsSynchronously() public {
+        token.mint(address(this), _AMOUNT);
+        token.approve(address(gateway), _AMOUNT);
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: _DESTINATION_PROJECT_ID,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 1,
+            memo: "",
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+
+        assertEq(gateway.pendingCallCount(), 0, "a priced minimum must never be retained even with the opt-in");
+        assertEq(token.balanceOf(address(this)), _AMOUNT);
+    }
+
+    function test_processUnknownIdReverts() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalGateway.JBRouterTerminalGateway_PendingCallNotFound.selector, _ID)
+        );
+        _process(_ID, _feeCall());
+
+        // A settled id is gone for good: replaying it must fail the same way.
+        _queueFee(address(token));
+        router.setMode(0);
+        _process(_ID, _feeCall());
+        vm.expectRevert(
+            abi.encodeWithSelector(JBRouterTerminalGateway.JBRouterTerminalGateway_PendingCallNotFound.selector, _ID)
+        );
+        _process(_ID, _feeCall());
+    }
+
     function test_processRequiresFinalizerAfterThreeMatchingFailures() public {
         _queueFee(address(token));
         _qualifyWithMatchingFailures();
@@ -1580,7 +1698,12 @@ contract RouterTerminalGatewayBaseForkTest is Test {
         vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
 
         JBRouterTerminalGateway gateway = _installGateway();
-        assertGe(gateway.maximumQualifiedCallGas(), 20_000_000, "Base must support the complete default gas ladder");
+        // EIP-7825 caps any transaction at 2^24 gas, so the 20M rung must clip to what one transaction can carry.
+        assertEq(
+            gateway.maximumQualifiedCallGas(),
+            uint256(16_777_216 - 1_500_000) * 63 / 64,
+            "the ladder ceiling must be the per-transaction cap, not the block limit"
+        );
         uint256 gatewayBalanceBefore = IERC20(_USDC).balanceOf(address(gateway));
         uint256 payoutBalanceBefore = IERC20(_USDC).balanceOf(_PAYOUT_BENEFICIARY);
 

@@ -145,7 +145,7 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 3. Wait at least one day between qualified failures.
 4. If the selector changes, the count resets to one and retries continue; changed arguments for the same selector do not reset.
 5. After three matching failures and one more day, anyone calls `finalizePendingCall` with the same event-sourced call, memo, and metadata.
-6. Complete-budget gas exhaustion automatically raises the required budget from 5M to 10M to 15M, with 20M required for the final attempt.
+6. Complete-budget gas exhaustion automatically raises the required budget from 5M to 10M to 15M, with 20M targeted for the final attempt, each step clipped to what a single transaction can carry under the live chain's block limit and the EIP-7825 per-transaction cap.
 7. The final attempt settles if possible, resets on a changed class, or atomically refunds the fixed source project after the same class.
 
 **Failure Modes**

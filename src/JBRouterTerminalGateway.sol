@@ -110,6 +110,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice The stable fingerprint used when an attempt consumes its complete forwarded gas budget.
     bytes32 internal constant _GAS_EXHAUSTED_ERROR_HASH = keccak256("JBRouterTerminalGateway: gas exhausted");
 
+    /// @notice The EIP-7825 per-transaction gas cap (2^24). No transaction can carry more gas than this even when the
+    /// block gas limit is larger, so the retry ladder must stop here or its top rungs become unexecutable.
+    uint256 internal constant _TRANSACTION_GAS_CAP = 16_777_216;
+
     /// @notice Block gas retained for transaction overhead, EIP-150 withholding, and durable failure accounting.
     uint256 internal constant _TRANSACTION_GAS_RESERVE = 1_500_000;
 
@@ -297,7 +301,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
     /// @notice Make one final qualified attempt with an expanded gas budget.
     /// @dev Behaves like `finalizePendingCall` but forwards a caller-selected budget, which must satisfy the pending
-    /// call's escalating minimum and fit under the live chain's executable block budget.
+    /// call's escalating minimum and fit under the live chain's executable transaction budget.
     /// @param id The pending call identifier.
     /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
@@ -429,7 +433,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
     /// @notice Make a permissionless attempt with an expanded qualified gas budget.
     /// @dev Behaves like `processPendingCall` but forwards a caller-selected budget, which must satisfy the pending
-    /// call's escalating minimum and fit under the live chain's executable block budget.
+    /// call's escalating minimum and fit under the live chain's executable transaction budget.
     /// @param id The pending call identifier.
     /// @param call The retained call, as emitted when it was queued.
     /// @param gasLimit The gas to forward, which must satisfy the pending call's escalating minimum.
@@ -1110,10 +1114,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Derive the largest call budget which preserves the transaction's accounting reserves.
-    /// @dev Applies the EIP-150 forwarding ratio after reserving gas for transaction overhead and failure accounting.
+    /// @dev Bounds the block limit by the EIP-7825 per-transaction cap, reserves gas for transaction overhead and
+    /// failure accounting, then applies the EIP-150 forwarding ratio.
     /// @param blockGasLimit The block gas limit from which to derive an executable call budget.
     /// @return gasLimit The maximum call budget supported by `blockGasLimit`.
     function _maximumQualifiedCallGas(uint256 blockGasLimit) internal pure returns (uint256 gasLimit) {
+        // A block larger than one transaction can carry does not make a larger attempt executable.
+        if (blockGasLimit > _TRANSACTION_GAS_CAP) blockGasLimit = _TRANSACTION_GAS_CAP;
+
         // A chain whose whole block cannot cover the reserve can execute no qualified attempt at all.
         if (blockGasLimit <= _TRANSACTION_GAS_RESERVE) return 0;
 
@@ -1123,7 +1131,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Resolve the minimum escalating gas budget for a qualified attempt on the live chain.
-    /// @dev Consecutive gas exhaustion targets 5M, 10M, 15M, then 20M gas, capped by the executable block budget.
+    /// @dev Consecutive gas exhaustion targets 5M, 10M, 15M, then 20M gas, capped by the executable transaction budget.
     /// @param failure The pending call's current matching failure state.
     /// @param requestedGasLimit The explicit caller-selected budget, or zero to select the required minimum.
     /// @return gasLimit The validated gas budget to forward.

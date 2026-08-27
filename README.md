@@ -77,7 +77,7 @@ The shortest useful reading order is:
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
 - failed calls carrying an exact raw source project ID become asynchronous pending calls; calls without that opt-in remain synchronous
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
-- gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable block budget, and `processPendingCallWithGas` must stay between the current step and that cap
+- gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable transaction budget, and `processPendingCallWithGas` must stay between the current step and that cap
 - deployment attempts project 1 plus `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS` without aborting on unauthorized cohorts; each failure emits `RouterTerminalMigrationFailed`
 - an authorized project owner or operator can finish one failed cohort with `script/MigrateProject.s.sol`
 
@@ -151,7 +151,7 @@ script/
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
 - the gateway treats exact 32-byte metadata encoding a nonzero raw source project ID no wider than `uint64` as an explicit project-refund escrow opt-in; calls without it, wider coincidental 32-byte words, and non-zero-minimum payments still revert synchronously
 - retained calls are stored as a single hash commitment; the queue event emits the full call, memo, and metadata, and retriers supply them back to `processPendingCall`/`finalizePendingCall` where a hash match authenticates them
-- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable block budget
+- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable transaction budget
 - the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths
