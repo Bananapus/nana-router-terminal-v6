@@ -86,16 +86,16 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return count The issued identifier count.
     function pendingCallCount() external view returns (uint256 count);
 
-    /// @notice Return a pending call's consecutive matching failure state.
-    /// @param id The pending call identifier.
-    /// @return failure The matching failure state.
-    function pendingCallFailureOf(bytes32 id) external view returns (JBPendingRouterTerminalCallFailure memory failure);
-
     /// @notice Return the hash commitment of a router call retained after its first attempt failed.
     /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
     /// @param id The pending call identifier.
     /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
     function pendingCallCommitmentOf(bytes32 id) external view returns (bytes32 commitment);
+
+    /// @notice Return a pending call's consecutive matching failure state.
+    /// @param id The pending call identifier.
+    /// @return failure The matching failure state.
+    function pendingCallFailureOf(bytes32 id) external view returns (JBPendingRouterTerminalCallFailure memory failure);
 
     /// @notice Make one final qualified attempt with the gas budget required by its failure state.
     /// @param id The pending call identifier.

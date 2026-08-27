@@ -144,13 +144,13 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     // -------------------- internal stored properties ------------------- //
     //*********************************************************************//
 
-    /// @notice Qualified failure state for each retained call.
-    mapping(bytes32 id => JBPendingRouterTerminalCallFailure) internal _pendingCallFailureOf;
-
     /// @notice The hash commitment binding each retained call, its memo, and its metadata.
     /// @dev Only the commitment is stored so the gas-constrained queue path writes a single slot. Retriers supply the
     /// full call from the queue event and are authenticated against this hash.
     mapping(bytes32 id => bytes32) internal _pendingCallCommitmentOf;
+
+    /// @notice Qualified failure state for each retained call.
+    mapping(bytes32 id => JBPendingRouterTerminalCallFailure) internal _pendingCallFailureOf;
 
     //*********************************************************************//
     // ------------------- transient stored properties ------------------- //
@@ -534,6 +534,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         return ROUTER.discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
     }
 
+    /// @notice Return the hash commitment of a call retained after its atomic router attempt failed.
+    /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
+    /// @param id The pending call identifier.
+    /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
+    function pendingCallCommitmentOf(bytes32 id) external view override returns (bytes32 commitment) {
+        return _pendingCallCommitmentOf[id];
+    }
+
     /// @notice Return a retained call's consecutive matching failure state.
     /// @param id The pending call identifier.
     /// @return failure The matching failure state.
@@ -544,14 +552,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         returns (JBPendingRouterTerminalCallFailure memory failure)
     {
         return _pendingCallFailureOf[id];
-    }
-
-    /// @notice Return the hash commitment of a call retained after its atomic router attempt failed.
-    /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
-    /// @param id The pending call identifier.
-    /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
-    function pendingCallCommitmentOf(bytes32 id) external view override returns (bytes32 commitment) {
-        return _pendingCallCommitmentOf[id];
     }
 
     /// @notice Delegate payment previewing to the immutable router.
@@ -1186,6 +1186,23 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
 
+    /// @notice Hash a retained call together with its original memo and metadata into its stored commitment.
+    /// @param call The retained call.
+    /// @param memo The original memo bound by the pending call.
+    /// @param metadata The original metadata bound by the pending call.
+    /// @return commitment The commitment binding the call, memo, and metadata.
+    function _commitmentOf(
+        JBPendingRouterTerminalCall memory call,
+        string calldata memo,
+        bytes calldata metadata
+    )
+        internal
+        pure
+        returns (bytes32 commitment)
+    {
+        return keccak256(abi.encode(call, memo, metadata));
+    }
+
     /// @notice Require a pending call and authenticate the supplied call, memo, and metadata against its commitment.
     /// @param id The pending call identifier.
     /// @param call The retained call as supplied by the retrier.
@@ -1236,23 +1253,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         if (available < required) {
             revert JBRouterTerminalGateway_InsufficientRetryGas({available: available, required: required});
         }
-    }
-
-    /// @notice Hash a retained call together with its original memo and metadata into its stored commitment.
-    /// @param call The retained call.
-    /// @param memo The original memo bound by the pending call.
-    /// @param metadata The original metadata bound by the pending call.
-    /// @return commitment The commitment binding the call, memo, and metadata.
-    function _commitmentOf(
-        JBPendingRouterTerminalCall memory call,
-        string calldata memo,
-        bytes calldata metadata
-    )
-        internal
-        pure
-        returns (bytes32 commitment)
-    {
-        return keccak256(abi.encode(call, memo, metadata));
     }
 
     /// @notice Resolve an upstream payer exposed by a forwarding caller.
