@@ -111,6 +111,7 @@ contract GatewayTestDirectory {
     mapping(uint256 projectId => mapping(address terminal => bool)) public isTerminal;
     mapping(uint256 projectId => mapping(address token => IJBTerminal terminal)) public primaryTerminal;
     mapping(uint256 projectId => IJBTerminal[] terminals) internal _terminalsOf;
+    mapping(uint256 projectId => address controller) public controllerOf;
 
     function isTerminalOf(uint256 projectId, IJBTerminal terminal) external view returns (bool) {
         return isTerminal[projectId][address(terminal)];
@@ -118,6 +119,10 @@ contract GatewayTestDirectory {
 
     function primaryTerminalOf(uint256 projectId, address token) external view returns (IJBTerminal) {
         return primaryTerminal[projectId][token];
+    }
+
+    function setControllerOf(uint256 projectId, address controller) external {
+        controllerOf[projectId] = controller;
     }
 
     function setIsTerminalOf(uint256 projectId, IJBTerminal terminal, bool flag) external {
@@ -1498,6 +1503,61 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0);
         assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0));
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
+    }
+
+    function test_controllerReservedSplitRevertsSynchronously() public {
+        // `JBController` pays reserved project tokens to a split recipient with exactly the opt-in metadata shape,
+        // then hands the tokens to the split beneficiary if the terminal reverts. Custody would swallow that catch and
+        // hold a token the source project can never take back.
+        directory.setControllerOf({projectId: _SOURCE_PROJECT_ID, controller: address(this)});
+        token.mint(address(this), _AMOUNT * 2);
+        token.approve(address(gateway), _AMOUNT * 2);
+
+        uint256[2] memory destinations = [uint256(JBConstants.FEE_BENEFICIARY_PROJECT_ID), uint256(3)];
+        for (uint256 i; i < destinations.length; ++i) {
+            vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+            gateway.pay({
+                projectId: destinations[i],
+                token: address(token),
+                amount: _AMOUNT,
+                beneficiary: address(this),
+                minReturnedTokens: 0,
+                memo: "",
+                metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+            });
+        }
+
+        assertEq(gateway.pendingCallCount(), 0, "a controller-originated call must never be retained");
+        assertEq(token.balanceOf(address(this)), _AMOUNT * 2, "the controller's catch must get its tokens back");
+    }
+
+    function test_terminalPayoutToNonFeeProjectRevertsSynchronously() public {
+        // A failed payout split reverting into `JBMultiTerminal` restores the full amount fee-free; retaining it
+        // would charge the fee on a payout that never lands and lock the net for days.
+        token.mint(address(sourceTerminal), _AMOUNT);
+        sourceTerminal.sendPayout({
+            terminal: registry,
+            destinationProjectId: 3,
+            token: address(token),
+            amount: _AMOUNT,
+            sourceProjectId: _SOURCE_PROJECT_ID,
+            preferAddToBalance: false
+        });
+        assertTrue(sourceTerminal.payoutWasNullified(), "the terminal's catch must see the failure");
+
+        sourceTerminal.sendPayout({
+            terminal: registry,
+            destinationProjectId: 3,
+            token: address(token),
+            amount: _AMOUNT,
+            sourceProjectId: _SOURCE_PROJECT_ID,
+            preferAddToBalance: true
+        });
+        assertTrue(sourceTerminal.payoutWasNullified(), "add-to-balance payouts follow the same rule");
+
+        assertEq(gateway.pendingCallCount(), 0, "terminal payouts to non-fee projects must not be retained");
+        assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT * 2, "the source terminal keeps its payout");
+        assertEq(token.balanceOf(address(gateway)), 0);
     }
 
     function test_terminalCallWithoutSourceProjectRevertsSynchronously() public {

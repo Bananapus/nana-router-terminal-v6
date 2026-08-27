@@ -268,8 +268,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
 
-        // Calls without an explicit source project retain synchronous failure semantics.
-        if (sourceProjectId == 0) revert JBRouterTerminalGateway_RouteFailed(errorHash);
+        // Calls without a usable source-project opt-in retain synchronous failure semantics.
+        if (!_shouldRetain(call)) revert JBRouterTerminalGateway_RouteFailed(errorHash);
 
         // The opt-in was given, so absorb the failure instead of bubbling it into the caller's catch boundary. The
         // input stays in custody and recovery becomes permissionless.
@@ -398,9 +398,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             _attempt({call: call, minReturnedTokens: minReturnedTokens, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
 
-        // Preserve minimums and calls without source-project opt-in instead of silently expanding custody. A caller
-        // who priced a minimum is asking to fail now rather than to be settled later at an unknown rate.
-        if (minReturnedTokens != 0 || sourceProjectId == 0) {
+        // Preserve minimums and calls without a usable source-project opt-in instead of silently expanding custody. A
+        // caller who priced a minimum is asking to fail now rather than to be settled later at an unknown rate.
+        if (minReturnedTokens != 0 || !_shouldRetain(call)) {
             revert JBRouterTerminalGateway_RouteFailed(errorHash);
         }
 
@@ -1276,6 +1276,28 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
             } catch {}
         }
         return fallback_;
+    }
+
+    /// @notice Decide whether a failed call carrying the source-project opt-in should be retained rather than reverted.
+    /// @dev The opt-in metadata shape is also what core's own infrastructure sends when it pays on a project's behalf.
+    /// Those callers already catch a synchronous failure and restore the input to the right party without fees:
+    /// `JBController` hands undeliverable reserved-token splits to the split beneficiary, and `JBMultiTerminal`
+    /// restores a failed payout split fee-free. Custody would only turn that into a delayed, fee-charged refund, or,
+    /// for reserved project tokens the source cannot hold, a permanent lock. So the source project's controller never
+    /// retains, and its terminals retain only protocol fees to the fee project, which is the forgiveness this
+    /// contract exists to close. Any other payer, such as a protocol contract with its own catch boundary, retains.
+    /// @param call The failed call.
+    /// @return shouldRetain Whether the call should be queued for permissionless recovery.
+    function _shouldRetain(JBPendingRouterTerminalCall memory call) internal view returns (bool shouldRetain) {
+        // Zero means this caller never asked for custody and expects a synchronous revert.
+        if (call.sourceProjectId == 0) return false;
+
+        // `refundTo` is the resolved upstream payer: the contract acting for the source project, if any.
+        if (address(DIRECTORY.controllerOf(call.sourceProjectId)) == call.refundTo) return false;
+        if (DIRECTORY.isTerminalOf({projectId: call.sourceProjectId, terminal: IJBTerminal(call.refundTo)})) {
+            return call.projectId == JBConstants.FEE_BENEFICIARY_PROJECT_ID;
+        }
+        return true;
     }
 
     /// @notice Decode the raw source-project metadata used by core terminal fees and project payouts.
