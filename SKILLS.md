@@ -11,6 +11,7 @@
 |---|---|
 | Repo overview and routing model | [`README.md`](./README.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
 | Terminal execution path | [`src/JBRouterTerminal.sol`](./src/JBRouterTerminal.sol) |
+| Failed-route custody and autonomous retry/refund | [`src/JBRouterTerminalGateway.sol`](./src/JBRouterTerminalGateway.sol), [`test/regression/RouterTerminalGatewayFailure.t.sol`](./test/regression/RouterTerminalGatewayFailure.t.sol) |
 | Pay-route resolution helpers | [`src/JBPayRouteResolver.sol`](./src/JBPayRouteResolver.sol) |
 | Registry behavior and terminal selection | [`src/JBRouterTerminalRegistry.sol`](./src/JBRouterTerminalRegistry.sol) |
 | Shared libraries, interfaces, and metadata structs | [`src/libraries/`](./src/libraries/), [`src/interfaces/`](./src/interfaces/), [`src/structs/`](./src/structs/) |
@@ -42,5 +43,6 @@ Universal routing terminal for Juicebox V6. This repo accepts many input tokens,
 - Treat preview behavior, quote selection, and execution callbacks as tightly coupled.
 - When the input token is itself a Juicebox project token, follow the cash-out loop carefully.
 - Refund handling is part of correctness.
+- Gateway selector-level failure classes, retry timing, callback-safe original-input custody, and source-project refunds are one security boundary.
 - `addToBalanceOf` receipt enforcement, pay-path fee-on-transfer limits, and callback guards are real security boundaries.
 - If you touch registry behavior, verify project-specific overrides, allowlisting, and terminal locking together.
