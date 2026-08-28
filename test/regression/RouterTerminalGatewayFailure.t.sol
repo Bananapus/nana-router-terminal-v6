@@ -1628,9 +1628,7 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         _process(_ID, _feeCall());
         JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
-        assertEq(
-            first.errorHash, GatewayGasHarness(address(gateway)).gasExhaustedErrorHash(), "nested OOG is gas class"
-        );
+        assertEq(first.errorHash, new GatewayGasHarness().gasExhaustedErrorHash(), "nested OOG is gas class");
         assertEq(first.count, 1);
         assertEq(first.highestGasLimit, gateway.QUALIFIED_CALL_GAS(), "the base budget was forwarded");
 
