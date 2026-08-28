@@ -111,7 +111,6 @@ contract GatewayTestDirectory {
     mapping(uint256 projectId => mapping(address terminal => bool)) public isTerminal;
     mapping(uint256 projectId => mapping(address token => IJBTerminal terminal)) public primaryTerminal;
     mapping(uint256 projectId => IJBTerminal[] terminals) internal _terminalsOf;
-    mapping(uint256 projectId => address controller) public controllerOf;
 
     function isTerminalOf(uint256 projectId, IJBTerminal terminal) external view returns (bool) {
         return isTerminal[projectId][address(terminal)];
@@ -119,10 +118,6 @@ contract GatewayTestDirectory {
 
     function primaryTerminalOf(uint256 projectId, address token) external view returns (IJBTerminal) {
         return primaryTerminal[projectId][token];
-    }
-
-    function setControllerOf(uint256 projectId, address controller) external {
-        controllerOf[projectId] = controller;
     }
 
     function setIsTerminalOf(uint256 projectId, IJBTerminal terminal, bool flag) external {
@@ -152,7 +147,17 @@ contract GatewayTestProjects {
     }
 }
 
+contract GatewayTestTokens {
+    mapping(address token => uint256 projectId) public projectIdOf;
+
+    function setProjectIdOf(address token, uint256 projectId) external {
+        projectIdOf[token] = projectId;
+    }
+}
+
 contract GatewayTestRouter {
+    GatewayTestTokens public immutable TOKENS = new GatewayTestTokens();
+
     error GatewayTestRouter_FailureA();
     error GatewayTestRouter_FailureB();
     error GatewayTestRouter_FailureWithArgument(uint256 argument);
@@ -1505,20 +1510,23 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallFailureOf(_ID).count, 0);
     }
 
-    function test_controllerReservedSplitRevertsSynchronously() public {
-        // `JBController` pays reserved project tokens to a split recipient with exactly the opt-in metadata shape,
-        // then hands the tokens to the split beneficiary if the terminal reverts. Custody would swallow that catch and
-        // hold a token the source project can never take back.
-        directory.setControllerOf({projectId: _SOURCE_PROJECT_ID, controller: address(this)});
-        token.mint(address(this), _AMOUNT * 2);
-        token.approve(address(gateway), _AMOUNT * 2);
+    function test_sourceProjectOwnTokenIsNeverRetainedRegardlessOfPayer() public {
+        // `JBController` distributes reserved splits in the source project's own token with exactly the opt-in
+        // metadata shape, then hands the tokens to the split beneficiary if the terminal reverts. No source terminal
+        // can ever book that token, so custody would be a permanent lock. The rule keys on the token, not on who the
+        // payer appears to be: a controller whose transient `originalPayer` is a re-entering attacker looks like a
+        // third party, and a project owner can point `controllerOf` at anything.
+        GatewayTestToken projectToken = new GatewayTestToken();
+        router.TOKENS().setProjectIdOf({token: address(projectToken), projectId: _SOURCE_PROJECT_ID});
+        projectToken.mint(address(this), _AMOUNT * 2);
+        projectToken.approve(address(gateway), _AMOUNT * 2);
 
         uint256[2] memory destinations = [uint256(JBConstants.FEE_BENEFICIARY_PROJECT_ID), uint256(3)];
         for (uint256 i; i < destinations.length; ++i) {
             vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
             gateway.pay({
                 projectId: destinations[i],
-                token: address(token),
+                token: address(projectToken),
                 amount: _AMOUNT,
                 beneficiary: address(this),
                 minReturnedTokens: 0,
@@ -1527,8 +1535,21 @@ contract RouterTerminalGatewayFailureTest is Test {
             });
         }
 
-        assertEq(gateway.pendingCallCount(), 0, "a controller-originated call must never be retained");
-        assertEq(token.balanceOf(address(this)), _AMOUNT * 2, "the controller's catch must get its tokens back");
+        assertEq(gateway.pendingCallCount(), 0, "a project's own token must never be retained");
+        assertEq(projectToken.balanceOf(address(this)), _AMOUNT * 2, "the caller's catch must get its tokens back");
+
+        // Another project's token is bookable and retains as usual.
+        router.TOKENS().setProjectIdOf({token: address(projectToken), projectId: 9});
+        gateway.pay({
+            projectId: 3,
+            token: address(projectToken),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+        assertEq(gateway.pendingCallCount(), 1, "another project's token is ordinary custody");
     }
 
     function test_terminalPayoutToNonFeeProjectRevertsSynchronously() public {
