@@ -255,6 +255,45 @@ contract GatewayTestRouter {
                 invalid()
             }
         }
+        // A nested frame runs out of gas below a threshold: the real shape of a route that needs a larger budget.
+        if (mode == 8 && gasleft() < 8_000_000) GatewayGasBurner(address(this)).burn();
+    }
+
+    function burn() external pure {
+        while (true) {}
+    }
+}
+
+interface GatewayGasBurner {
+    function burn() external view;
+}
+
+contract GatewayEmptyFallbackPayer {
+    fallback() external payable {}
+
+    function payThrough(
+        JBRouterTerminalGateway gateway,
+        address token,
+        uint256 amount,
+        bytes memory metadata
+    )
+        external
+        returns (bool success)
+    {
+        IERC20(token).approve(address(gateway), amount);
+        try gateway.pay({
+            projectId: 3,
+            token: token,
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: metadata
+        }) returns (
+            uint256
+        ) {
+            success = true;
+        } catch {}
     }
 }
 
@@ -769,7 +808,7 @@ contract RouterTerminalGatewayFailureTest is Test {
 
         // The finalization rung (count 3 -> 20M target) must clip to something a transaction can carry.
         JBPendingRouterTerminalCallFailure memory failure = JBPendingRouterTerminalCallFailure({
-            count: 3, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0
+            count: 3, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0, highestGasLimit: 0
         });
         uint256 rung =
             harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 0, maximumGasLimit: maximumGasLimit});
@@ -781,7 +820,7 @@ contract RouterTerminalGatewayFailureTest is Test {
         GatewayGasHarness harness = new GatewayGasHarness();
         uint256 maximumGasLimit = 11_000_000;
         JBPendingRouterTerminalCallFailure memory failure = JBPendingRouterTerminalCallFailure({
-            count: 2, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0
+            count: 2, errorHash: harness.gasExhaustedErrorHash(), lastFailureAt: 0, highestGasLimit: 0
         });
 
         assertEq(
@@ -1579,6 +1618,64 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(gateway.pendingCallCount(), 0, "terminal payouts to non-fee projects must not be retained");
         assertEq(token.balanceOf(address(sourceTerminal)), _AMOUNT * 2, "the source terminal keeps its payout");
         assertEq(token.balanceOf(address(gateway)), 0);
+    }
+
+    function test_nestedGasExhaustionEscalatesInsteadOfRefunding() public {
+        // Out-of-gas one frame below the router bubbles as an empty revert while the router keeps its sixty-fourth, so
+        // gas spent here never reaches the budget. It must still climb the ladder rather than "prove" the route dead.
+        _queueFee(address(token));
+        router.setMode(8);
+
+        _process(_ID, _feeCall());
+        JBPendingRouterTerminalCallFailure memory first = gateway.pendingCallFailureOf(_ID);
+        assertEq(
+            first.errorHash, GatewayGasHarness(address(gateway)).gasExhaustedErrorHash(), "nested OOG is gas class"
+        );
+        assertEq(first.count, 1);
+        assertEq(first.highestGasLimit, gateway.QUALIFIED_CALL_GAS(), "the base budget was forwarded");
+
+        // The next default attempt is forced to 10M, which is enough for the route to complete.
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+        uint256 count = _process(_ID, _feeCall());
+        assertEq(count, _AMOUNT, "the escalated budget settles the route");
+        assertEq(token.balanceOf(address(router)), _AMOUNT);
+        assertEq(gateway.pendingCallCommitmentOf(_ID), bytes32(0));
+    }
+
+    function test_budgetFloorNeverDropsAfterClassChange() public {
+        GatewayGasHarness harness = new GatewayGasHarness();
+        // A real error surfaced only at 10M, after an exhaustion at 5M: the next minimum stays at 10M.
+        JBPendingRouterTerminalCallFailure memory failure = JBPendingRouterTerminalCallFailure({
+            count: 1, errorHash: keccak256("some route error"), lastFailureAt: 0, highestGasLimit: 10_000_000
+        });
+        uint256 maximumGasLimit = 15_000_000;
+        assertEq(
+            harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 0, maximumGasLimit: maximumGasLimit}),
+            10_000_000,
+            "the floor is the highest budget already tried"
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                JBRouterTerminalGateway.JBRouterTerminalGateway_RetryGasLimitTooLow.selector, 5_000_000, 10_000_000
+            )
+        );
+        harness.qualifiedGasLimitFor({failure: failure, requestedGasLimit: 5_000_000, maximumGasLimit: maximumGasLimit});
+    }
+
+    function test_emptyFallbackPayerIsResolvedNotReverted() public {
+        // A caller whose fallback accepts `originalPayer()` with empty data must resolve to itself, not revert.
+        GatewayEmptyFallbackPayer payer = new GatewayEmptyFallbackPayer();
+        token.mint(address(payer), _AMOUNT);
+        router.setMode(0);
+
+        bool success = payer.payThrough({
+            gateway: gateway,
+            token: address(token),
+            amount: _AMOUNT,
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+        assertTrue(success, "an empty-fallback payer must be able to pay directly");
+        assertEq(token.balanceOf(address(router)), _AMOUNT);
     }
 
     function test_terminalCallWithoutSourceProjectRevertsSynchronously() public {

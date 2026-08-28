@@ -716,7 +716,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @return success Whether the router call succeeded.
     /// @return errorHash The selector-level fingerprint of the failure, if any.
     /// @return beneficiaryTokenCount The project tokens returned by a successful `pay` call.
-    /// @return gasExhausted Whether a failed call consumed its complete forwarded budget with no error data.
+    /// @return gasExhausted Whether a failed call surfaced no error data, the shape of out-of-gas anywhere in the
+    /// route.
     function _attempt(
         JBPendingRouterTerminalCall memory call,
         uint256 minReturnedTokens,
@@ -842,7 +843,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // confirmation a refund requires, so restore the pending call and start the evidence over.
         if (errorHash != failure.errorHash) {
             _pendingCallCommitmentOf[id] = commitment;
-            _recordFailure({id: id, errorHash: errorHash, previous: failure});
+            _recordFailure({id: id, errorHash: errorHash, gasLimit: gasLimit, previous: failure});
             return (false, 0);
         }
 
@@ -909,7 +910,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
         // Still failing, so restore custody and fold this attempt into the streak that governs the next budget.
         _pendingCallCommitmentOf[id] = commitment;
-        _recordFailure({id: id, errorHash: errorHash, previous: failure});
+        _recordFailure({id: id, errorHash: errorHash, gasLimit: gasLimit, previous: failure});
     }
 
     /// @notice Queue a failed call, retaining its original input token behind a single-slot hash commitment.
@@ -947,6 +948,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     function _recordFailure(
         bytes32 id,
         bytes32 errorHash,
+        uint256 gasLimit,
         JBPendingRouterTerminalCallFailure memory previous
     )
         internal
@@ -959,8 +961,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // forge-lint: disable-next-line(block-timestamp)
         uint48 failedAt = uint48(block.timestamp);
 
-        _pendingCallFailureOf[id] =
-            JBPendingRouterTerminalCallFailure({count: count, errorHash: errorHash, lastFailureAt: failedAt});
+        // The budget floor only ever rises, regardless of which class this attempt produced.
+        uint64 highestGasLimit = previous.highestGasLimit;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (gasLimit > highestGasLimit) highestGasLimit = uint64(gasLimit);
+
+        _pendingCallFailureOf[id] = JBPendingRouterTerminalCallFailure({
+            count: count, errorHash: errorHash, lastFailureAt: failedAt, highestGasLimit: highestGasLimit
+        });
 
         emit JBRouterTerminalGateway_RecordTerminalCallFailure({
             id: id,
@@ -1089,7 +1097,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @return success Whether the call succeeded.
     /// @return errorHash The selector-level fingerprint of the failure, if any.
     /// @return result The first return word of a successful call.
-    /// @return gasExhausted Whether a failed call consumed its complete forwarded budget with no error data.
+    /// @return gasExhausted Whether a failed call surfaced no error data, the shape of out-of-gas anywhere in the
+    /// route.
     function _boundedCall(
         address target,
         uint256 value,
@@ -1103,18 +1112,18 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // inflate this frame's memory cost and consume the reserve that the failure accounting depends on.
         assembly ("memory-safe") {
             let ptr := mload(0x40)
-            let gasBefore := gas()
-
             // Bound the call so a route that runs away on gas fails here rather than taking the whole transaction.
             success := call(gasLimit, target, value, add(data, 0x20), mload(data), ptr, 0x20)
-            let gasSpent := sub(gasBefore, gas())
-
             // Only a full word is a usable `pay` result; a shorter return cannot be a token count.
             let size := returndatasize()
             if and(success, gt(size, 0x1f)) { result := mload(ptr) }
 
-            // A failed call with no error data which consumed its complete budget is an unqualified gas exhaustion.
-            gasExhausted := and(iszero(success), and(iszero(size), iszero(lt(gasSpent, gasLimit))))
+            // A failed call with no error data is treated as gas exhaustion. Out-of-gas anywhere in the route surfaces
+            // as an empty revert bubbled through frames that still hold their EIP-150 sixty-fourth, so the budget
+            // consumed here can never prove where it ran out. A bare `revert()` shares the shape and simply climbs the
+            // same ladder; that costs retriers gas, whereas mistaking exhaustion for a stable route failure would
+            // refund a route that only needed a larger budget.
+            gasExhausted := and(iszero(success), iszero(size))
 
             // Fingerprint only the selector. Custom errors embed dynamic arguments — amounts, addresses, block
             // numbers — that differ between otherwise identical failures, and hashing those would make every attempt
@@ -1187,6 +1196,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // larger one. Other failure classes are about the route itself and stay at the base budget.
         uint256 minimum = QUALIFIED_CALL_GAS;
         if (failure.errorHash == _GAS_EXHAUSTED_ERROR_HASH) minimum *= uint256(failure.count) + 1;
+
+        // Never go back below a budget already tried: a route that only shows its real failure past the base budget
+        // would otherwise alternate between exhaustion and that failure, resetting the streak forever.
+        if (minimum < failure.highestGasLimit) minimum = failure.highestGasLimit;
 
         // The ladder stops at whatever the chain can actually execute; demanding more would strand the call.
         if (minimum > maximumGasLimit) minimum = maximumGasLimit;
@@ -1285,10 +1298,14 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // The Registry forwards on a payer's behalf, so asking it who it is acting for recovers the terminal or
         // protocol payer that actually funded the input. Probe defensively: most callers are not forwarders, and a
         // caller that answers badly must degrade to itself rather than take the payment down.
+        // A high-level `try` would not cover a caller whose fallback answers the selector with empty data: the decode
+        // of that empty return reverts in this frame, outside the catch. Probe raw and require a full word instead.
         if (msg.sender.code.length != 0) {
-            try IJBPayerTracker(msg.sender).originalPayer() returns (address original) {
+            (bool ok, bytes memory data) = msg.sender.staticcall(abi.encodeCall(IJBPayerTracker.originalPayer, ()));
+            if (ok && data.length >= 32) {
+                address original = abi.decode(data, (address));
                 if (original != address(0)) return original;
-            } catch {}
+            }
         }
         return fallback_;
     }
