@@ -129,11 +129,11 @@ This repo is the project-facing payment router for "user has X, project wants Y.
 **Postconditions**
 - the registry records the chosen router terminal and locks the decision
 
-## Journey 6: Retry or autonomously refund a failed fee or project payout
+## Journey 6: Retry or autonomously refund a failed fee or protocol-payer call
 
 **Actor:** any keeper, frontend, or interested account.
 
-**Intent:** settle a failed source-project-opted route without forgiving a fee or nullifying a project payout.
+**Intent:** settle a failed source-project-opted route without forgiving a fee. Terminal payout splits are not retained; they keep `JBMultiTerminal`'s fee-free restore.
 
 **Preconditions**
 - the Gateway emitted `JBRouterTerminalGateway_QueuePendingCall`

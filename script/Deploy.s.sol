@@ -213,7 +213,7 @@ contract DeployScript is Script, Sphinx {
         });
 
         // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
-        // failed fee and project-payout routes.
+        // failed fee and protocol-payer routes.
         JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({
             directory: core.directory, permit2: IPermit2(permit2), router: terminal, trustedForwarder: trustedForwarder
         });

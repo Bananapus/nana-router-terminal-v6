@@ -94,7 +94,8 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
 
     /// @notice Return a pending call's consecutive matching failure state.
     /// @param id The pending call identifier.
-    /// @return failure The matching failure state.
+    /// @return failure The matching failure state, including the highest qualified budget already forwarded, which
+    /// later attempts never go below.
     function pendingCallFailureOf(bytes32 id) external view returns (JBPendingRouterTerminalCallFailure memory failure);
 
     /// @notice Make one final qualified attempt with the gas budget required by its failure state.

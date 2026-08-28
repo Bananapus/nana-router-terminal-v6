@@ -1283,15 +1283,22 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(token.balanceOf(address(gateway)), 0, "gateway has no retained input to represent");
     }
 
-    function test_matchingCheapEmptyErrorsCanQualifyAndRefund() public {
+    function test_cheapEmptyRevertsClimbTheGasLadderThenRefund() public {
+        // A bare `revert()` is indistinguishable from out-of-gas below the router, so it is treated as the gas class:
+        // it climbs the budget ladder and refunds only once the ceiling has been tried.
         router.setMode(6);
         _queueFee(address(token));
         _qualifyWithMatchingFailures();
         vm.warp(block.timestamp + gateway.RETRY_DELAY());
 
+        JBPendingRouterTerminalCallFailure memory failure = gateway.pendingCallFailureOf(_ID);
+        assertEq(failure.errorHash, new GatewayGasHarness().gasExhaustedErrorHash(), "empty data is the gas class");
+        assertEq(failure.count, 3);
+        assertEq(failure.highestGasLimit, 3 * gateway.QUALIFIED_CALL_GAS(), "three rungs were climbed");
+
         (bool wasRefunded,) = _finalize(_ID, _feeCall());
 
-        assertTrue(wasRefunded, "matching explicit empty reverts should qualify");
+        assertTrue(wasRefunded, "a route that fails empty at the ceiling is refunded");
         assertEq(sourceTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
     }
 
@@ -1677,6 +1684,37 @@ contract RouterTerminalGatewayFailureTest is Test {
         });
         assertTrue(success, "an empty-fallback payer must be able to pay directly");
         assertEq(token.balanceOf(address(router)), _AMOUNT);
+    }
+
+    function test_oversizedMemoIsNeverRetained() public {
+        // A retained memo is resupplied as calldata on every retry; past a few kilobytes the top retry rung could no
+        // longer fit in one transaction, so such a call must fail synchronously instead of entering custody.
+        token.mint(address(this), _AMOUNT * 2);
+        token.approve(address(gateway), _AMOUNT * 2);
+        string memory memo = string(new bytes(4097));
+
+        vm.expectPartialRevert(JBRouterTerminalGateway.JBRouterTerminalGateway_RouteFailed.selector);
+        gateway.pay({
+            projectId: 3,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: memo,
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+        assertEq(gateway.pendingCallCount(), 0, "an oversized memo must never be retained");
+
+        gateway.pay({
+            projectId: 3,
+            token: address(token),
+            amount: _AMOUNT,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: string(new bytes(4096)),
+            metadata: abi.encodePacked(uint256(_SOURCE_PROJECT_ID))
+        });
+        assertEq(gateway.pendingCallCount(), 1, "a memo at the cap is retained");
     }
 
     function test_terminalCallWithoutSourceProjectRevertsSynchronously() public {

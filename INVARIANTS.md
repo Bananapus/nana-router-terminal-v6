@@ -60,7 +60,7 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 - Failed calls are retained only when metadata is exactly 32 bytes and encodes a nonzero raw source project ID no wider than `uint64`. This is an explicit project-refund escrow opt-in available to source terminals and protocol payers such as `REVLoans`; it does not authenticate the caller. A caller can escrow only the input it funds, and pending liabilities remain isolated by token. Calls without the opt-in and non-zero-minimum `pay` failures revert synchronously.
 - Retention stores only `pendingCallCommitmentOf(id)` — a hash binding the call, memo, and metadata — so the gas-constrained queue path writes a single slot. The queue event emits the full call, memo, and metadata; retriers supply them back and are authenticated by hash match before any retry or refund.
 - The Registry propagates the resolved original payer into the Gateway. That address is retained as the preferred refund terminal when it remains registered for the source project, but retention eligibility does not depend on its interface shape. `test_realCoreMultiTerminalPropagatesPreferredRefundTarget` exercises this behavior against the real core implementation.
-- `processPendingCall` is permissionless. Each counted attempt must be separated by one day and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one. Complete-budget empty failures use one stable gas-exhaustion fingerprint and target 5M, 10M, then 15M gas across the qualifying attempts. Each target is capped by `maximumQualifiedCallGas()`, which derives the live chain's executable budget from `block.gaslimit`; `processPendingCallWithGas` cannot undercut the capped requirement or exceed that ceiling.
+- `processPendingCall` is permissionless. Each counted attempt must be separated by one day and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one. Any empty-data failure uses one stable gas-exhaustion fingerprint and target 5M, 10M, then 15M gas across the qualifying attempts. Each target is capped by `maximumQualifiedCallGas()`, which derives the live chain's executable budget from `block.gaslimit`; `processPendingCallWithGas` cannot undercut the capped requirement or exceed that ceiling.
 - After three matching failure classes and another day, `finalizePendingCall` makes another qualified attempt. Success settles; a changed class resets; the same class refunds the source project. A gas-exhausted final attempt targets 20M gas, subject to the same executable ceiling. Refund delivery prefers the still-registered original terminal, then the token-specific primary, then every other registered non-circular terminal.
 - `_acceptFundsFor` uses the ecosystem's transient intake guard so a callback-capable token cannot nest another transfer inside an in-flight balance-delta measurement.
 - Pending state is deleted before retry/refund interactions. A failed refund reverts the transaction, atomically restoring pending state, qualification, and custody.
@@ -333,11 +333,11 @@ Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPermitTermin
 
 ### `src/JBRouterTerminalGateway.sol`
 
-- Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`, `_GAS_EXHAUSTED_ERROR_HASH`.
+- Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`, `_GAS_EXHAUSTED_ERROR_HASH`, `_TRANSACTION_GAS_CAP = 16_777_216`, `_TRANSACTION_GAS_RESERVE = 1_500_000`.
 - Immutable: `DIRECTORY`, `PERMIT2`, `ROUTER`.
 - Stored: `pendingCallCount`, `_pendingCallCommitmentOf`, `_pendingCallFailureOf`; transient: `_acceptingToken`, `originalPayer`.
 - Entry points: `addToBalanceOf`, `finalizePendingCall`, `pay`, `processPendingCall`.
-- Critical helpers: `_attempt`, `_boundedCall`, `_commitmentOf`, `_qualifiedGasLimit`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_sourceProjectIdFrom`.
+- Critical helpers: `_attempt`, `_boundedCall`, `_commitmentOf`, `_maximumQualifiedCallGas`, `_qualifiedGasLimit`, `_qualifiedGasLimitFor`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_shouldRetain`, `_sourceProjectIdFrom`, `_tryRefund`.
 
 ### `src/JBPayRouteResolver.sol`
 

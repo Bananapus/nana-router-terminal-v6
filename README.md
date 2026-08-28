@@ -121,6 +121,8 @@ Useful scripts:
 
 ## Deployment notes
 
+`script/Deploy.s.sol` is for chains without a live Router: it calls `setChainSpecificConstants` unconditionally, which reverts `JBRouterTerminal_AlreadyConfigured` where the Router already exists. On those chains the Gateway upgrade is performed by `deploy-all-v6` consuming this package, plus `script/MigrateProject.s.sol` for cohorts.
+
 This package depends on core, address-registry, and permission-ID packages plus Uniswap V3, V4, and Permit2 integrations. It is meant to sit in front of canonical Juicebox terminals, not replace them.
 
 ## Repository layout

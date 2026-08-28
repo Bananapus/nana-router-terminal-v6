@@ -109,6 +109,10 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Gas retained around an attempted route for cleanup and durable failure accounting.
     uint256 internal constant _FAILURE_GAS_RESERVE = 750_000;
 
+    /// @notice The longest memo a retained call may carry. Retriers resupply the memo as calldata, and a very long one
+    /// would push the top retry rung past what a single transaction can carry, locking custody.
+    uint256 internal constant _MAX_RETAINED_MEMO_LENGTH = 4096;
+
     /// @notice The stable fingerprint used when an attempt consumes its complete forwarded gas budget.
     bytes32 internal constant _GAS_EXHAUSTED_ERROR_HASH = keccak256("JBRouterTerminalGateway: gas exhausted");
 
@@ -267,12 +271,15 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
 
         // Decide on custody while gas is plentiful, so the failure path's fixed reserve cannot be starved by directory
         // reads.
-        bool shouldRetain = _shouldRetain(call);
+        bool shouldRetain = bytes(memo).length <= _MAX_RETAINED_MEMO_LENGTH && _shouldRetain(call);
 
         // Try the route inside this transaction first. Nothing is retained when it settles.
-        (bool success, bytes32 errorHash,,) =
+        (bool success, bytes32 errorHash,, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: 0, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return;
+
+        // Queue under the same class a retry would record, so the event stream never shows a phantom class change.
+        if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
         // Calls without a usable source-project opt-in retain synchronous failure semantics.
         if (!shouldRetain) revert JBRouterTerminalGateway_RouteFailed(errorHash);
@@ -401,13 +408,17 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         // Decide on custody while gas is plentiful, so the failure path's fixed reserve cannot be starved by directory
         // reads. A caller who priced a minimum is asking to fail now rather than to be settled later at an unknown
         // rate.
-        bool shouldRetain = minReturnedTokens == 0 && _shouldRetain(call);
+        bool shouldRetain =
+            minReturnedTokens == 0 && bytes(memo).length <= _MAX_RETAINED_MEMO_LENGTH && _shouldRetain(call);
 
         // Try the route inside this transaction first, honoring the caller's minimum. Nothing is retained when it
         // settles, and the minimum is only ever enforced here because retained calls always carry a zero minimum.
-        (bool success, bytes32 errorHash, uint256 count,) =
+        (bool success, bytes32 errorHash, uint256 count, bool gasExhausted) =
             _attempt({call: call, minReturnedTokens: minReturnedTokens, memo: memo, metadata: metadata, gasLimit: 0});
         if (success) return count;
+
+        // Queue under the same class a retry would record, so the event stream never shows a phantom class change.
+        if (gasExhausted) errorHash = _GAS_EXHAUSTED_ERROR_HASH;
 
         // Preserve minimums and calls without a usable source-project opt-in instead of silently expanding custody.
         if (!shouldRetain) revert JBRouterTerminalGateway_RouteFailed(errorHash);
@@ -944,6 +955,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice Record a qualified failure, resetting the streak whenever the failure class changes.
     /// @param id The pending call identifier.
     /// @param errorHash The selector-level or gas-exhaustion failure-class fingerprint.
+    /// @param gasLimit The qualified budget forwarded by the attempt.
     /// @param previous The pending call's failure state before this attempt.
     function _recordFailure(
         bytes32 id,
@@ -1089,7 +1101,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     //*********************************************************************//
 
     /// @notice Call the router while matching failures by selector without copying encoded error arguments.
-    /// @dev Empty and short return data are hashed as-is. Return data at least four bytes long is matched by selector.
+    /// @dev Empty return data is reported as gas exhaustion. Shorter-than-selector data is hashed as-is; return data at
+    /// least four bytes long is matched by selector.
     /// @param target The address to call.
     /// @param value The native-token value to send with the call.
     /// @param gasLimit The gas to forward to the call.
@@ -1197,7 +1210,8 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         uint256 minimum = QUALIFIED_CALL_GAS;
         if (failure.errorHash == _GAS_EXHAUSTED_ERROR_HASH) minimum *= uint256(failure.count) + 1;
 
-        // Never go back below a budget already tried: a route that only shows its real failure past the base budget
+        // Never go back below a budget already tried, other than to the live ceiling below: a route that only shows
+        // its real failure past the base budget
         // would otherwise alternate between exhaustion and that failure, resetting the streak forever.
         if (minimum < failure.highestGasLimit) minimum = failure.highestGasLimit;
 
