@@ -269,7 +269,10 @@ interface GatewayGasBurner {
 }
 
 contract GatewayEmptyFallbackPayer {
+    // Mirrors `REVLoans`: a payable fallback that answers any selector, including `originalPayer()`, with no data.
     fallback() external payable {}
+
+    receive() external payable {}
 
     function payThrough(
         JBRouterTerminalGateway gateway,
