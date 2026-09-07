@@ -2019,10 +2019,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
 
     /// @notice Replays the exact reported Base payout with only project 1's registry pointer changed to the gateway.
     function testFork_reportedBaseFeeIsRetainedByGatewayWithoutRegistryCodeChanges() public {
-        string memory rpc = vm.envOr("RPC_BASE_MAINNET", string(""));
-        // Skip visibly rather than pass silently when the Base RPC is not configured.
-        vm.skip(bytes(rpc).length == 0);
-        vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
+        vm.createSelectFork("base", _BASE_BLOCK_BEFORE_TX);
 
         JBRouterTerminalGateway gateway = _installGateway();
         // EIP-7825 caps any transaction at 2^24 gas, so the 20M rung must clip to what one transaction can carry.
@@ -2079,10 +2076,7 @@ contract RouterTerminalGatewayBaseForkTest is Test {
 
     /// @notice Sweeps the reported gas boundary. Any payout which completes must not forgive its fee.
     function testFork_reportedBaseFeeHasNoSuccessfulFeeRevertGasBand() public {
-        string memory rpc = vm.envOr("RPC_BASE_MAINNET", string(""));
-        // Skip visibly rather than pass silently when the Base RPC is not configured.
-        vm.skip(bytes(rpc).length == 0);
-        vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
+        vm.createSelectFork("base", _BASE_BLOCK_BEFORE_TX);
 
         _installGateway();
         uint256 snapshot = vm.snapshotState();
