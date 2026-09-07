@@ -390,6 +390,53 @@ contract GatewayReentrantPayer is IGatewayTokenTransferCallback {
     }
 }
 
+/// @notice A payer whose token transfer callback tries to settle an older pending call mid-intake.
+contract GatewayCallbackSettler is IGatewayTokenTransferCallback {
+    uint256 internal constant _SOURCE_PROJECT_ID = 2;
+
+    JBRouterTerminalGateway public gateway;
+    JBPendingRouterTerminalCall public pending;
+    bool public settlementReverted;
+    GatewayCallbackToken public token;
+
+    function deposit(
+        JBRouterTerminalGateway gatewayToUse,
+        GatewayCallbackToken tokenToUse,
+        JBPendingRouterTerminalCall calldata pendingCall,
+        uint256 amount
+    )
+        external
+    {
+        gateway = gatewayToUse;
+        token = tokenToUse;
+        pending = pendingCall;
+
+        tokenToUse.approve({spender: address(gatewayToUse), value: amount});
+        gatewayToUse.pay({
+            projectId: 1,
+            token: address(tokenToUse),
+            amount: amount,
+            beneficiary: address(this),
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        });
+    }
+
+    function beforeGatewayTokenTransfer() external {
+        require(msg.sender == address(token));
+
+        try gateway.processPendingCall({
+            id: bytes32(uint256(1)), call: pending, memo: "", metadata: abi.encodePacked(_SOURCE_PROJECT_ID)
+        }) returns (
+            uint256
+        ) {}
+        catch {
+            settlementReverted = true;
+        }
+    }
+}
+
 /// @notice Models the source terminal's fail-open protocol-fee and project-payout boundaries.
 contract GatewayTestSourceTerminal {
     error GatewayTestSourceTerminal_RefundRejected();
@@ -501,6 +548,16 @@ contract GatewayTestSourceTerminal {
 }
 
 /// @notice Minimal store shape used to deploy the current core terminal in a payer-propagation regression.
+/// @notice A source terminal whose forwarding probe returns a word with dirty upper bits.
+contract GatewayMalformedProbeTerminal is GatewayTestSourceTerminal {
+    function terminalOf(uint256) external pure returns (address) {
+        assembly ("memory-safe") {
+            mstore(0, not(0))
+            return(0, 32)
+        }
+    }
+}
+
 contract GatewayTestTerminalStore {
     /// @notice Return no directory because the regression only exercises the terminal's payer and interface shape.
     /// @return directory The empty directory address.
@@ -795,6 +852,30 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertEq(
             callbackToken.balanceOf(address(gateway)), victimAmount + attackerAmount, "custody must cover every claim"
         );
+    }
+
+    function test_callbackTokenCannotSettlePendingCallDuringIntake() public {
+        GatewayCallbackToken callbackToken = new GatewayCallbackToken();
+        GatewayCallbackSettler settler = new GatewayCallbackSettler();
+        JBPendingRouterTerminalCall memory oldCall =
+            _feeCall({paymentToken: address(callbackToken), amount: _AMOUNT, payer: address(sourceTerminal)});
+
+        callbackToken.mint({account: address(sourceTerminal), amount: _AMOUNT});
+        _queueFee(address(callbackToken));
+        assertEq(gateway.pendingCallCommitmentOf(_ID), _commitmentOf(oldCall), "old fee should be pending");
+
+        // The route is healthy again, so the callback's settlement attempt would otherwise move the old custody out
+        // while the new deposit's balance delta is still being measured.
+        router.setMode(0);
+        callbackToken.configure({gatewayAddress: address(gateway), callbackAddress: address(settler)});
+        callbackToken.mint({account: address(settler), amount: 2 * _AMOUNT});
+        settler.deposit({gatewayToUse: gateway, tokenToUse: callbackToken, pendingCall: oldCall, amount: 2 * _AMOUNT});
+
+        assertTrue(settler.settlementReverted(), "settling a pending call inside intake must revert");
+        assertEq(gateway.pendingCallCommitmentOf(_ID), _commitmentOf(oldCall), "old fee must stay pending");
+        assertEq(gateway.pendingCallCount(), 1, "the healthy deposit should settle without a new record");
+        assertEq(callbackToken.balanceOf(address(router)), 2 * _AMOUNT, "the whole new deposit should route");
+        assertEq(callbackToken.balanceOf(address(gateway)), _AMOUNT, "custody must equal the sole pending claim");
     }
 
     function test_transactionGasCapBoundsFinalRungOnLargeBlockChains() public {
@@ -1224,6 +1305,34 @@ contract RouterTerminalGatewayFailureTest is Test {
         assertTrue(wasRefunded, "the registered non-circular terminal should receive the refund");
         assertEq(alternativeTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
         assertEq(token.balanceOf(address(gateway)), 0, "successful alternative refund must clear custody");
+    }
+
+    function test_finalRefundSurvivesMalformedOriginalTerminalProbe() public {
+        sourceTerminal = new GatewayMalformedProbeTerminal();
+        directory.setIsTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, terminal: IJBTerminal(address(sourceTerminal)), flag: true
+        });
+        token.mint({account: address(sourceTerminal), amount: _AMOUNT});
+        _queueFee(address(token));
+        _qualifyWithMatchingFailures();
+        vm.warp(block.timestamp + gateway.RETRY_DELAY());
+
+        // The original terminal both answers the probe with a non-address word and rejects the refund, so the search
+        // has to get past it to reach the healthy primary.
+        sourceTerminal.setRejectRefund(true);
+        GatewayTestSourceTerminal healthyTerminal = new GatewayTestSourceTerminal();
+        directory.setIsTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, terminal: IJBTerminal(address(healthyTerminal)), flag: true
+        });
+        directory.setPrimaryTerminalOf({
+            projectId: _SOURCE_PROJECT_ID, token: address(token), terminal: IJBTerminal(address(healthyTerminal))
+        });
+
+        (bool wasRefunded,) = _finalize(_ID, _feeCall());
+
+        assertTrue(wasRefunded, "a malformed probe on one candidate must not block the healthy primary");
+        assertEq(healthyTerminal.credited(_SOURCE_PROJECT_ID, address(token)), _AMOUNT);
+        assertEq(token.balanceOf(address(gateway)), 0, "successful primary refund must clear custody");
     }
 
     function test_finalRefundUsesCurrentPrimaryWhenOriginalTerminalWasRemoved() public {
@@ -1911,7 +2020,8 @@ contract RouterTerminalGatewayBaseForkTest is Test {
     /// @notice Replays the exact reported Base payout with only project 1's registry pointer changed to the gateway.
     function testFork_reportedBaseFeeIsRetainedByGatewayWithoutRegistryCodeChanges() public {
         string memory rpc = vm.envOr("RPC_BASE_MAINNET", string(""));
-        if (bytes(rpc).length == 0) return;
+        // Skip visibly rather than pass silently when the Base RPC is not configured.
+        vm.skip(bytes(rpc).length == 0);
         vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
 
         JBRouterTerminalGateway gateway = _installGateway();
@@ -1970,7 +2080,8 @@ contract RouterTerminalGatewayBaseForkTest is Test {
     /// @notice Sweeps the reported gas boundary. Any payout which completes must not forgive its fee.
     function testFork_reportedBaseFeeHasNoSuccessfulFeeRevertGasBand() public {
         string memory rpc = vm.envOr("RPC_BASE_MAINNET", string(""));
-        if (bytes(rpc).length == 0) return;
+        // Skip visibly rather than pass silently when the Base RPC is not configured.
+        vm.skip(bytes(rpc).length == 0);
         vm.createSelectFork(rpc, _BASE_BLOCK_BEFORE_TX);
 
         _installGateway();

@@ -739,6 +739,11 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
         internal
         returns (bool success, bytes32 errorHash, uint256 beneficiaryTokenCount, bool gasExhausted)
     {
+        // No custody may leave while an inbound balance-delta measurement is open. A callback-capable token could
+        // otherwise settle an older pending call from inside a new deposit's transfer, so the outgoing amount would be
+        // subtracted from the incoming one and part of the new deposit would be left with no pending record.
+        if (_acceptingToken) revert JBRouterTerminalGateway_ReentrantTokenTransfer(call.token);
+
         // Rebuild the exact terminal call the payer originally made, so a retry days later is indistinguishable from
         // the first attempt apart from its gas budget.
         bytes memory routerCall;
