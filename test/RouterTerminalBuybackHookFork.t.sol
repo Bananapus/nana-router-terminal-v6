@@ -282,6 +282,42 @@ contract RouterTerminalBuybackHookForkTest is Test {
         assertGe(skipReceived, 10 ether, "the quoted floor must hold in skip mode");
     }
 
+    function test_fork_previewAndPay_dustSwapDoesNotUnderstateDirectMint() public {
+        _queueReservedRuleset(5000);
+        // Nearly the whole payment mints directly; the swap leg is dust, so any rounding in the hook's swap-leg
+        // figures would be amplified enormously if the direct leg were derived from them.
+        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 3, minimumSwapAmountOut: 2, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        // Only the dust swap's own output, a few hundred wei of project token, can differ between quote and
+        // execution. The defect this guards against understated the direct leg by a sixth of a token.
+        assertApproxEqAbs(received, previewBeneficiaryTokenCount, 1000, "direct-mint beneficiary share understated");
+        assertEq(reserved, previewReservedTokenCount, "direct-mint reserved share must match execution");
+        assertGt(reserved, 0.49 ether, "half of the direct leg is reserved");
+    }
+
+    function test_fork_previewAndPay_fullReserveReservesWholeDirectMint() public {
+        _queueReservedRuleset(10_000);
+        bytes memory metadata =
+            _buybackQuoteMetadata({amountToSwapWith: 0.1 ether, minimumSwapAmountOut: 1 ether, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        assertEq(reserved, 0.9 ether, "execution reserves the entire direct leg");
+        assertEq(previewReservedTokenCount, reserved, "preview must reserve the entire direct leg too");
+        assertGe(previewBeneficiaryTokenCount, 1 ether, "the swap floor is scored for the beneficiary");
+        assertGe(received, 1 ether, "the swap floor holds at execution");
+    }
+
     /// @notice Pay the hooked project through the router and return what the beneficiary actually received.
     function _payHooked(bytes memory metadata) internal returns (uint256 received) {
         uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
