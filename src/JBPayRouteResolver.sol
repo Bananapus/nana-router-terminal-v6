@@ -332,9 +332,15 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 directMintTokenCount = mulDiv({x: amountToMintWith, y: weight, denominator: weightRatio});
             }
 
-            // Score the executable floor first. This supports callers that only provide a minimum and no live quote.
+            // Score the hook's TWAP-backed live quote when it beats the executable floor, otherwise the floor itself,
+            // which supports callers that only provide a minimum and no live quote. When the buyback hook reports
+            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is trusted. One
+            // figure suffices because the split below is monotone in swap output, so the larger swap always scores
+            // at least as well on both counts.
+            uint256 swapTokenCount =
+                !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut ? rawSwapQuote : minimumSwapAmountOut;
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
-                swapTokenCount: minimumSwapAmountOut,
+                swapTokenCount: swapTokenCount,
                 directMintTokenCount: directMintTokenCount,
                 skipSplits: skipSplits,
                 reservedPercent: reservedPercent
@@ -345,24 +351,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
                 candidateReservedTokenCount: candidateReservedTokenCount
             });
-
-            // If the hook also surfaced a stronger TWAP-backed live quote, score it too. When the buyback hook reports
-            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the executable floor is trusted.
-            bool hasTrustedRawQuote = !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut;
-            if (hasTrustedRawQuote) {
-                (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
-                    swapTokenCount: rawSwapQuote,
-                    directMintTokenCount: directMintTokenCount,
-                    skipSplits: skipSplits,
-                    reservedPercent: reservedPercent
-                });
-                (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
-                    currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
-                    currentReservedTokenCount: effectiveReservedTokenCount,
-                    candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
-                    candidateReservedTokenCount: candidateReservedTokenCount
-                });
-            }
             unchecked {
                 ++i;
             }
