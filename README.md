@@ -97,7 +97,7 @@ That separation is why a successful route can still end in downstream terminal b
 3. `test/RouterTerminalCashOutFork.t.sol`
 4. `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 5. `test/regression/CashOutCircularPrimaryTerminal.t.sol`
-6. `test/regression/RouterTerminalGatewayFailureTest.t.sol` and `test/regression/RouterTerminalGatewayBaseForkTest.t.sol`
+6. `test/regression/RouterTerminalGatewayFailure.t.sol`
 
 ## Install
 

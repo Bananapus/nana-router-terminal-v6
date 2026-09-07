@@ -98,9 +98,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     JBTerminalStore jbTerminalStore;
     JBMultiTerminal jbMultiTerminal;
     JBRouterTerminal routerTerminal;
-    /// @notice The gateway retaining eligible fees when their router conversion fails.
     JBRouterTerminalGateway routerTerminalGateway;
-    /// @notice The fee project's forwarding registry selecting the gateway.
     JBRouterTerminalRegistry routerTerminalRegistry;
 
     // ───────────────────────── Project IDs
@@ -118,7 +116,6 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // ───────────────────────── Setup
     // ──────────────────────────
 
-    /// @notice Deploys the fee-project registry and gateway with source projects for routed cash-out fees.
     function setUp() public {
         vm.createSelectFork("ethereum", BLOCK_NUMBER);
 
@@ -348,11 +345,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
     // Internal helpers
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Cashes out a funded core project whose reclaim token has no router conversion route.
-    /// @return tokenToReclaim The token received by the holder and charged as a fee.
-    /// @return cashOutProjectId The source project's ID.
-    /// @return beneficiaryBalanceBefore The holder's token balance before cashing out.
-    /// @return reclaimAmount The token amount reclaimed by the holder.
+    /// @dev Cash out a real core project whose reclaim token has no Router conversion route.
     function _cashOutUnroutableToken()
         internal
         returns (
@@ -401,10 +394,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice Checks the recorded logs for mutually exclusive fee result events.
-    /// @param logs The logs recorded during the cash-out transaction.
-    /// @return sawFeeReverted Whether fee forwarding failed and the fee was forgiven.
-    /// @return sawProcessFee Whether the terminal recognized the fee as processed.
+    /// @dev Return whether the recorded logs contain the mutually exclusive fee result events.
     function _feeEventsIn(Vm.Log[] memory logs) internal pure returns (bool sawFeeReverted, bool sawProcessFee) {
         bytes32 feeRevertedTopic = keccak256("FeeReverted(uint256,address,uint256,uint256,bytes,address)");
         bytes32 processFeeTopic = keccak256("ProcessFee(uint256,address,uint256,bool,address,address)");
@@ -415,8 +405,7 @@ contract RouterTerminalFeeCashOutForkTest is Test {
         }
     }
 
-    /// @notice Launches project 1 with its native terminal and routed-token forwarding path.
-    /// @return projectId The fee project's ID.
+    /// @dev Launch the fee project (project 1) with both its native terminal and routed-token forwarding path.
     function _launchFeeProject() internal returns (uint256 projectId) {
         JBRulesetMetadata memory metadata = JBRulesetMetadata({
             reservedPercent: 0,

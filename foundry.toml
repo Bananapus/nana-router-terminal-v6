@@ -21,5 +21,4 @@ multiline_func_header = "all"
 wrap_comments = true
 
 [rpc_endpoints]
-base = "${RPC_BASE_MAINNET}"
 ethereum = "${RPC_ETHEREUM_MAINNET}"

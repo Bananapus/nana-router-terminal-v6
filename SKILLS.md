@@ -11,7 +11,7 @@
 |---|---|
 | Repo overview and routing model | [`README.md`](./README.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
 | Terminal execution path | [`src/JBRouterTerminal.sol`](./src/JBRouterTerminal.sol) |
-| Failed-route custody and autonomous retry/refund | [`src/JBRouterTerminalGateway.sol`](./src/JBRouterTerminalGateway.sol), [`test/regression/RouterTerminalGatewayFailureTest.t.sol`](./test/regression/RouterTerminalGatewayFailureTest.t.sol), [`test/regression/RouterTerminalGatewayBaseForkTest.t.sol`](./test/regression/RouterTerminalGatewayBaseForkTest.t.sol) |
+| Failed-route custody and autonomous retry/refund | [`src/JBRouterTerminalGateway.sol`](./src/JBRouterTerminalGateway.sol), [`test/regression/RouterTerminalGatewayFailure.t.sol`](./test/regression/RouterTerminalGatewayFailure.t.sol) |
 | Pay-route resolution helpers | [`src/JBPayRouteResolver.sol`](./src/JBPayRouteResolver.sol) |
 | Registry behavior and terminal selection | [`src/JBRouterTerminalRegistry.sol`](./src/JBRouterTerminalRegistry.sol) |
 | Shared libraries, interfaces, and metadata structs | [`src/libraries/`](./src/libraries/), [`src/interfaces/`](./src/interfaces/), [`src/structs/`](./src/structs/) |

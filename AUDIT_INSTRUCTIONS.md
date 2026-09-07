@@ -97,4 +97,4 @@ The gateway selected by the registry takes custody before calling the immutable 
 - `npm install`
 - `forge build --deny notes`
 - `forge test --deny notes`
-- `forge test --match-path "test/regression/RouterTerminalGateway*Test.t.sol"`
+- `forge test --match-path test/regression/RouterTerminalGatewayFailure.t.sol`

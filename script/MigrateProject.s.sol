@@ -11,12 +11,10 @@ contract MigrateProjectScript is Script {
     /// @notice Point one project at a deployed gateway using the configured broadcast account.
     /// @dev Run once per project so an unauthorized cohort cannot block an authorized migration.
     function run() public {
-        // Resolve the project and its selected gateway before broadcasting the permissioned registry update.
         IJBTerminal gateway = IJBTerminal(vm.envAddress("NANA_ROUTER_TERMINAL_GATEWAY"));
         uint256 projectId = vm.envUint("NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_ID");
         IJBRouterTerminalRegistry registry = IJBRouterTerminalRegistry(vm.envAddress("NANA_ROUTER_TERMINAL_REGISTRY"));
 
-        // Use the broadcaster's project permissions rather than the script contract's identity.
         vm.startBroadcast();
         registry.setTerminalFor({projectId: projectId, terminal: gateway});
         vm.stopBroadcast();

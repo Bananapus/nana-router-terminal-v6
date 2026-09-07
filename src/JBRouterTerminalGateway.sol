@@ -20,10 +20,9 @@ import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTran
 import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
-import {JBRouterTerminal} from "./JBRouterTerminal.sol";
-
 import {IJBForwardingTerminal} from "./interfaces/IJBForwardingTerminal.sol";
 import {IJBRouterTerminal} from "./interfaces/IJBRouterTerminal.sol";
+import {JBRouterTerminal} from "./JBRouterTerminal.sol";
 import {IJBRouterTerminalGateway} from "./interfaces/IJBRouterTerminalGateway.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
@@ -158,11 +157,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     /// @notice The hash commitment binding each retained call, its memo, and its metadata.
     /// @dev Only the commitment is stored so the gas-constrained queue path writes a single slot. Retriers supply the
     /// full call from the queue event and are authenticated against this hash.
-    /// @custom:param id The pending call identifier.
     mapping(bytes32 id => bytes32) internal _pendingCallCommitmentOf;
 
     /// @notice Qualified failure state for each retained call.
-    /// @custom:param id The pending call identifier.
     mapping(bytes32 id => JBPendingRouterTerminalCallFailure) internal _pendingCallFailureOf;
 
     //*********************************************************************//
@@ -179,7 +176,6 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
-    /// @notice Initialize the gateway's immutable routing, refund, and token-approval dependencies.
     /// @param directory The immutable directory used to resolve project accounting terminals.
     /// @param permit2 The Permit2 singleton used for gasless ERC-20 approvals and transfers.
     /// @param router The immutable router terminal to call atomically.
@@ -1315,9 +1311,9 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
     }
 
     /// @notice Resolve an upstream payer exposed by a forwarding caller.
-    /// @param fallbackPayer The payer to use when the caller does not expose an upstream payer.
-    /// @return payer The forwarding caller's `originalPayer` when nonzero, otherwise `fallbackPayer`.
-    function _resolveOriginalPayer(address fallbackPayer) internal view returns (address payer) {
+    /// @param fallback_ The payer to use when the caller does not expose an upstream payer.
+    /// @return payer The forwarding caller's `originalPayer` when nonzero, otherwise `fallback_`.
+    function _resolveOriginalPayer(address fallback_) internal view returns (address payer) {
         // The Registry forwards on a payer's behalf, so asking it who it is acting for recovers the terminal or
         // protocol payer that actually funded the input. Probe defensively: most callers are not forwarders, and a
         // caller that answers badly must degrade to itself rather than take the payment down.
@@ -1330,7 +1326,7 @@ contract JBRouterTerminalGateway is ERC2771Context, IJBRouterTerminalGateway {
                 if (original != address(0)) return original;
             }
         }
-        return fallbackPayer;
+        return fallback_;
     }
 
     /// @notice Decide whether a call carrying the source-project opt-in should be retained if its route fails.

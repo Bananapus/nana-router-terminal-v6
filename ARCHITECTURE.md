@@ -119,7 +119,7 @@ Preview and execution share the same conceptual route shape: optional recursive 
 - final-hop ERC-20 receipt shortfalls:
   `test/regression/LossyReceiptRegression.t.sol`
 - exact Base fee-failure replay, matching-error qualification, and refunds:
-  `test/regression/RouterTerminalGatewayFailureTest.t.sol` and `test/regression/RouterTerminalGatewayBaseForkTest.t.sol`
+  `test/regression/RouterTerminalGatewayFailure.t.sol`
 
 ## Source map
 
