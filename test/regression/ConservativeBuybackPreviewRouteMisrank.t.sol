@@ -112,7 +112,9 @@ contract ConservativeBuybackPreviewTerminal {
                 MINIMUM_BENEFICIARY_TOKEN_COUNT,
                 uint256(0),
                 RAW_SWAP_QUOTE,
-                false
+                false,
+                false,
+                uint256(0)
             )
         });
     }

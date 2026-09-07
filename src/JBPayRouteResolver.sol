@@ -256,6 +256,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
     /// @param buybackHook The canonical buyback hook address the router recognizes.
     /// @param beneficiaryTokenCount The beneficiary token count returned by the terminal preview.
     /// @param reservedTokenCount The reserved token count returned by the terminal preview.
+    /// @param weight The destination ruleset's weight, which the hook's direct-mint leg is issued at.
     /// @param hookSpecifications The hook specifications returned by the terminal preview.
     /// @return effectiveBeneficiaryTokenCount The beneficiary token count after applying understood hook metadata.
     /// @return effectiveReservedTokenCount The reserved token count after applying understood hook metadata.
@@ -263,6 +264,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         address buybackHook,
         uint256 beneficiaryTokenCount,
         uint256 reservedTokenCount,
+        uint256 weight,
         JBPayHookSpecification[] memory hookSpecifications
     )
         internal
@@ -290,9 +292,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Read the canonical 15-word static pay metadata tuple emitted by the published buyback hook.
+            // Read the canonical 17-word static pay metadata tuple emitted by the published buyback hook.
             bytes memory hookMetadata = specification.metadata;
-            if (hookMetadata.length < 15 * 32) {
+            if (hookMetadata.length < 17 * 32) {
                 unchecked {
                     ++i;
                 }
@@ -301,37 +303,47 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
             uint256 amountToMintWith;
             uint256 minimumSwapAmountOut;
-            uint256 tokenCountWithoutHook;
-            uint256 minimumBeneficiaryTokenCount;
-            uint256 minimumReservedTokenCount;
+            uint256 weightRatio;
             uint256 rawSwapQuote;
             uint256 oracleUnseededWord;
+            uint256 skipSplitsWord;
+            uint256 reservedPercent;
             assembly ("memory-safe") {
                 amountToMintWith := mload(add(hookMetadata, 0x40))
                 minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
-                tokenCountWithoutHook := mload(add(hookMetadata, 0xc0))
-                minimumBeneficiaryTokenCount := mload(add(hookMetadata, 0x180))
-                minimumReservedTokenCount := mload(add(hookMetadata, 0x1a0))
+                weightRatio := mload(add(hookMetadata, 0xe0))
                 rawSwapQuote := mload(add(hookMetadata, 0x1c0))
                 oracleUnseededWord := mload(add(hookMetadata, 0x1e0))
+                skipSplitsWord := mload(add(hookMetadata, 0x200))
+                reservedPercent := mload(add(hookMetadata, 0x220))
             }
             bool oracleUnseeded = oracleUnseededWord != 0;
+            // A payer who opted out of the reserved split takes the swap output directly, so the hook's
+            // beneficiary/reserved commitments, which were previewed through the split, no longer describe that leg.
+            bool skipSplits = skipSplitsWord != 0;
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
-            // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
-            // amount so the router compares a whole-route token count against ordinary terminal previews.
+            // payment to mint directly, issue that leg exactly as the hook does at settlement, from the ruleset weight
+            // and the hook's published weight ratio, so the router compares a whole-route token count against
+            // ordinary terminal previews. Deriving it from the hook's rounded swap-leg figures instead would amplify
+            // that rounding by the direct-to-swap input ratio.
             uint256 directMintTokenCount;
-            if (amountToMintWith != 0 && specification.amount != 0 && tokenCountWithoutHook != 0) {
-                directMintTokenCount =
-                    mulDiv({x: amountToMintWith, y: tokenCountWithoutHook, denominator: specification.amount});
+            if (amountToMintWith != 0 && weightRatio != 0) {
+                directMintTokenCount = mulDiv({x: amountToMintWith, y: weight, denominator: weightRatio});
             }
 
-            // Score the executable floor first. This supports callers that only provide a minimum and no live quote.
-            (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                tokenCount: minimumSwapAmountOut + directMintTokenCount,
-                referenceTokenCount: minimumSwapAmountOut,
-                referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
-                referenceReservedTokenCount: minimumReservedTokenCount
+            // Score the hook's TWAP-backed live quote when it beats the executable floor, otherwise the floor itself,
+            // which supports callers that only provide a minimum and no live quote. When the buyback hook reports
+            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is trusted. One
+            // figure suffices because the split below is monotone in swap output, so the larger swap always scores
+            // at least as well on both counts.
+            uint256 swapTokenCount =
+                !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut ? rawSwapQuote : minimumSwapAmountOut;
+            (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
+                swapTokenCount: swapTokenCount,
+                directMintTokenCount: directMintTokenCount,
+                skipSplits: skipSplits,
+                reservedPercent: reservedPercent
             });
             (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
                 currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
@@ -339,24 +351,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
                 candidateReservedTokenCount: candidateReservedTokenCount
             });
-
-            // If the hook also surfaced a stronger TWAP-backed live quote, score it too. When the buyback hook reports
-            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the executable floor is trusted.
-            bool hasTrustedRawQuote = !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut;
-            if (hasTrustedRawQuote) {
-                (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _scaledPreviewPayTokenCounts({
-                    tokenCount: rawSwapQuote + directMintTokenCount,
-                    referenceTokenCount: minimumSwapAmountOut,
-                    referenceBeneficiaryTokenCount: minimumBeneficiaryTokenCount,
-                    referenceReservedTokenCount: minimumReservedTokenCount
-                });
-                (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
-                    currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
-                    currentReservedTokenCount: effectiveReservedTokenCount,
-                    candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
-                    candidateReservedTokenCount: candidateReservedTokenCount
-                });
-            }
             unchecked {
                 ++i;
             }
@@ -403,6 +397,44 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
         return _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenA})
             == _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenB});
+    }
+
+    /// @notice Split a buyback route's token counts between beneficiary and reserved tokens the way the controller
+    /// mints them.
+    /// @dev The direct-mint leg always passes through the reserved split. The swap leg does too unless the payer
+    /// opted out with `skipSplits`, in which case it goes to the beneficiary untouched.
+    /// @param swapTokenCount The project tokens the AMM leg is expected to produce.
+    /// @param directMintTokenCount The gross project tokens the direct-mint leg issues.
+    /// @param skipSplits Whether the payer opted the swap output out of the reserved split.
+    /// @param reservedPercent The ruleset's reserved percent, out of `JBConstants.MAX_RESERVED_PERCENT`.
+    /// @return beneficiaryTokenCount The beneficiary token count to score.
+    /// @return reservedTokenCount The reserved token count to score.
+    function _hookPreviewPayTokenCounts(
+        uint256 swapTokenCount,
+        uint256 directMintTokenCount,
+        bool skipSplits,
+        uint256 reservedPercent
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        // Everything the controller mints passes through the split in one call: the direct-mint leg always, and the
+        // swap output too unless the payer skipped the split and takes it as-is.
+        uint256 splitTokenCount = skipSplits ? directMintTokenCount : swapTokenCount + directMintTokenCount;
+
+        // Take the beneficiary share the way the controller does, so the preview rounds exactly like settlement.
+        beneficiaryTokenCount = mulDiv({
+            x: splitTokenCount,
+            y: JBConstants.MAX_RESERVED_PERCENT - reservedPercent,
+            denominator: JBConstants.MAX_RESERVED_PERCENT
+        });
+
+        // Assign the residual to reserved tokens so rounding cannot lose supply during route comparison.
+        reservedTokenCount = splitTokenCount - beneficiaryTokenCount;
+
+        // A skipped split hands the swap output over untouched, on top of the beneficiary's share of the split.
+        if (skipSplits) beneficiaryTokenCount += swapTokenCount;
     }
 
     /// @notice Whether previewing through a terminal would cycle back into the router.
@@ -552,6 +584,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             buybackHook: router.BUYBACK_HOOK(),
             beneficiaryTokenCount: beneficiaryTokenCount,
             reservedTokenCount: reservedTokenCount,
+            weight: ruleset.weight,
             hookSpecifications: hookSpecifications
         });
 
@@ -772,45 +805,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Decode the returned terminal array on successful responses.
         return abi.decode(data, (IJBTerminal[]));
-    }
-
-    /// @notice Scale a known beneficiary/reserved token split to a different total token count.
-    /// @param tokenCount The total token count to score.
-    /// @param referenceTokenCount The total token count the reference split was computed from.
-    /// @param referenceBeneficiaryTokenCount The beneficiary share of the reference split.
-    /// @param referenceReservedTokenCount The reserved share of the reference split.
-    /// @return beneficiaryTokenCount The scaled beneficiary token count.
-    /// @return reservedTokenCount The scaled reserved token count.
-    function _scaledPreviewPayTokenCounts(
-        uint256 tokenCount,
-        uint256 referenceTokenCount,
-        uint256 referenceBeneficiaryTokenCount,
-        uint256 referenceReservedTokenCount
-    )
-        internal
-        pure
-        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
-    {
-        // A zero candidate means there is no stronger route output to scale, so preserve the known reference split.
-        if (tokenCount == 0) {
-            return (referenceBeneficiaryTokenCount, referenceReservedTokenCount);
-        }
-
-        // Prefer the already-previewed beneficiary/reserved total because it includes the destination's reserve logic.
-        uint256 referenceTotal = referenceBeneficiaryTokenCount + referenceReservedTokenCount;
-
-        // Fall back to the original token count when previewed counts were unavailable but the hook reported a floor.
-        if (referenceTotal == 0) referenceTotal = referenceTokenCount;
-
-        // If both reference totals are zero, treat the whole candidate as beneficiary tokens so the route stays
-        // comparable instead of disappearing from scoring.
-        if (referenceTotal == 0) return (tokenCount, 0);
-
-        // Scale the beneficiary share proportionally from the reference split to the candidate total being scored.
-        beneficiaryTokenCount = mulDiv({x: tokenCount, y: referenceBeneficiaryTokenCount, denominator: referenceTotal});
-
-        // Assign the residual to reserved tokens so rounding cannot lose supply during route comparison.
-        reservedTokenCount = tokenCount - beneficiaryTokenCount;
     }
 
     /// @notice Choose the stronger preview outcome using beneficiary tokens first and reserved tokens as a tie-break.
@@ -1125,6 +1119,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             buybackHook: routePreviewer.BUYBACK_HOOK(),
             beneficiaryTokenCount: beneficiaryTokenCount,
             reservedTokenCount: reservedTokenCount,
+            weight: ruleset.weight,
             hookSpecifications: hookSpecifications
         });
     }
