@@ -290,10 +290,9 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 continue;
             }
 
-            // Read the canonical static pay metadata tuple emitted by the published buyback hook: 15 words up to
-            // 1.3.x, with `skipSplits` and `reservedPercent` appended as words 16 and 17 from 1.4.0.
+            // Read the canonical 17-word static pay metadata tuple emitted by the published buyback hook.
             bytes memory hookMetadata = specification.metadata;
-            if (hookMetadata.length < 15 * 32) {
+            if (hookMetadata.length < 17 * 32) {
                 unchecked {
                     ++i;
                 }
@@ -307,6 +306,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             uint256 minimumReservedTokenCount;
             uint256 rawSwapQuote;
             uint256 oracleUnseededWord;
+            uint256 skipSplitsWord;
+            uint256 reservedPercent;
             assembly ("memory-safe") {
                 amountToMintWith := mload(add(hookMetadata, 0x40))
                 minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
@@ -315,21 +316,13 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 minimumReservedTokenCount := mload(add(hookMetadata, 0x1a0))
                 rawSwapQuote := mload(add(hookMetadata, 0x1c0))
                 oracleUnseededWord := mload(add(hookMetadata, 0x1e0))
+                skipSplitsWord := mload(add(hookMetadata, 0x200))
+                reservedPercent := mload(add(hookMetadata, 0x220))
             }
             bool oracleUnseeded = oracleUnseededWord != 0;
-
             // A payer who opted out of the reserved split takes the swap output directly, so the hook's
             // beneficiary/reserved commitments, which were previewed through the split, no longer describe that leg.
-            bool skipSplits;
-            uint256 reservedPercent;
-            if (hookMetadata.length >= 17 * 32) {
-                uint256 skipSplitsWord;
-                assembly ("memory-safe") {
-                    skipSplitsWord := mload(add(hookMetadata, 0x200))
-                    reservedPercent := mload(add(hookMetadata, 0x220))
-                }
-                skipSplits = skipSplitsWord != 0;
-            }
+            bool skipSplits = skipSplitsWord != 0;
 
             // The hook's beneficiary/reserved commitments are only for the AMM leg. If the hook leaves part of the
             // payment to mint directly, estimate that direct-mint leg at the same issuance rate used for the swapped
@@ -421,6 +414,52 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         // Otherwise compare normalized representations so native and wrapped native tokens share one routing identity.
         return _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenA})
             == _normalizedTokenOf({wrappedNativeToken: wrappedNativeToken, token: tokenB});
+    }
+
+    /// @notice Split a buyback route's whole-route token count between beneficiary and reserved tokens.
+    /// @dev Without `skipSplits`, the swap and direct-mint legs both pass through the reserved split, so the whole
+    /// count is scaled from the hook's previewed split. With `skipSplits`, the swap output goes to the beneficiary
+    /// untouched while the direct-mint leg still passes through the split.
+    /// @param swapTokenCount The project tokens the AMM leg is expected to produce.
+    /// @param directMintTokenCount The direct-mint leg's token count. In skip mode this is already the beneficiary's
+    /// share, because the hook reduces `tokenCountWithoutHook` to that share before publishing it.
+    /// @param skipSplits Whether the payer opted the swap output out of the reserved split.
+    /// @param reservedPercent The ruleset's reserved percent, out of `JBConstants.MAX_RESERVED_PERCENT`.
+    /// @param referenceBeneficiaryTokenCount The beneficiary tokens the hook previewed for its minimum swap output.
+    /// @param referenceReservedTokenCount The reserved tokens the hook previewed for its minimum swap output.
+    /// @return beneficiaryTokenCount The beneficiary token count to score.
+    /// @return reservedTokenCount The reserved token count to score.
+    function _hookPreviewPayTokenCounts(
+        uint256 swapTokenCount,
+        uint256 directMintTokenCount,
+        bool skipSplits,
+        uint256 reservedPercent,
+        uint256 referenceBeneficiaryTokenCount,
+        uint256 referenceReservedTokenCount
+    )
+        internal
+        pure
+        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
+    {
+        if (!skipSplits) {
+            return _scaledPreviewPayTokenCounts({
+                tokenCount: swapTokenCount + directMintTokenCount,
+                referenceTokenCount: swapTokenCount,
+                referenceBeneficiaryTokenCount: referenceBeneficiaryTokenCount,
+                referenceReservedTokenCount: referenceReservedTokenCount
+            });
+        }
+
+        // The swap output is handed over as-is, and the direct-mint leg's beneficiary share is already in
+        // `directMintTokenCount`; rebuild that leg's reserved remainder from the ruleset's split.
+        beneficiaryTokenCount = swapTokenCount + directMintTokenCount;
+        if (reservedPercent < JBConstants.MAX_RESERVED_PERCENT) {
+            reservedTokenCount = mulDiv({
+                x: directMintTokenCount,
+                y: reservedPercent,
+                denominator: JBConstants.MAX_RESERVED_PERCENT - reservedPercent
+            });
+        }
     }
 
     /// @notice Whether previewing through a terminal would cycle back into the router.
@@ -790,52 +829,6 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
         // Decode the returned terminal array on successful responses.
         return abi.decode(data, (IJBTerminal[]));
-    }
-
-    /// @notice Split a buyback route's whole-route token count between beneficiary and reserved tokens.
-    /// @dev Without `skipSplits`, the swap and direct-mint legs both pass through the reserved split, so the whole
-    /// count is scaled from the hook's previewed split. With `skipSplits`, the swap output goes to the beneficiary
-    /// untouched while the direct-mint leg still passes through the split.
-    /// @param swapTokenCount The project tokens the AMM leg is expected to produce.
-    /// @param directMintTokenCount The direct-mint leg's token count. In skip mode this is already the beneficiary's
-    /// share, because the hook reduces `tokenCountWithoutHook` to that share before publishing it.
-    /// @param skipSplits Whether the payer opted the swap output out of the reserved split.
-    /// @param reservedPercent The ruleset's reserved percent, out of `JBConstants.MAX_RESERVED_PERCENT`.
-    /// @param referenceBeneficiaryTokenCount The beneficiary tokens the hook previewed for its minimum swap output.
-    /// @param referenceReservedTokenCount The reserved tokens the hook previewed for its minimum swap output.
-    /// @return beneficiaryTokenCount The beneficiary token count to score.
-    /// @return reservedTokenCount The reserved token count to score.
-    function _hookPreviewPayTokenCounts(
-        uint256 swapTokenCount,
-        uint256 directMintTokenCount,
-        bool skipSplits,
-        uint256 reservedPercent,
-        uint256 referenceBeneficiaryTokenCount,
-        uint256 referenceReservedTokenCount
-    )
-        internal
-        pure
-        returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
-    {
-        if (!skipSplits) {
-            return _scaledPreviewPayTokenCounts({
-                tokenCount: swapTokenCount + directMintTokenCount,
-                referenceTokenCount: swapTokenCount,
-                referenceBeneficiaryTokenCount: referenceBeneficiaryTokenCount,
-                referenceReservedTokenCount: referenceReservedTokenCount
-            });
-        }
-
-        // The swap output is handed over as-is, and the direct-mint leg's beneficiary share is already in
-        // `directMintTokenCount`; rebuild that leg's reserved remainder from the ruleset's split.
-        beneficiaryTokenCount = swapTokenCount + directMintTokenCount;
-        if (reservedPercent < JBConstants.MAX_RESERVED_PERCENT) {
-            reservedTokenCount = mulDiv({
-                x: directMintTokenCount,
-                y: reservedPercent,
-                denominator: JBConstants.MAX_RESERVED_PERCENT - reservedPercent
-            });
-        }
     }
 
     /// @notice Scale a known beneficiary/reserved token split to a different total token count.

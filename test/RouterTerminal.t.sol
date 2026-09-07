@@ -3069,7 +3069,9 @@ contract RouterTerminalTest is Test {
                 minimumBeneficiaryTokenCount,
                 minimumReservedTokenCount,
                 rawSwapQuote,
-                oracleUnseeded
+                oracleUnseeded,
+                false,
+                uint256(0)
             )
         });
     }

@@ -403,7 +403,9 @@ contract DeployBuybackHookZeroTest is Test {
                 minimumBeneficiaryTokenCount,
                 minimumReservedTokenCount,
                 uint256(0),
-                false
+                false,
+                false,
+                uint256(0)
             )
         });
     }
