@@ -431,13 +431,21 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
         pure
         returns (uint256 beneficiaryTokenCount, uint256 reservedTokenCount)
     {
+        // Everything the controller mints passes through the split in one call: the direct-mint leg always, and the
+        // swap output too unless the payer skipped the split and takes it as-is.
         uint256 splitTokenCount = skipSplits ? directMintTokenCount : swapTokenCount + directMintTokenCount;
+
+        // Take the beneficiary share the way the controller does, so the preview rounds exactly like settlement.
         beneficiaryTokenCount = mulDiv({
             x: splitTokenCount,
             y: JBConstants.MAX_RESERVED_PERCENT - reservedPercent,
             denominator: JBConstants.MAX_RESERVED_PERCENT
         });
+
+        // Assign the residual to reserved tokens so rounding cannot lose supply during route comparison.
         reservedTokenCount = splitTokenCount - beneficiaryTokenCount;
+
+        // A skipped split hands the swap output over untouched, on top of the beneficiary's share of the split.
         if (skipSplits) beneficiaryTokenCount += swapTokenCount;
     }
 
