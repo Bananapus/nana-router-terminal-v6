@@ -1926,6 +1926,74 @@ contract RouterTerminalTest is Test {
         assertEq(address(returnedSpecs[0].hook), buybackHook);
     }
 
+    function test_previewPayFor_honorsBuybackSkipSplitsMetadata() public {
+        uint256 projectId = 1;
+        address tokenIn = makeAddr("buybackTokenIn");
+        address beneficiary = makeAddr("buybackBeneficiary");
+        address destTerminal = makeAddr("buybackDestTerminal");
+        vm.etch(destTerminal, hex"00");
+        vm.etch(buybackHook, hex"00");
+
+        vm.mockCall(
+            address(mockTokens), abi.encodeCall(IJBTokens.projectIdOf, (IJBToken(tokenIn))), abi.encode(uint256(0))
+        );
+
+        IJBTerminal[] memory terminals = new IJBTerminal[](1);
+        terminals[0] = IJBTerminal(destTerminal);
+        vm.mockCall(
+            address(mockDirectory), abi.encodeCall(IJBDirectory.terminalsOf, (projectId)), abi.encode(terminals)
+        );
+        vm.mockCall(
+            address(mockDirectory),
+            abi.encodeCall(IJBDirectory.primaryTerminalOf, (projectId, tokenIn)),
+            abi.encode(destTerminal)
+        );
+
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        contexts[0] = JBAccountingContext({token: tokenIn, decimals: 18, currency: uint32(uint160(tokenIn))});
+        vm.mockCall(destTerminal, abi.encodeCall(IJBTerminal.accountingContextsOf, (projectId)), abi.encode(contexts));
+
+        bytes4 buybackInterfaceId = bytes4(keccak256("MAX_TWAP_WINDOW()"));
+        vm.mockCall(buybackHook, abi.encodeCall(IERC165.supportsInterface, (buybackInterfaceId)), abi.encode(true));
+
+        // Buyback 1.4.0 shape: a 1,500-token swap floor previewed through a 50% reserved split, a direct-mint leg
+        // whose beneficiary share is 50 tokens, and the payer's `skipSplits` opt-out appended as word 16.
+        JBPayHookSpecification[] memory hookSpecifications = _buybackSkipSplitsPayHookSpecifications({
+            hook: buybackHook, minimumSwapAmountOut: 1500, reservedPercent: 5000
+        });
+
+        vm.mockCall(
+            destTerminal,
+            abi.encodeCall(IJBTerminal.previewPayFor, (projectId, tokenIn, 100, beneficiary, bytes(""))),
+            abi.encode(
+                JBRuleset({
+                    cycleNumber: 1,
+                    id: 111,
+                    basedOnId: 0,
+                    start: 0,
+                    duration: 0,
+                    weight: 0,
+                    weightCutPercent: 0,
+                    approvalHook: IJBRulesetApprovalHook(address(0)),
+                    metadata: 0
+                }),
+                uint256(0),
+                uint256(0),
+                hookSpecifications
+            )
+        );
+
+        (, uint256 beneficiaryTokenCount, uint256 reservedTokenCount, JBPayHookSpecification[] memory returnedSpecs) =
+            routerTerminal.previewPayFor(projectId, tokenIn, 100, beneficiary, "");
+
+        // The whole swap output goes to the beneficiary; only the direct-mint leg is split.
+        assertEq(beneficiaryTokenCount, 1500 + 50, "skip mode must not scale the swap leg through the split");
+        assertEq(reservedTokenCount, 50, "only the direct-mint leg is reserved in skip mode");
+        assertEq(returnedSpecs.length, 1);
+        assertEq(address(returnedSpecs[0].hook), buybackHook);
+    }
+
     function test_previewPayFor_ignoresRawBuybackQuoteWhenOracleUnseeded() public {
         uint256 projectId = 1;
         address tokenIn = makeAddr("coldStartBuybackTokenIn");
@@ -3002,6 +3070,46 @@ contract RouterTerminalTest is Test {
                 minimumReservedTokenCount,
                 rawSwapQuote,
                 oracleUnseeded
+            )
+        });
+    }
+
+    function _buybackSkipSplitsPayHookSpecifications(
+        address hook,
+        uint256 minimumSwapAmountOut,
+        uint256 reservedPercent
+    )
+        internal
+        pure
+        returns (JBPayHookSpecification[] memory specifications)
+    {
+        // The hook previews its floor through the split even in skip mode, so the reference counts are split.
+        uint256 minimumBeneficiaryTokenCount = minimumSwapAmountOut * (10_000 - reservedPercent) / 10_000;
+        specifications = new JBPayHookSpecification[](1);
+        specifications[0] = JBPayHookSpecification({
+            hook: IJBPayHook(hook),
+            noop: false,
+            // 100 units are swapped and 50 minted directly. `tokenCountWithoutHook` is the swap leg's direct-mint
+            // equivalent already reduced to the beneficiary's share, as the hook publishes it in skip mode.
+            amount: 100,
+            metadata: abi.encode(
+                false,
+                uint256(50),
+                minimumSwapAmountOut,
+                true,
+                address(0),
+                uint256(100),
+                uint256(0),
+                uint256(100),
+                int24(0),
+                uint128(0),
+                PoolId.wrap(bytes32(0)),
+                minimumBeneficiaryTokenCount,
+                minimumSwapAmountOut - minimumBeneficiaryTokenCount,
+                uint256(0),
+                false,
+                true,
+                reservedPercent
             )
         });
     }
