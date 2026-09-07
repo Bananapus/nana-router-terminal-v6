@@ -4,71 +4,37 @@ pragma solidity 0.8.28;
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {Test} from "forge-std/Test.sol";
 
-import {RouterTerminalMigrationLib} from "../script/helpers/RouterTerminalMigrationLib.sol";
 import {IJBRouterTerminalRegistry} from "../src/interfaces/IJBRouterTerminalRegistry.sol";
 
-contract RouterTerminalMigrationRegistry {
-    error RouterTerminalMigrationRegistry_Rejected(uint256 projectId);
+import {RouterTerminalMigrationLib} from "../script/helpers/RouterTerminalMigrationLib.sol";
 
-    uint256 public rejectProjectId;
-    mapping(uint256 projectId => IJBTerminal terminal) public terminalOf;
-    uint256 public writeCount;
+import {RouterTerminalMigrationRegistry} from "./helpers/deployment/RouterTerminalMigrationRegistry.sol";
 
-    function setRejectProjectId(uint256 projectId) external {
-        rejectProjectId = projectId;
-    }
-
-    function requireMigratedProject(IJBTerminal terminal, uint256 projectId) external view {
-        RouterTerminalMigrationLib.requireMigratedProject({
-            registry: IJBRouterTerminalRegistry(address(this)), terminal: terminal, projectId: projectId
-        });
-    }
-
-    function setTerminalFor(uint256 projectId, IJBTerminal terminal) external {
-        if (projectId == rejectProjectId) revert RouterTerminalMigrationRegistry_Rejected(projectId);
-        terminalOf[projectId] = terminal;
-        writeCount++;
-    }
-}
-
+/// @notice Tests selective project migration, failure isolation, and required-project validation.
 contract RouterTerminalMigrationLibTest is Test {
-    function test_migrationContinuesAfterUnauthorizedProject() public {
-        RouterTerminalMigrationRegistry registry = new RouterTerminalMigrationRegistry();
-        IJBTerminal gateway = IJBTerminal(makeAddr("gateway"));
+    //*********************************************************************//
+    // ----------------------- public transactions ----------------------- //
+    //*********************************************************************//
 
-        uint256[] memory projectIds = new uint256[](2);
-        projectIds[0] = 1;
-        projectIds[1] = 2;
-        registry.setRejectProjectId(1);
-
-        uint256 failedCount = RouterTerminalMigrationLib.migrateProjects({
-            registry: IJBRouterTerminalRegistry(address(registry)),
-            terminal: gateway,
-            projectCount: 2,
-            projectIds: projectIds
-        });
-
-        assertEq(failedCount, 1, "the unauthorized project should be reported");
-        assertEq(address(registry.terminalOf(1)), address(0), "the unauthorized project must remain unchanged");
-        assertEq(address(registry.terminalOf(2)), address(gateway), "later authorized projects must still migrate");
-    }
-
+    /// @notice Migration writes only issued projects that do not already resolve through the selected gateway.
     function test_migratesOnlyIssuedProjectsWhichDoNotAlreadyResolveThroughGateway() public {
         RouterTerminalMigrationRegistry registry = new RouterTerminalMigrationRegistry();
         IJBTerminal gateway = IJBTerminal(makeAddr("gateway"));
         IJBTerminal router = IJBTerminal(makeAddr("router"));
 
+        // Only the raw-router project requires a write; the selected gateway must remain untouched.
         registry.setTerminalFor({projectId: 1, terminal: router});
         registry.setTerminalFor({projectId: 2, terminal: gateway});
         uint256 writesBefore = registry.writeCount();
 
+        // Include invalid and unissued IDs to verify that a shared migration list cannot create project entries.
         uint256[] memory projectIds = new uint256[](4);
         projectIds[0] = 0;
         projectIds[1] = 1;
         projectIds[2] = 2;
         projectIds[3] = 3;
 
-        uint256 failedCount = RouterTerminalMigrationLib.migrateProjects({
+        uint256 failedCount = RouterTerminalMigrationLib._migrateProjects({
             registry: IJBRouterTerminalRegistry(address(registry)),
             terminal: gateway,
             projectCount: 2,
@@ -80,11 +46,35 @@ contract RouterTerminalMigrationLibTest is Test {
         assertEq(address(registry.terminalOf(2)), address(gateway), "gateway cohort must remain unchanged");
         assertEq(address(registry.terminalOf(3)), address(0), "unissued project must be ignored");
         assertEq(registry.writeCount() - writesBefore, 1, "only the vulnerable issued cohort should be written");
-        RouterTerminalMigrationLib.requireMigratedProject({
+        RouterTerminalMigrationLib._requireMigratedProject({
             registry: IJBRouterTerminalRegistry(address(registry)), terminal: gateway, projectId: 1
         });
     }
 
+    /// @notice An unauthorized project does not prevent a later authorized project from migrating.
+    function test_migrationContinuesAfterUnauthorizedProject() public {
+        RouterTerminalMigrationRegistry registry = new RouterTerminalMigrationRegistry();
+        IJBTerminal gateway = IJBTerminal(makeAddr("gateway"));
+
+        // Put the rejected project first so successful migration requires continuing after the failure.
+        uint256[] memory projectIds = new uint256[](2);
+        projectIds[0] = 1;
+        projectIds[1] = 2;
+        registry.setRejectProjectId(1);
+
+        uint256 failedCount = RouterTerminalMigrationLib._migrateProjects({
+            registry: IJBRouterTerminalRegistry(address(registry)),
+            terminal: gateway,
+            projectCount: 2,
+            projectIds: projectIds
+        });
+
+        assertEq(failedCount, 1, "the unauthorized project should be reported");
+        assertEq(address(registry.terminalOf(1)), address(0), "the unauthorized project must remain unchanged");
+        assertEq(address(registry.terminalOf(2)), address(gateway), "later authorized projects must still migrate");
+    }
+
+    /// @notice Required-project validation reverts when an isolated migration failure leaves its terminal unchanged.
     function test_requiredProjectMigrationCannotSilentlyFail() public {
         RouterTerminalMigrationRegistry registry = new RouterTerminalMigrationRegistry();
         IJBTerminal gateway = IJBTerminal(makeAddr("gateway"));
@@ -92,7 +82,9 @@ contract RouterTerminalMigrationLibTest is Test {
 
         uint256[] memory projectIds = new uint256[](1);
         projectIds[0] = 1;
-        RouterTerminalMigrationLib.migrateProjects({
+        // A best-effort migration reports failure without reverting, so required projects need a separate
+        // postcondition.
+        RouterTerminalMigrationLib._migrateProjects({
             registry: IJBRouterTerminalRegistry(address(registry)),
             terminal: gateway,
             projectCount: 1,

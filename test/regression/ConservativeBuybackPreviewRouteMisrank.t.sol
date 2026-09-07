@@ -62,6 +62,12 @@ contract ConservativeBuybackPreviewTerminal {
 
     function addToBalanceOf(uint256, address, uint256, bool, string calldata, bytes calldata) external payable {}
 
+    /// @notice Returns a swap-floor preview with the raw quote supplied by the canonical buyback hook.
+    /// @dev The fixture ignores the payment arguments and returns its configured quote for every request.
+    /// @return ruleset The fixed ruleset identifying this terminal's destination project.
+    /// @return beneficiaryTokenCount Zero because the hook determines the beneficiary output.
+    /// @return reservedTokenCount Zero because the hook determines the reserved output.
+    /// @return hookSpecifications The canonical hook specification with its floor and raw swap quote.
     function previewPayFor(
         uint256,
         address,

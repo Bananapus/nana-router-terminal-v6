@@ -208,6 +208,43 @@ contract RouterTerminalBuybackHookForkTest is Test {
         vm.deal(payer, 10 ether);
     }
 
+    /// @notice Checks that a dust swap preserves precise beneficiary and reserved previews for the direct-mint leg.
+    function test_fork_previewAndPay_dustSwapDoesNotUnderstateDirectMint() public {
+        _queueReservedRuleset(5000);
+        // A dust swap isolates the direct-mint calculation from rounding in the hook's swap preview.
+        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 3, minimumSwapAmountOut: 2, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        // Allow only the few hundred wei of project tokens by which the dust swap quote can differ from
+        // execution; the direct-mint amount must remain precise.
+        assertApproxEqAbs(received, previewBeneficiaryTokenCount, 1000, "direct-mint beneficiary share understated");
+        assertEq(reserved, previewReservedTokenCount, "direct-mint reserved share must match execution");
+        assertGt(reserved, 0.49 ether, "half of the direct leg is reserved");
+    }
+
+    /// @notice Checks that a full reserve assigns the entire direct-mint leg to reserved recipients.
+    function test_fork_previewAndPay_fullReserveReservesWholeDirectMint() public {
+        _queueReservedRuleset(10_000);
+        bytes memory metadata =
+            _buybackQuoteMetadata({amountToSwapWith: 0.1 ether, minimumSwapAmountOut: 1 ether, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        assertEq(reserved, 0.9 ether, "execution reserves the entire direct leg");
+        assertEq(previewReservedTokenCount, reserved, "preview must reserve the entire direct leg too");
+        assertGe(previewBeneficiaryTokenCount, 1 ether, "the swap floor is scored for the beneficiary");
+        assertGe(received, 1 ether, "the swap floor holds at execution");
+    }
+
     function test_fork_previewAndPay_routeToProjectUsingBuybackHook() public {
         uint256 directMintTokenCount = PAY_AMOUNT;
         bytes memory metadata = _buybackQuoteMetadata(0, 10 ether);
@@ -244,6 +281,7 @@ contract RouterTerminalBuybackHookForkTest is Test {
         assertGt(minted, directMintTokenCount, "pay did not use buyback-favorable route");
     }
 
+    /// @notice Checks that bypassing reserved splits transfers the full swap output to the beneficiary.
     function test_fork_previewAndPay_skipSplitsPreviewMatchesExecution() public {
         _queueReservedRuleset(5000);
         bytes memory splitMetadata = _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 10 ether});
@@ -282,58 +320,6 @@ contract RouterTerminalBuybackHookForkTest is Test {
         assertGe(skipReceived, 10 ether, "the quoted floor must hold in skip mode");
     }
 
-    function test_fork_previewAndPay_dustSwapDoesNotUnderstateDirectMint() public {
-        _queueReservedRuleset(5000);
-        // Nearly the whole payment mints directly; the swap leg is dust, so any rounding in the hook's swap-leg
-        // figures would be amplified enormously if the direct leg were derived from them.
-        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 3, minimumSwapAmountOut: 2, skipSplits: true});
-
-        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
-            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
-        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
-        uint256 received = _payHooked(metadata);
-        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
-
-        // Only the dust swap's own output, a few hundred wei of project token, can differ between quote and
-        // execution. The defect this guards against understated the direct leg by a sixth of a token.
-        assertApproxEqAbs(received, previewBeneficiaryTokenCount, 1000, "direct-mint beneficiary share understated");
-        assertEq(reserved, previewReservedTokenCount, "direct-mint reserved share must match execution");
-        assertGt(reserved, 0.49 ether, "half of the direct leg is reserved");
-    }
-
-    function test_fork_previewAndPay_fullReserveReservesWholeDirectMint() public {
-        _queueReservedRuleset(10_000);
-        bytes memory metadata =
-            _buybackQuoteMetadata({amountToSwapWith: 0.1 ether, minimumSwapAmountOut: 1 ether, skipSplits: true});
-
-        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
-            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
-        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
-        uint256 received = _payHooked(metadata);
-        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
-
-        assertEq(reserved, 0.9 ether, "execution reserves the entire direct leg");
-        assertEq(previewReservedTokenCount, reserved, "preview must reserve the entire direct leg too");
-        assertGe(previewBeneficiaryTokenCount, 1 ether, "the swap floor is scored for the beneficiary");
-        assertGe(received, 1 ether, "the swap floor holds at execution");
-    }
-
-    /// @notice Pay the hooked project through the router and return what the beneficiary actually received.
-    function _payHooked(bytes memory metadata) internal returns (uint256 received) {
-        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
-        vm.prank(payer);
-        received = routerTerminal.pay{value: PAY_AMOUNT}({
-            projectId: hookedProjectId,
-            token: JBConstants.NATIVE_TOKEN,
-            amount: PAY_AMOUNT,
-            beneficiary: beneficiary,
-            minReturnedTokens: 0,
-            memo: "buyback hook",
-            metadata: metadata
-        });
-        assertEq(IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore, received, "balance mismatch");
-    }
-
     function _deployJbCore() internal {
         jbPermissions = new JBPermissions(address(0));
         jbProjects = new JBProjects(multisig, address(0), address(0));
@@ -368,6 +354,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
         );
     }
 
+    /// @notice Builds a duration-less ruleset using the buyback hook and requested reserve percentage.
+    /// @param reservedPercent The reserved percentage out of 10,000.
+    /// @return rulesetConfigs The project's single ruleset configuration.
     function _hookedRulesetConfigs(uint16 reservedPercent)
         internal
         view
@@ -408,18 +397,8 @@ contract RouterTerminalBuybackHookForkTest is Test {
         });
     }
 
-    /// @notice Replace the project's current duration-less ruleset so a reserved split applies immediately.
-    function _queueReservedRuleset(uint16 reservedPercent) internal {
-        vm.prank(multisig);
-        jbController.queueRulesetsOf({
-            projectId: hookedProjectId, rulesetConfigurations: _hookedRulesetConfigs(reservedPercent), memo: ""
-        });
-        (JBRuleset memory current, JBRulesetMetadata memory currentMetadata) =
-            jbController.currentRulesetOf(hookedProjectId);
-        assertGt(current.id, 0, "no current ruleset");
-        assertEq(currentMetadata.reservedPercent, reservedPercent, "reserved ruleset is not current");
-    }
-
+    /// @notice Launches a project that accepts native-token payments through the buyback hook.
+    /// @return projectId The launched project's ID.
     function _launchHookedProject() internal returns (uint256 projectId) {
         JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(0);
 
@@ -438,6 +417,38 @@ contract RouterTerminalBuybackHookForkTest is Test {
             terminalConfigurations: terminalConfigs,
             memo: ""
         });
+    }
+
+    /// @notice Pays the hooked project through the router and checks the beneficiary's received balance.
+    /// @param metadata The payment metadata containing the buyback quote and split preference.
+    /// @return received The project tokens delivered to the beneficiary.
+    function _payHooked(bytes memory metadata) internal returns (uint256 received) {
+        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
+        vm.prank(payer);
+        received = routerTerminal.pay{value: PAY_AMOUNT}({
+            projectId: hookedProjectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: PAY_AMOUNT,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "buyback hook",
+            metadata: metadata
+        });
+        assertEq(IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore, received, "balance mismatch");
+    }
+
+    /// @notice Queues a ruleset and checks that its reserved split applies immediately.
+    /// @dev A duration-less current ruleset permits the queued configuration to take effect immediately.
+    /// @param reservedPercent The reserved percentage out of 10,000.
+    function _queueReservedRuleset(uint16 reservedPercent) internal {
+        vm.prank(multisig);
+        jbController.queueRulesetsOf({
+            projectId: hookedProjectId, rulesetConfigurations: _hookedRulesetConfigs(reservedPercent), memo: ""
+        });
+        (JBRuleset memory current, JBRulesetMetadata memory currentMetadata) =
+            jbController.currentRulesetOf(hookedProjectId);
+        assertGt(current.id, 0, "no current ruleset");
+        assertEq(currentMetadata.reservedPercent, reservedPercent, "reserved ruleset is not current");
     }
 
     function _seedBuybackPool() internal {
@@ -477,6 +488,10 @@ contract RouterTerminalBuybackHookForkTest is Test {
         buybackHook.setPoolFor(hookedProjectId, buybackPoolKey, 10 minutes, JBConstants.NATIVE_TOKEN);
     }
 
+    /// @notice Encodes a buyback quote that applies reserved splits to the swap output.
+    /// @param amountToSwapWith The input amount to swap, or zero to swap the full payment.
+    /// @param minimumSwapAmountOut The minimum project-token output accepted from the swap.
+    /// @return metadata The payment metadata containing the buyback quote.
     function _buybackQuoteMetadata(
         uint256 amountToSwapWith,
         uint256 minimumSwapAmountOut
@@ -490,6 +505,11 @@ contract RouterTerminalBuybackHookForkTest is Test {
         });
     }
 
+    /// @notice Encodes a buyback quote and the payer's reserved-split preference.
+    /// @param amountToSwapWith The input amount to swap, or zero to swap the full payment.
+    /// @param minimumSwapAmountOut The minimum project-token output accepted from the swap.
+    /// @param skipSplits Whether the swap output bypasses reserved splits.
+    /// @return metadata The payment metadata containing the buyback quote and split preference.
     function _buybackQuoteMetadata(
         uint256 amountToSwapWith,
         uint256 minimumSwapAmountOut,
@@ -499,11 +519,11 @@ contract RouterTerminalBuybackHookForkTest is Test {
         view
         returns (bytes memory metadata)
     {
-        return JBMetadataResolver.addToMetadata(
-            "",
-            JBMetadataResolver.getId("pay", address(buybackHook)),
-            abi.encode(amountToSwapWith, minimumSwapAmountOut, skipSplits)
-        );
+        return JBMetadataResolver.addToMetadata({
+            originalMetadata: "",
+            idToAdd: JBMetadataResolver.getId({purpose: "pay", target: address(buybackHook)}),
+            dataToAdd: abi.encode(amountToSwapWith, minimumSwapAmountOut, skipSplits)
+        });
     }
 
     function _mockOracle(int256 liquidity, int24 tick, uint32 twapWindow) internal {

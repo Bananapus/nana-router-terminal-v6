@@ -24,7 +24,7 @@ import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 import {RouterTerminalMigrationLib} from "./helpers/RouterTerminalMigrationLib.sol";
 
-/// @notice Deploys the router terminal and registry with network-specific dependency addresses.
+/// @notice Deploys the router terminal, gateway, and registry with network-specific dependency addresses.
 contract DeployScript is Script, Sphinx {
     //*********************************************************************//
     // ------------------------ internal constants ----------------------- //
@@ -34,7 +34,7 @@ contract DeployScript is Script, Sphinx {
     bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
 
     /// @notice The CREATE2 salt used for the router-terminal gateway deployment.
-    bytes32 constant ROUTER_TERMINAL_GATEWAY = "JBRouterTerminalGatewayV6";
+    bytes32 internal constant _ROUTER_TERMINAL_GATEWAY = "JBRouterTerminalGatewayV6";
 
     /// @notice The CREATE2 salt used for the router-terminal registry deployment.
     bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
@@ -53,7 +53,7 @@ contract DeployScript is Script, Sphinx {
     address factory;
 
     /// @notice Existing project IDs which must resolve through the gateway after deployment.
-    uint256[] migrationProjectIds;
+    uint256[] internal _migrationProjectIds;
 
     /// @notice The Permit2 singleton address for the active deployment network.
     address permit2;
@@ -115,10 +115,10 @@ contract DeployScript is Script, Sphinx {
         // configured payout-project cohorts without allowing an environment override to omit the fee project.
         uint256[] memory additionalMigrationProjectIds =
             vm.envOr({name: "NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS", delim: ",", defaultValue: new uint256[](0)});
-        migrationProjectIds = new uint256[](additionalMigrationProjectIds.length + 1);
-        migrationProjectIds[0] = JBConstants.FEE_BENEFICIARY_PROJECT_ID;
+        _migrationProjectIds = new uint256[](additionalMigrationProjectIds.length + 1);
+        _migrationProjectIds[0] = JBConstants.FEE_BENEFICIARY_PROJECT_ID;
         for (uint256 i; i < additionalMigrationProjectIds.length; i++) {
-            migrationProjectIds[i + 1] = additionalMigrationProjectIds[i];
+            _migrationProjectIds[i + 1] = additionalMigrationProjectIds[i];
         }
 
         // Reuse the trusted forwarder from core so router meta-transactions match the rest of the stack.
@@ -214,7 +214,7 @@ contract DeployScript is Script, Sphinx {
 
         // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
         // failed fee and protocol-payer routes.
-        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({
+        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: _ROUTER_TERMINAL_GATEWAY}({
             directory: core.directory, permit2: IPermit2(permit2), router: terminal, trustedForwarder: trustedForwarder
         });
 
@@ -223,12 +223,12 @@ contract DeployScript is Script, Sphinx {
         registry.setDefaultTerminal(gateway);
 
         // Explicitly move configured existing cohorts because changing the default applies only to future projects.
-        uint256[] memory projectIds = migrationProjectIds;
+        uint256[] memory projectIds = _migrationProjectIds;
         if (projectIds.length == 0) {
             projectIds = new uint256[](1);
             projectIds[0] = JBConstants.FEE_BENEFICIARY_PROJECT_ID;
         }
-        RouterTerminalMigrationLib.migrateProjects({
+        RouterTerminalMigrationLib._migrateProjects({
             registry: registry,
             terminal: IJBTerminal(address(gateway)),
             projectCount: core.projects.count(),
@@ -236,7 +236,7 @@ contract DeployScript is Script, Sphinx {
         });
 
         // Abort unless the fee project actually moved, so a successful deployment cannot leave fee forgiveness live.
-        RouterTerminalMigrationLib.requireMigratedProject({
+        RouterTerminalMigrationLib._requireMigratedProject({
             registry: registry,
             terminal: IJBTerminal(address(gateway)),
             projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID

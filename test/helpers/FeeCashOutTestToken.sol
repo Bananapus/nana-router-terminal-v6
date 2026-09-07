@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-/// @notice An ERC-20 without a Router conversion route, used to exercise failed cash-out fee forwarding.
+/// @notice An ERC-20 without a router conversion route, used to exercise failed cash-out fee forwarding.
 contract FeeCashOutTestToken is ERC20 {
     /// @notice Construct the test token.
     constructor() ERC20("Unroutable", "UNR") {}

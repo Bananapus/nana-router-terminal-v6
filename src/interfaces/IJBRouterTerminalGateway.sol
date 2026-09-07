@@ -82,15 +82,15 @@ interface IJBRouterTerminalGateway is IJBForwardingTerminal, IJBPayerTracker, IJ
     /// @return gasLimit The maximum gas which may be forwarded while preserving accounting reserves.
     function maximumQualifiedCallGas() external view returns (uint256 gasLimit);
 
-    /// @notice The total number of pending-call identifiers issued.
-    /// @return count The issued identifier count.
-    function pendingCallCount() external view returns (uint256 count);
-
     /// @notice Return the hash commitment of a router call retained after its first attempt failed.
     /// @dev The full call, memo, and metadata are emitted by the queue event; only their hash is stored.
     /// @param id The pending call identifier.
     /// @return commitment The retained call's commitment, or zero when no call is pending under `id`.
     function pendingCallCommitmentOf(bytes32 id) external view returns (bytes32 commitment);
+
+    /// @notice The total number of pending-call identifiers issued.
+    /// @return count The issued identifier count.
+    function pendingCallCount() external view returns (uint256 count);
 
     /// @notice Return a pending call's consecutive matching failure state.
     /// @param id The pending call identifier.

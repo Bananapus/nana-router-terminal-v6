@@ -242,6 +242,7 @@ contract DeployBuybackHookZeroTest is Test {
     address internal payer = makeAddr("payer");
     address internal beneficiary = makeAddr("beneficiary");
 
+    /// @notice Configures competing routes and routers with and without the canonical buyback hook.
     function setUp() public {
         directory = IJBDirectory(makeAddr("directory"));
         tokens = IJBTokens(makeAddr("tokens"));
@@ -375,6 +376,11 @@ contract DeployBuybackHookZeroTest is Test {
         assertEq(nativeTerminal.totalReceived(), 40, "zero-hook router should fall back to the native route");
     }
 
+    /// @notice Builds a canonical buyback swap-floor specification with reserved splits.
+    /// @param hook The canonical buyback hook supplying the metadata.
+    /// @param minimumSwapAmountOut The minimum swap output, in project-token units.
+    /// @param reservedPercent The reserved percentage out of 10,000.
+    /// @return specifications The single buyback hook specification.
     function _buybackPayHookSpecifications(
         address hook,
         uint256 minimumSwapAmountOut,
@@ -384,6 +390,7 @@ contract DeployBuybackHookZeroTest is Test {
         pure
         returns (JBPayHookSpecification[] memory specifications)
     {
+        // Match the controller's floor-rounded beneficiary share and assign the remainder to reserves.
         uint256 minimumBeneficiaryTokenCount = minimumSwapAmountOut * (10_000 - reservedPercent) / 10_000;
         specifications = new JBPayHookSpecification[](1);
         specifications[0] = JBPayHookSpecification({
