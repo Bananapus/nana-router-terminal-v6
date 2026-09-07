@@ -6,6 +6,8 @@ import {
     BuybackDeploymentLib
 } from "@bananapus/buyback-hook-v6/script/helpers/BuybackDeploymentLib.sol";
 import {CoreDeployment, CoreDeploymentLib} from "@bananapus/core-v6/script/helpers/CoreDeploymentLib.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
+import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {
     Univ4RouterDeployment,
     Univ4RouterDeploymentLib
@@ -17,8 +19,10 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
+import {JBRouterTerminalGateway} from "../src/JBRouterTerminalGateway.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
+import {RouterTerminalMigrationLib} from "./helpers/RouterTerminalMigrationLib.sol";
 
 /// @notice Deploys the router terminal and registry with network-specific dependency addresses.
 contract DeployScript is Script, Sphinx {
@@ -29,6 +33,9 @@ contract DeployScript is Script, Sphinx {
     /// @notice The CREATE2 salt used for the router terminal deployment.
     bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
 
+    /// @notice The CREATE2 salt used for the router-terminal gateway deployment.
+    bytes32 constant ROUTER_TERMINAL_GATEWAY = "JBRouterTerminalGatewayV6";
+
     /// @notice The CREATE2 salt used for the router-terminal registry deployment.
     bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
 
@@ -36,29 +43,32 @@ contract DeployScript is Script, Sphinx {
     // --------------------- internal stored properties ------------------ //
     //*********************************************************************//
 
+    /// @notice Tracks the deployment of the buyback-hook contracts for the chain being deployed to.
+    BuybackDeployment buyback;
+
     /// @notice Tracks the deployment of the core contracts for the chain being deployed to.
     CoreDeployment core;
 
-    /// @notice Tracks the deployment of the buyback-hook contracts for the chain being deployed to.
-    BuybackDeployment buyback;
+    /// @notice The Uniswap V3 factory address for the active deployment network.
+    address factory;
+
+    /// @notice Existing project IDs which must resolve through the gateway after deployment.
+    uint256[] migrationProjectIds;
+
+    /// @notice The Permit2 singleton address for the active deployment network.
+    address permit2;
+
+    /// @notice The Uniswap V4 pool manager address for the active deployment network.
+    address poolManager;
+
+    /// @notice The trusted forwarder inherited from the core deployment.
+    address trustedForwarder;
 
     /// @notice Tracks the deployment of the canonical Uniswap V4 router hook for the chain being deployed to.
     Univ4RouterDeployment univ4Router;
 
     /// @notice The wrapped native token address for the active deployment network.
     address weth;
-
-    /// @notice The Uniswap V3 factory address for the active deployment network.
-    address factory;
-
-    /// @notice The Uniswap V4 pool manager address for the active deployment network.
-    address poolManager;
-
-    /// @notice The Permit2 singleton address for the active deployment network.
-    address permit2;
-
-    /// @notice The trusted forwarder inherited from the core deployment.
-    address trustedForwarder;
 
     //*********************************************************************//
     // ---------------------- external transactions ---------------------- //
@@ -100,6 +110,16 @@ contract DeployScript is Script, Sphinx {
                 defaultValue: string("node_modules/@bananapus/univ4-router-v6/deployments/")
             })
         );
+
+        // Project 1 receives protocol fees and must not remain pinned to a fail-open registry cohort. Append any other
+        // configured payout-project cohorts without allowing an environment override to omit the fee project.
+        uint256[] memory additionalMigrationProjectIds =
+            vm.envOr({name: "NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS", delim: ",", defaultValue: new uint256[](0)});
+        migrationProjectIds = new uint256[](additionalMigrationProjectIds.length + 1);
+        migrationProjectIds[0] = JBConstants.FEE_BENEFICIARY_PROJECT_ID;
+        for (uint256 i; i < additionalMigrationProjectIds.length; i++) {
+            migrationProjectIds[i + 1] = additionalMigrationProjectIds[i];
+        }
 
         // Reuse the trusted forwarder from core so router meta-transactions match the rest of the stack.
         trustedForwarder = core.permissions.trustedForwarder();
@@ -192,8 +212,35 @@ contract DeployScript is Script, Sphinx {
             newUniv4Hook: address(univ4Router.hook)
         });
 
-        // Set the terminal as the default for the registry.
-        registry.setDefaultTerminal(terminal);
+        // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
+        // failed fee and protocol-payer routes.
+        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({
+            directory: core.directory, permit2: IPermit2(permit2), router: terminal, trustedForwarder: trustedForwarder
+        });
+
+        // Point the registry at the gateway. Existing registries use the same operation when selecting this
+        // implementation; no registry bytecode or storage-layout change is required.
+        registry.setDefaultTerminal(gateway);
+
+        // Explicitly move configured existing cohorts because changing the default applies only to future projects.
+        uint256[] memory projectIds = migrationProjectIds;
+        if (projectIds.length == 0) {
+            projectIds = new uint256[](1);
+            projectIds[0] = JBConstants.FEE_BENEFICIARY_PROJECT_ID;
+        }
+        RouterTerminalMigrationLib.migrateProjects({
+            registry: registry,
+            terminal: IJBTerminal(address(gateway)),
+            projectCount: core.projects.count(),
+            projectIds: projectIds
+        });
+
+        // Abort unless the fee project actually moved, so a successful deployment cannot leave fee forgiveness live.
+        RouterTerminalMigrationLib.requireMigratedProject({
+            registry: registry,
+            terminal: IJBTerminal(address(gateway)),
+            projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID
+        });
     }
 
     //*********************************************************************//

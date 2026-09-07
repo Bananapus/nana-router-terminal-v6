@@ -17,7 +17,7 @@
 
 ## Overview
 
-The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal.
+The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. Deployments put `JBRouterTerminalGateway` between the registry and the route-executing terminal so a failed route can retain its original input token without modifying the registry.
 
 It can route through:
 
@@ -37,6 +37,7 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
+| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains source-project-opted failed calls, and manages autonomous retry or refund. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
@@ -52,16 +53,18 @@ The router answers those questions, then hands off to the canonical terminal. It
 
 The shortest useful reading order is:
 
-1. `JBRouterTerminal`
-2. `JBRouterTerminalRegistry`
-3. the downstream terminal selected through `JBDirectory`
+1. `JBRouterTerminalGateway`
+2. `JBRouterTerminal`
+3. `JBRouterTerminalRegistry`
+4. the downstream terminal selected through `JBDirectory`
 
 ## Read these files first
 
-1. `src/JBRouterTerminal.sol`
-2. `src/JBRouterTerminalRegistry.sol`
-3. `src/libraries/JBSwapLib.sol`
-4. the downstream terminal implementation in `nana-core-v6`
+1. `src/JBRouterTerminalGateway.sol`
+2. `src/JBRouterTerminal.sol`
+3. `src/JBRouterTerminalRegistry.sol`
+4. `src/libraries/JBSwapLib.sol`
+5. the downstream terminal implementation in `nana-core-v6`
 
 ## Integration traps
 
@@ -72,10 +75,16 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
+- failed calls carrying an exact raw source project ID become asynchronous pending calls; calls without that opt-in remain synchronous. A source project's own token is never retained, since no terminal of that project can book a refund of it (reserved-token splits keep `JBController`'s beneficiary fallback), and a registered source terminal retains only fees to the fee project (payout splits keep `JBMultiTerminal`'s fee-free restore); both rules key on properties no upstream caller can shape.
+- transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
+- gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable transaction budget, and `processPendingCallWithGas` must stay between the current step and that cap
+- deployment attempts project 1 plus `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_IDS` without aborting on unauthorized cohorts; each failure emits `RouterTerminalMigrationFailed`
+- an authorized project owner or operator can finish one failed cohort with `script/MigrateProject.s.sol`
 
 ## Where state lives
 
 - route-selection logic: `JBRouterTerminal`
+- failed-call custody and qualification state: `JBRouterTerminalGateway`
 - per-project router choice and lock status: `JBRouterTerminalRegistry`
 - accepted-token accounting and final balance changes: the downstream terminal, usually in `nana-core-v6`
 
@@ -88,6 +97,7 @@ That separation is why a successful route can still end in downstream terminal b
 3. `test/RouterTerminalCashOutFork.t.sol`
 4. `test/regression/PreviewPrimaryTerminalMismatch.t.sol`
 5. `test/regression/CashOutCircularPrimaryTerminal.t.sol`
+6. `test/regression/RouterTerminalGatewayFailure.t.sol`
 
 ## Install
 
@@ -107,8 +117,11 @@ Useful scripts:
 
 - `npm run deploy:mainnets`
 - `npm run deploy:testnets`
+- `forge script script/MigrateProject.s.sol:MigrateProjectScript --rpc-url <RPC_URL> --broadcast` after setting `NANA_ROUTER_TERMINAL_REGISTRY`, `NANA_ROUTER_TERMINAL_GATEWAY`, and `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_ID`
 
 ## Deployment notes
+
+`script/Deploy.s.sol` is for chains without a live Router: it calls `setChainSpecificConstants` unconditionally, which reverts `JBRouterTerminal_AlreadyConfigured` where the Router already exists. On those chains the Gateway upgrade is performed by `deploy-all-v6` consuming this package, plus `script/MigrateProject.s.sol` for cohorts.
 
 This package depends on core, address-registry, and permission-ID packages plus Uniswap V3, V4, and Permit2 integrations. It is meant to sit in front of canonical Juicebox terminals, not replace them.
 
@@ -117,6 +130,7 @@ This package depends on core, address-registry, and permission-ID packages plus 
 ```text
 src/
   JBRouterTerminal.sol
+  JBRouterTerminalGateway.sol
   JBRouterTerminalRegistry.sol
   interfaces/
   libraries/
@@ -125,6 +139,7 @@ test/
   unit, fork, registry, review, invariant, and regression coverage
 script/
   Deploy.s.sol
+  MigrateProject.s.sol
   helpers/
 ```
 
@@ -136,6 +151,10 @@ script/
 - slippage and sandwich resistance depend on the quality of the chosen quote path
 - V4 auto-quotes prefer the full router TWAP window, but use the longest retained best-effort window when the oracle hook reports partial observation coverage
 - `addToBalanceOf` rejects final-hop ERC-20 receipt shortfalls; `pay` cannot reliably detect final-hop fee-on-transfer loss because pay hooks can consume tokens during settlement
+- the gateway treats exact 32-byte metadata encoding a nonzero raw source project ID no wider than `uint64` as an explicit project-refund escrow opt-in; calls without it, wider coincidental 32-byte words, and non-zero-minimum payments still revert synchronously. A source project's own token is never retained, since no terminal of that project can book a refund of it (reserved-token splits keep `JBController`'s beneficiary fallback), and a registered source terminal retains only fees to the fee project (payout splits keep `JBMultiTerminal`'s fee-free restore); both rules key on properties no upstream caller can shape.
+- retained calls are stored as a single hash commitment; the queue event emits the full call, memo, and metadata, and retriers supply them back to `processPendingCall`/`finalizePendingCall` where a hash match authenticates them
+- three failures with the same selector-level class, separated by one day, qualify a final attempt after another day; gas exhaustion is one class whose target budgets escalate from 5M through 20M without exceeding the live chain's executable transaction budget
+- the native-token protocol-fee path can bypass the registry and gateway when the fee project directly accepts the native token
 - the registry is not a native-token receiver for project accounting; direct ETH sent there is outside router-terminal
   settlement paths
 

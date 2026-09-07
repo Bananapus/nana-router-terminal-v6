@@ -337,7 +337,8 @@ contract DeployBuybackHookZeroTest is Test {
             address(directory), abi.encodeCall(IJBDirectory.terminalsOf, (DEST_PROJECT_ID)), abi.encode(destTerminals)
         );
 
-        JBPayHookSpecification[] memory buybackSpecs = _buybackPayHookSpecifications(buybackHook, 150, 5);
+        JBPayHookSpecification[] memory buybackSpecs =
+            _buybackPayHookSpecifications({hook: buybackHook, minimumSwapAmountOut: 155, reservedPercent: 300});
 
         vm.mockCall(
             address(tokenBTerminal),
@@ -376,13 +377,14 @@ contract DeployBuybackHookZeroTest is Test {
 
     function _buybackPayHookSpecifications(
         address hook,
-        uint256 minimumBeneficiaryTokenCount,
-        uint256 minimumReservedTokenCount
+        uint256 minimumSwapAmountOut,
+        uint256 reservedPercent
     )
         internal
         pure
         returns (JBPayHookSpecification[] memory specifications)
     {
+        uint256 minimumBeneficiaryTokenCount = minimumSwapAmountOut * (10_000 - reservedPercent) / 10_000;
         specifications = new JBPayHookSpecification[](1);
         specifications[0] = JBPayHookSpecification({
             hook: IJBPayHook(hook),
@@ -391,7 +393,7 @@ contract DeployBuybackHookZeroTest is Test {
             metadata: abi.encode(
                 false,
                 uint256(0),
-                minimumBeneficiaryTokenCount + minimumReservedTokenCount,
+                minimumSwapAmountOut,
                 false,
                 address(0),
                 uint256(0),
@@ -401,9 +403,11 @@ contract DeployBuybackHookZeroTest is Test {
                 uint128(0),
                 PoolId.wrap(bytes32(0)),
                 minimumBeneficiaryTokenCount,
-                minimumReservedTokenCount,
+                minimumSwapAmountOut - minimumBeneficiaryTokenCount,
                 uint256(0),
-                false
+                false,
+                false,
+                reservedPercent
             )
         });
     }

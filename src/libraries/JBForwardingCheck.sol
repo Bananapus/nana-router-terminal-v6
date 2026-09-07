@@ -29,12 +29,15 @@ library JBForwardingCheck {
             (bool success, bytes memory data) =
                 address(current).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
 
-            // Non-forwarding terminals (call fails or returns zero) end the chain — not circular.
+            // Non-forwarding terminals (call fails, returns zero, or returns a word that is not an address) end the
+            // chain — not circular. Decode as a word rather than an address so a malformed reply cannot revert the
+            // caller's frame; the refund search in particular must be able to move on to the next candidate.
             if (!success || data.length < 32) return false;
-            IJBTerminal forwardingTarget = abi.decode(data, (IJBTerminal));
-            if (address(forwardingTarget) == address(0)) return false;
+            uint256 forwardingTarget = abi.decode(data, (uint256));
+            if (forwardingTarget == 0 || forwardingTarget > type(uint160).max) return false;
 
-            current = forwardingTarget;
+            // forge-lint: disable-next-line(unsafe-typecast)
+            current = IJBTerminal(address(uint160(forwardingTarget)));
         }
 
         // 5 hops without resolution — treat as circular to be safe.

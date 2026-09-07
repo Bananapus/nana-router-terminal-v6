@@ -1,8 +1,8 @@
 # Invariants of `nana-router-terminal-v6`
 
-Scope: three contracts in this package — `JBRouterTerminal` (universal-token payment terminal), `JBRouterTerminalRegistry` (per-project terminal selection with cohort-stable defaults), and `JBPayRouteResolver` (preview-only route ranking helper). Package: `@bananapus/router-terminal-v6`.
+Scope: four contracts in this package — `JBRouterTerminal` (universal-token route executor), `JBRouterTerminalGateway` (failed-route escrow and autonomous recovery), `JBRouterTerminalRegistry` (per-project terminal selection with cohort-stable defaults), and `JBPayRouteResolver` (preview-only route ranking helper). Package: `@bananapus/router-terminal-v6`.
 
-Trust model in one sentence: the router is a **stateless routing surface** that accepts ANY token, normalizes through Uniswap V3/V4 swaps and recursive JB cashout loops, and forwards into a destination terminal whose `minReturnedTokens` is the authoritative slippage gate — the router does not account for project balances as surplus, refunds route-scoped partial-fill leftovers to the *true* original payer (propagated through transient storage when called via the registry), rejects ERC-20 receipt shortfalls at the final hop on `addToBalanceOf`, and rejects circular forwarding cycles before any irreversible state is written.
+Trust model in one sentence: the Router is a **stateless routing surface**, while the Registry-selected Gateway takes custody before calling it atomically and may retain only source-project-opted inputs represented by pending records — destination `minReturnedTokens` remains authoritative, Router-frame failure rolls every swap back, matching qualified error selectors gate autonomous refunds, and final project accounting remains in `nana-core-v6`.
 
 This file documents invariants enforced by the **runtime contracts in this repo**. The destination-terminal slippage guarantee, fee semantics, and ruleset state machine all live in `nana-core-v6/INVARIANTS.md`. Cashout-loop economic safety against revenue-recursion attacks ultimately depends on the bonding-curve guarantees documented at `../INVARIANTS.md` Section A.2.
 
@@ -54,6 +54,17 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 - The registry additionally blocks immediate-caller cycles at forward time via `_enforceNoCircularForward` (`JBRouterTerminalRegistry.sol:294-297, 453, 604`): a router that calls back into the registry mid-forward reverts `JBRouterTerminalRegistry_CircularForward` instead of looping until out-of-gas.
 - The router-side analogues — `_usablePrimaryTerminalOf` (`JBRouterTerminal.sol:1017-1036`) and the resolver's `_isCircularTerminal` (`JBPayRouteResolver.sol:403`) — drop any candidate terminal whose forwarding chain points back at the router so preview-time selection and execution-time selection agree.
 
+### A.7 Failed-call custody and autonomous recovery
+
+- `JBRouterTerminalGateway` takes custody before its low-level call to immutable `ROUTER`. A failed call, including a swap or downstream OOG, reverts the entire Router frame; calls opted into source-project refund retain the original input while calls without that opt-in revert synchronously.
+- Failed calls are retained only when metadata is exactly 32 bytes and encodes a nonzero raw source project ID no wider than `uint64`. This is an explicit project-refund escrow opt-in available to source terminals and protocol payers such as `REVLoans`; it does not authenticate the caller. A caller can escrow only the input it funds, and pending liabilities remain isolated by token. Calls without the opt-in and non-zero-minimum `pay` failures revert synchronously.
+- Retention stores only `pendingCallCommitmentOf(id)` — a hash binding the call, memo, and metadata — so the gas-constrained queue path writes a single slot. The queue event emits the full call, memo, and metadata; retriers supply them back and are authenticated by hash match before any retry or refund.
+- The Registry propagates the resolved original payer into the Gateway. That address is retained as the preferred refund terminal when it remains registered for the source project, but retention eligibility does not depend on its interface shape. `test_realCoreMultiTerminalPropagatesPreferredRefundTarget` exercises this behavior against the real core implementation.
+- `processPendingCall` is permissionless. Each counted attempt must be separated by one day and records a selector-level fingerprint. Encoded error arguments are ignored; any changed selector resets the streak to one. Any empty-data failure uses one stable gas-exhaustion fingerprint and target 5M, 10M, then 15M gas across the qualifying attempts. Each target is capped by `maximumQualifiedCallGas()`, which derives the live chain's executable budget from `block.gaslimit`; `processPendingCallWithGas` cannot undercut the capped requirement or exceed that ceiling.
+- After three matching failure classes and another day, `finalizePendingCall` makes another qualified attempt. Success settles; a changed class resets; the same class refunds the source project. A gas-exhausted final attempt targets 20M gas, subject to the same executable ceiling. Refund delivery prefers the still-registered original terminal, then the token-specific primary, then every other registered non-circular terminal.
+- `_acceptFundsFor` uses the ecosystem's transient intake guard so a callback-capable token cannot nest another transfer inside an in-flight balance-delta measurement.
+- Pending state is deleted before retry/refund interactions. A failed refund reverts the transaction, atomically restoring pending state, qualification, and custody.
+
 ---
 
 ## Section B — Guarantees to project operators / owners
@@ -96,7 +107,7 @@ This file documents invariants enforced by the **runtime contracts in this repo*
 ### B.5 Powers the registry owner does NOT have
 
 - **Cannot redirect existing project's payments.** All silent-reroute paths are closed by the cohort-stable default mechanism (B.3) and the lock surface (B.2). The only way to change a project's resolved terminal is for the project owner / `SET_ROUTER_TERMINAL` operator to call `setTerminalFor`.
-- **Cannot intercept funds.** Neither the router nor the registry holds project balances between calls. Both contracts only hold tokens for the duration of a single inbound `pay`/`addToBalanceOf` call, and any leftover is refunded to the originating payer (A.3) or pushed into the destination terminal.
+- **Cannot intercept funds.** Neither the Router nor Registry holds project balances between calls. The Gateway can hold only failed original inputs represented by immutable-project pending records, and exposes no administrative transfer or redirection function. A refund terminal can change only through the creditor project's ordinary `JBDirectory` configuration.
 - **Cannot bypass per-project permission gates.** `setTerminalFor` and `lockTerminalFor` always route through `_requirePermissionFrom(PROJECTS.ownerOf(projectId), ...)`.
 
 ---
@@ -234,12 +245,22 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 
 - `DIRECTORY` (`IJBDirectory`; immutable; `:33`).
 
+### C.4 `JBRouterTerminalGateway`
+
+Implements `IJBRouterTerminalGateway`, `IJBForwardingTerminal`, `IJBPermitTerminal`, `IJBPayerTracker`, and `IJBRouterTerminal` without changing the Registry ABI or storage. It uses the deployment's immutable Permit2 singleton and ERC-2771 trusted forwarder so selecting the Gateway does not remove those Router integration surfaces.
+
+- `pay` and `addToBalanceOf` accept the original input and call immutable `ROUTER` with a 750,000-gas failure reserve. Source-project-opted failed calls queue; calls without the opt-in revert and successful calls settle synchronously.
+- `processPendingCall` retries with the original call, memo, and metadata — read from the queue event and authenticated against the stored commitment — and an automatically selected gas budget. The base is 5,000,000 gas; matching gas exhaustion targets 10M and then 15M, and the minimum never drops below the highest budget already forwarded. `maximumQualifiedCallGas` caps each target to a budget executable under the live block gas limit. `processPendingCallWithGas` permits a larger budget but cannot undercut the capped current minimum or exceed the executable maximum. Pending state is deleted before interaction and restored on failure.
+- `finalizePendingCall` requires three matching failure classes and a final matching attempt before refund. Gas-exhaustion finalization targets 20M subject to the same live-chain cap. The project refund calls `addToBalanceOf(sourceProjectId, originalToken, originalAmount, false, "", "")` through the still-registered source terminal, current token-specific primary terminal, or another registered non-circular terminal; pending calls never degrade into raw transfers to terminal addresses.
+- `terminalOf` returns immutable `ROUTER`, allowing forwarding-cycle checks to see through the Gateway.
+- Accounting, preview, and pool-discovery views delegate to `ROUTER`; `currentSurplusOf` therefore remains zero even while failed-call liabilities are escrowed.
+
 ---
 
 ## Section D — Cross-cutting invariants
 
-1. **Router/registry do not account for project balances as surplus.** Both contracts are forwarding surfaces, not accounting terminals: `currentSurplusOf` and `migrateBalanceOf` always return zero by design (`JBRouterTerminal.sol:562-578, 316-330`; `JBRouterTerminalRegistry.sol:182-198, 544-558`). Route-scoped leftovers are refunded to the originating payer, while pre-existing ambient balances are not swept into later routes.
-2. **Balance-delta accounting on inbound transfers.** `_acceptFundsFor` returns the post-transfer balance delta, not the nominal `amount`. The cashout loop and the swap leftover detection both use the same pattern. Fee-on-transfer source tokens route the *actually received* amount.
+1. **Router/registry/gateway do not account for project balances as surplus.** These contracts are routing surfaces, not accounting terminals. Gateway escrow is a pending-call liability, not project surplus.
+2. **Balance-delta accounting on inbound transfers.** `_acceptFundsFor` returns the post-transfer balance delta, not the nominal `amount`. The Gateway and core terminal guard the measurement with a transient intake flag so callback-capable tokens cannot make a nested deposit count twice. Fee-on-transfer source tokens route the *actually received* amount.
 3. **`minReturnedTokens` is the destination terminal's responsibility.** The router does not impose its own beneficiary-token floor on `pay`; the floor is delegated to the destination terminal which can see pay-hook side effects accurately. `addToBalanceOf` adds a final-hop ERC-20 receipt shortfall check because no pay hooks fire.
 4. **Original payer propagated through transient storage.** `JBRouterTerminalRegistry` writes `originalPayer` transient slot before forwarding and restores the previous value after (save/restore pattern supports nested forwards through pay hooks). The router resolves refunds against this slot via `IJBPayerTracker.originalPayer()` when called through the registry. Chains like `projectPayer -> registry -> router` propagate the true originator one extra hop via `_originalPayerOrSender`.
 5. **Non-circular-forward is checked at every irreversible write.** `setTerminalFor`, `lockTerminalFor`, and `setDefaultTerminal` each call `_requireNonCircularTerminalFor` (depth-5 walk via `JBForwardingCheck`). Per-call forwards additionally call `_enforceNoCircularForward` to block immediate-caller cycles.
@@ -248,6 +269,10 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 8. **Pool callbacks are authenticated by the active swap context.** The V3 callback verifies `msg.sender` against the transient `_v3ExpectedPool` set by `_executeV3Swap`; the V4 callback verifies `msg.sender == poolManager`, whose unlock flow returns only to the caller that initiated the unlock. Spoofed callbacks revert before any state change.
 9. **Cashout-loop iteration bound + first-hop-only `minTokensReclaimed`.** The 20-hop ceiling forecloses on infinite recursion through adversarial project-token graphs; the user-supplied reclaim minimum is intentionally NOT carried across hops because token units change between hops.
 10. **Quote precedence: explicit metadata > V3 TWAP > V4 hook geomean > V4 spot (accepted-risk fallback).** When supplied, `pay` swap-quote skips on-chain quoting entirely and a token-mismatch reverts `JBRouterTerminal_QuoteTokenMismatch`. The V4 spot fallback is bounded by a fixed 15% haircut and is documented as accepted-risk for routine flows.
+11. **Failed Router work is atomic with respect to Gateway custody.** A caught Router failure cannot leave a completed swap behind; the original input remains in the Gateway.
+12. **Changed failure classes prevent autonomous refund.** Qualification and finalization compare selector-level fingerprints; changed encoded arguments do not reset, but a changed selector always resets the streak to one. Empty-data failures share a distinct gas-exhaustion fingerprint and advance only through the 5M/10M/15M/20M target schedule, with every step capped by the live chain's executable transaction budget.
+13. **Refund ownership is fixed at queue time.** Permissionless callers can trigger attempts but cannot choose the payer, source project, token, amount, or call data. Terminal delivery searches only the creditor project's registered non-circular accounting terminals.
+14. **Gateway refunds are ordinary project balance.** The public terminal refund call cannot recreate core's internal `feeFreeSurplusOf` credit, so refunded fees may be fee-liable on a later cash out.
 
 ---
 
@@ -276,6 +301,12 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 
 - No owner. No setters. Pure view contract. The only privileged input is the `directory` constructor argument (immutable).
 
+### E.4 `JBRouterTerminalGateway`
+
+- No owner, setters, pause, cancellation, arbitrary transfer, or upgrade pointer.
+- `ROUTER`, retry delay, qualified gas, and finalization count are immutable in deployed bytecode.
+- Any account may process or finalize, but state fixes every economic parameter and refund recipient.
+
 ---
 
 ## Section F — File:line references
@@ -300,6 +331,14 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 - Forwarding mechanics: `_enforceNoCircularForward` (`:294-297`), `_originalPayerOrSender` (`:318-337`), `_requireNonCircularTerminalFor` (`:345-351`), `_defaultTerminalFor` (`:358-375`), `_resolvedTerminalOf` (`:382-388`), `_requireResolvedTerminalOf` (`:395-398`).
 - Views: `accountingContextForTokenOf` (`:144-158`), `accountingContextsOf` (`:163-174`), `currentSurplusOf` (`:182-198`), `defaultTerminalFor` (`:204-206`), `defaultTerminalHistoryAt` (`:211-218`), `defaultTerminalHistoryLength` (`:223-225`), `previewPayFor` (`:238-263`), `terminalOf` (`:266-268`), `supportsInterface` (`:277-281`).
 
+### `src/JBRouterTerminalGateway.sol`
+
+- Constants: `FINALIZATION_FAILURE_COUNT = 3`, `QUALIFIED_CALL_GAS = 5_000_000`, `RETRY_DELAY = 1 days`, `_FAILURE_GAS_RESERVE = 750_000`, `_GAS_EXHAUSTED_ERROR_HASH`, `_TRANSACTION_GAS_CAP = 16_777_216`, `_TRANSACTION_GAS_RESERVE = 1_500_000`.
+- Immutable: `DIRECTORY`, `PERMIT2`, `ROUTER`.
+- Stored: `pendingCallCount`, `_pendingCallCommitmentOf`, `_pendingCallFailureOf`; transient: `_acceptingToken`, `originalPayer`.
+- Entry points: `addToBalanceOf`, `finalizePendingCall`, `pay`, `processPendingCall`.
+- Critical helpers: `_attempt`, `_boundedCall`, `_commitmentOf`, `_maximumQualifiedCallGas`, `_qualifiedGasLimit`, `_qualifiedGasLimitFor`, `_recordFailure`, `_refund`, `_requirePendingCall`, `_requireReady`, `_requireRetryGas`, `_shouldRetain`, `_sourceProjectIdFrom`, `_tryRefund`.
+
 ### `src/JBPayRouteResolver.sol`
 
 - Immutable: `DIRECTORY` (`:33`).
@@ -314,6 +353,8 @@ Stateless preview helper deployed at the router's nonce 1. Constructor input is 
 
 - `CashOutPathCandidates.sol` — direct / base / recursive candidate triples used by `_findCashOutPath`.
 - `DefaultTerminalSegment.sol` — `(minProjectIdExclusive, maxProjectId, terminal)` history entry used by `_defaultTerminalFor`.
+- `JBPendingRouterTerminalCall.sol` — immutable retry/refund parameters for one retained original input.
+- `JBPendingRouterTerminalCallFailure.sol` — matching-selector count, fingerprint, and last-qualified timestamp.
 - `PoolInfo.sol` — `(isV4, v3Pool, v4Key)` discriminated union returned by pool discovery.
 
 ---
