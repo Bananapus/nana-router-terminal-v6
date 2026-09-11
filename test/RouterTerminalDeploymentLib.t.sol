@@ -41,11 +41,25 @@ contract RouterTerminalDeploymentLibTest is Test {
     }
 
     function test_preGatewayDeploymentArtifactsRemainReadable() public view {
-        RouterTerminalDeployment memory deployment = harness.getDeployment({path: "deployments/", networkName: "base"});
+        RouterTerminalDeployment memory deployment =
+            harness.getDeployment({path: "test/fixtures/pre-gateway/", networkName: "base"});
 
         assertEq(address(deployment.gateway), address(0), "missing gateway artifact should decode as zero");
         assertEq(address(deployment.registry), 0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
         assertEq(address(deployment.terminal), 0x0FBcbb3d10C8F524840d74EF81c1A9f161c418d7);
+    }
+
+    function test_currentMainnetDeploymentArtifactsIncludeGateway() public view {
+        uint256[4] memory chainIds = [uint256(1), 10, 8453, 42_161];
+
+        for (uint256 i; i < chainIds.length; i++) {
+            RouterTerminalDeployment memory deployment =
+                harness.getDeployment({path: "deployments/", networkName: harness.networkNameOf(chainIds[i])});
+
+            assertEq(address(deployment.gateway), 0x4a56AEf5b6A5b9742AbB02cA67C5a85ba183D901);
+            assertEq(address(deployment.registry), 0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
+            assertEq(address(deployment.terminal), 0x62e2fe718Ca3008a6a322DEEc9903286463F1AdD);
+        }
     }
 
     function test_unsupportedChainReverts() public {
