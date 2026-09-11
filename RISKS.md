@@ -2,6 +2,18 @@
 
 Documented risks that were reviewed and accepted.
 
+## Priority risks
+
+- A project can still resolve to an older router after a new gateway becomes the registry default; verify effective selection before claiming retained-fee protection.
+- Retained inputs depend on permissionless qualified retries and a source terminal that accepts the eventual refund; custody can outlast the minimum qualification window.
+- Route quality depends on available liquidity, oracle history, caller minima, and token behavior; gateway custody does not improve a successful route's price.
+
+## Invariants to Verify
+
+- Resolve the registry's `terminalOf(projectId)` and any gateway's `ROUTER`; the floor-fix raw router stays unselectable and existing cohorts stay unchanged until authorized migration.
+- Reconcile each queued commitment with gateway custody until `ProcessPendingCall` or `RefundPendingCall`, using chain and gateway address with the pending ID.
+- A failed final refund preserves pending custody; no caller can change the committed source project or refund amount. Review `test/regression/RouterTerminalGatewayFailure.t.sol` for retry, qualification, and refund coverage.
+
 ## Oracle and slippage risks
 
 **Pool-local V3 TWAP trusted as swap floor for permissionless pools.** *(Medium)*
@@ -40,6 +52,8 @@ When the oracle returns zero (no liquidity), slippage tolerance becomes zero. Th
 > **Status:** The V4 TWAP window is 120s, long enough that a single-block tick push cannot move the priced quote. A shorter window is not used.
 
 ## Registry and forwarding risks
+
+**Deployment generations coexist.** A new package or gateway deployment does not migrate existing project pins or default-history cohorts. Resolve the chain's registry `terminalOf(projectId)` before describing a payment as protected by gateway custody. The floor-fix proposal selects the gateway for new projects and project 1; the raw router remains unselectable, while existing projects can continue resolving to a retired router until their operators migrate. Keep every deployment generation's ABI for decoding and never use a proposed mainnet gateway address as a live route.
 
 **Autonomous pending-call refund cannot prove permanent sink failure.** *(Accepted tradeoff)*
 The EVM cannot distinguish a permanently broken destination from a route which is temporarily failing or deliberately made to fail. The gateway therefore requires three permissionless attempts separated by at least one day, followed by another one-day wait and a final attempt. All four failures must have the same selector-level class. Encoded arguments are ignored; a changed selector resets the streak to one and keeps the input retryable. Empty-data failures, the shape of out-of-gas anywhere in the route, share a gas-exhaustion class whose target budgets escalate through 5M, 10M, 15M, and 20M gas, capped by the live chain's executable transaction budget. A sink can still alternate selectors to prevent autonomous refund or reproduce one class through every window, so this is strong evidence rather than proof of permanent failure.

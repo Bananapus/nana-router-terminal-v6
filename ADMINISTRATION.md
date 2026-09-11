@@ -36,7 +36,7 @@
 | `JBRouterTerminalRegistry` | `allowTerminal(...)`, `disallowTerminal(...)`, `setDefaultTerminal(...)` | Registry owner | Controls global terminal availability and the default fallback for NEW projects only. `setDefaultTerminal` snapshots the outgoing default into `_defaultTerminalHistory` so projects with ID <= `defaultTerminalProjectIdThreshold` continue to resolve against the default that was current when their cohort was active. |
 | `JBRouterTerminalRegistry` | `setTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Sets a project's explicit router terminal |
 | `JBRouterTerminalRegistry` | `lockTerminalFor(...)` | Project owner or `SET_ROUTER_TERMINAL` delegate | Irreversibly locks the resolved terminal for a project |
-| `JBRouterTerminalGateway` | `processPendingCall(...)`, `finalizePendingCall(...)` | Anyone | Callers supply the queue event's call, memo, and metadata, authenticated by hash commitment; immutable gas, delay, and matching-selector rules apply and no caller can choose the refund recipient |
+| `JBRouterTerminalGateway` | `processPendingCall(...)`, `processPendingCallWithGas(...)`, `finalizePendingCall(...)`, `finalizePendingCallWithGas(...)` | Anyone | Callers supply the queue event's call, memo, and metadata, authenticated by hash commitment; immutable gas, delay, and matching-selector rules apply and no caller can choose the refund recipient |
 
 ## Immutable and one-way
 
@@ -48,6 +48,9 @@
 ## Operational notes
 
 - keep the terminal allowlist small and explicit
+- for the floor-fix rollout, allow/select the gateway and verify its immutable `ROUTER`; the new raw router must remain unselectable because selecting it skips failed-call custody
+- resolve both the registry default and each migrating project's `terminalOf(projectId)`. The infra proposal migrates project 1; projects 2–7 require their operators' `setHookFor`, `setPoolFor`, and `setTerminalFor` transactions before they use the new hook and gateway
+- disallowing an outgoing router blocks new selections but preserves existing pins and historical cohort resolution. Preserve its deployment record and ABI for those projects and for historical transaction decoding
 - the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that already exists at that moment (including the canonical fee project, ID 1) plus every later project with no override; pick it carefully because it propagates to all early projects
 - subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
 - moving an existing fee project or payout recipient to a Gateway requires an explicit `setTerminalFor`; the Registry owner must first allowlist it, but cannot perform the project-owner step
