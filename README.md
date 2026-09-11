@@ -125,7 +125,9 @@ Useful scripts:
 
 Read addresses, ABIs, and deployment receipt blocks from this package's `deployments/<chain>/` records. The canonical `JBRouterTerminal.json` identifies the route executor; `JBRouterTerminalGateway.json`, when present, identifies the selectable gateway. The floor-fix rollout never allowlists the new raw router. A proposed or deterministic address is not evidence that a chain or project uses it.
 
-Keep historical ABIs available: `_deprecated.json` records the original generation, and `_deprecated1.json` records the next retired generation on migrated chains. Mainnet canonical files continue to describe the previous router until execution and artifact distribution occur there. Existing project pins and historical default cohorts may still resolve to a disallowed router, so retirement prevents new selection rather than erasing its history or moving its users.
+The canonical records include the executed router and gateway deployments on Ethereum, Optimism, Base, Arbitrum, Sepolia, Base Sepolia, and Arbitrum Sepolia. OP Sepolia remains feed-only in the coordinated rollout and has no router or gateway deployment. Derive each chain's availability and indexing start block from its records.
+
+Keep historical ABIs available: `_deprecated.json` records the original generation, and `_deprecated1.json` records the next retired generation on migrated chains. Existing project pins and historical default cohorts may still resolve to a disallowed router, so retirement prevents new selection rather than erasing its history or moving its users.
 
 `script/Deploy.s.sol` is for chains without a live Router: it calls `setChainSpecificConstants` unconditionally, which reverts `JBRouterTerminal_AlreadyConfigured` where the Router already exists. On those chains the Gateway upgrade is performed by `deploy-all-v6` consuming this package, plus `script/MigrateProject.s.sol` for cohorts.
 

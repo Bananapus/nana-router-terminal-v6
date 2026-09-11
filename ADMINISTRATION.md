@@ -49,7 +49,7 @@
 
 - keep the terminal allowlist small and explicit
 - for the floor-fix rollout, allow/select the gateway and verify its immutable `ROUTER`; the new raw router must remain unselectable because selecting it skips failed-call custody
-- resolve both the registry default and each migrating project's `terminalOf(projectId)`. The infra proposal migrates project 1; projects 2–7 require their operators' `setHookFor`, `setPoolFor`, and `setTerminalFor` transactions before they use the new hook and gateway
+- resolve both the registry default and each migrating project's `terminalOf(projectId)`. The executed infrastructure rollout migrated project 1; projects 2–7 require their operators' `setHookFor`, `setPoolFor`, and `setTerminalFor` transactions before they use the new hook and gateway
 - disallowing an outgoing router blocks new selections but preserves existing pins and historical cohort resolution. Preserve its deployment record and ABI for those projects and for historical transaction decoding
 - the initial `setDefaultTerminal` at deploy time defines the cohort default for every project that already exists at that moment (including the canonical fee project, ID 1) plus every later project with no override; pick it carefully because it propagates to all early projects
 - subsequent `setDefaultTerminal` calls only re-route projects created AFTER the call; existing projects without an explicit `setTerminalFor` keep resolving to their cohort's historical default via `_defaultTerminalHistory`
