@@ -82,6 +82,12 @@ The Router and Registry do not own project balances. The Gateway can persistentl
 
 Preview and execution share the same conceptual route shape: optional recursive cashout first, then destination-token resolution, then final conversion and forwarding.
 
+### Indexing retained calls
+
+Index `JBRouterTerminalGateway_QueuePendingCall` from the gateway's deployment receipt block and retain its full call, memo, and metadata. Use `pendingCallCount`, `pendingCallCommitmentOf(id)`, and `pendingCallFailureOf(id)` to reconcile custody and retry qualification. `JBRouterTerminalGateway_RecordTerminalCallFailure` records retry evidence; `JBRouterTerminalGateway_ProcessPendingCall` records settlement; `JBRouterTerminalGateway_RefundPendingCall` records a refund into source-project accounting. Key each pending ID by chain and gateway address, since the counter is local to a deployment.
+
+A successful outer fee transaction can leave the input queued. Report that amount as retained until settlement or refund; it is neither collected revenue nor a core-forgiven fee. The commitment does not expose a full stored call, so event payloads are necessary to construct `processPendingCall[WithGas]` and `finalizePendingCall[WithGas]` transactions. A refund remains pending if no eligible source terminal accepts it.
+
 ## Security model
 
 - native-asset handling and refunds are the most failure-prone paths

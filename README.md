@@ -17,7 +17,7 @@
 
 ## Overview
 
-The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. Deployments put `JBRouterTerminalGateway` between the registry and the route-executing terminal so a failed route can retain its original input token without modifying the registry.
+The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. On chains and projects migrated to the gateway, the payment path is `JBRouterTerminalRegistry -> JBRouterTerminalGateway -> JBRouterTerminal -> destination terminal`. The gateway can retain an eligible failed route's original input token without modifying the registry.
 
 It can route through:
 
@@ -75,6 +75,8 @@ The shortest useful reading order is:
 - using JB project tokens as router input creates recursive path complexity that frontends and integrators should model explicitly
 - fee-on-transfer token routes need final-hop policy review before being shown as ordinary pay routes
 - the registry changes which router a project uses, but not what downstream terminal ultimately settles the payment
+- resolve a project's effective path with the registry's `terminalOf(projectId)`; if the selected terminal is a gateway, its `ROUTER()` or `terminalOf(projectId)` identifies the next hop. A registry default or the newest package version does not prove that an existing project migrated
+- resolve the effective buyback hook generation before encoding its quote: hook 1.4.0 uses three ABI words `(amountToSwapWith, minimumSwapAmountOut, skipSplits)`, while retired hooks retain their own format. The router's own swap quote remains `(tokenOut, minAmountOut)`; keep the target-specific metadata entries separate
 - failed calls carrying an exact raw source project ID become asynchronous pending calls; calls without that opt-in remain synchronous. A source project's own token is never retained, since no terminal of that project can book a refund of it (reserved-token splits keep `JBController`'s beneficiary fallback), and a registered source terminal retains only fees to the fee project (payout splits keep `JBMultiTerminal`'s fee-free restore); both rules key on properties no upstream caller can shape.
 - transaction senders should use at least 1.5–2x estimated gas headroom so the gateway always reaches its custody fallback
 - gas-exhausted pending routes target 5M, 10M, 15M, then 20M gas; each step is capped by the live chain's executable transaction budget, and `processPendingCallWithGas` must stay between the current step and that cap
@@ -120,6 +122,12 @@ Useful scripts:
 - `forge script script/MigrateProject.s.sol:MigrateProjectScript --rpc-url <RPC_URL> --broadcast` after setting `NANA_ROUTER_TERMINAL_REGISTRY`, `NANA_ROUTER_TERMINAL_GATEWAY`, and `NANA_ROUTER_TERMINAL_MIGRATION_PROJECT_ID`
 
 ## Deployment notes
+
+Read addresses, ABIs, and deployment receipt blocks from this package's `deployments/<chain>/` records. The canonical `JBRouterTerminal.json` identifies the route executor; `JBRouterTerminalGateway.json`, when present, identifies the selectable gateway. The floor-fix rollout never allowlists the new raw router. A proposed or deterministic address is not evidence that a chain or project uses it.
+
+The canonical records include the executed router and gateway deployments on Ethereum, Optimism, Base, Arbitrum, Sepolia, Base Sepolia, and Arbitrum Sepolia. OP Sepolia remains feed-only in the coordinated rollout and has no router or gateway deployment. Derive each chain's availability and indexing start block from its records.
+
+Keep historical ABIs available: `_deprecated.json` records the original generation, and `_deprecated1.json` records the next retired generation on migrated chains. Existing project pins and historical default cohorts may still resolve to a disallowed router, so retirement prevents new selection rather than erasing its history or moving its users.
 
 `script/Deploy.s.sol` is for chains without a live Router: it calls `setChainSpecificConstants` unconditionally, which reverts `JBRouterTerminal_AlreadyConfigured` where the Router already exists. On those chains the Gateway upgrade is performed by `deploy-all-v6` consuming this package, plus `script/MigrateProject.s.sol` for cohorts.
 
