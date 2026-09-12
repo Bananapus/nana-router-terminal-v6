@@ -72,23 +72,23 @@ contract MockPayerTracker is IJBPayerTracker {
     }
 }
 
-    contract MockERC20 is ERC20 {
-        constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
+contract MockERC20 is ERC20 {
+    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
 
-        function mint(address account, uint256 amount) external {
-            _mint(account, amount);
-        }
+    function mint(address account, uint256 amount) external {
+        _mint(account, amount);
+    }
+}
+
+contract MockWETH is MockERC20, IWETH9 {
+    constructor() MockERC20("Wrapped ETH", "WETH") {}
+
+    function deposit() external payable {
+        _mint(msg.sender, msg.value);
     }
 
-    contract MockWETH is MockERC20, IWETH9 {
-        constructor() MockERC20("Wrapped ETH", "WETH") {}
-
-        function deposit() external payable {
-            _mint(msg.sender, msg.value);
-        }
-
-        function withdraw(uint256 wad) external {
-            _burn(msg.sender, wad);
-            payable(msg.sender).transfer(wad);
-        }
+    function withdraw(uint256 wad) external {
+        _burn(msg.sender, wad);
+        payable(msg.sender).transfer(wad);
     }
+}
