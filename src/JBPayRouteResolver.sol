@@ -9,6 +9,7 @@ import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataRes
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
@@ -304,6 +305,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             uint256 amountToMintWith;
             uint256 minimumSwapAmountOut;
             uint256 weightRatio;
+            uint256 amountToSwapWith;
+            uint256 twapLiquidity;
             uint256 rawSwapQuote;
             uint256 oracleUnseededWord;
             uint256 skipSplitsWord;
@@ -312,6 +315,8 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 amountToMintWith := mload(add(hookMetadata, 0x40))
                 minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
                 weightRatio := mload(add(hookMetadata, 0xe0))
+                amountToSwapWith := mload(add(hookMetadata, 0x100))
+                twapLiquidity := mload(add(hookMetadata, 0x140))
                 rawSwapQuote := mload(add(hookMetadata, 0x1c0))
                 oracleUnseededWord := mload(add(hookMetadata, 0x1e0))
                 skipSplitsWord := mload(add(hookMetadata, 0x200))
@@ -332,13 +337,34 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 directMintTokenCount = mulDiv({x: amountToMintWith, y: weight, denominator: weightRatio});
             }
 
-            // Score the hook's TWAP-backed live quote when it beats the executable floor, otherwise the floor itself,
-            // which supports callers that only provide a minimum and no live quote. When the buyback hook reports
-            // `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is trusted. One
-            // figure suffices because the split below is monotone in swap output, so the larger swap always scores
-            // at least as well on both counts.
-            uint256 swapTokenCount =
-                !oracleUnseeded && rawSwapQuote > minimumSwapAmountOut ? rawSwapQuote : minimumSwapAmountOut;
+            // Score the executable floor, raised to the swap's expected output when the hook's TWAP-backed quote
+            // implies more, which supports callers that only provide a minimum and no live quote. When the buyback
+            // hook reports `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is
+            // trusted. One figure suffices because the split below is monotone in swap output, so the larger swap
+            // always scores at least as well on both counts.
+            uint256 swapTokenCount = minimumSwapAmountOut;
+            if (!oracleUnseeded && rawSwapQuote > minimumSwapAmountOut) {
+                // The raw quote prices the whole swap at the TWAP with no price impact, so a thin pool quotes far more
+                // than it gives. Its single-range output is `quote / (1 + impact)`, where `impact` is the relative
+                // sqrt-price move `JBSwapLib.calculateImpact` measures. At the price behind the quote that move is
+                // `sqrt(amountIn * quote) / liquidity` in either direction, so the published words suffice. A
+                // saturating product keeps an absurd quote from reverting the whole route preview. Zero liquidity
+                // carries no impact data, which `calculateImpact` also reads as zero impact.
+                uint256 impact;
+                if (twapLiquidity != 0) {
+                    impact = mulDiv({
+                        x: Math.sqrt(Math.saturatingMul({a: amountToSwapWith, b: rawSwapQuote})),
+                        y: 1e18,
+                        denominator: twapLiquidity
+                    });
+                }
+
+                // The hook publishes neither the LP fee nor live liquidity, so this estimate can overstate execution by
+                // up to the fee, or when the pool is shallower now than over the TWAP window. It never exceeds the raw
+                // quote, and the executable floor still bounds it from below.
+                uint256 expectedSwapTokenCount = mulDiv({x: rawSwapQuote, y: 1e18, denominator: 1e18 + impact});
+                if (expectedSwapTokenCount > swapTokenCount) swapTokenCount = expectedSwapTokenCount;
+            }
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
                 swapTokenCount: swapTokenCount,
                 directMintTokenCount: directMintTokenCount,
