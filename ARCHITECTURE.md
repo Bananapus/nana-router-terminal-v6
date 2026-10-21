@@ -16,7 +16,7 @@ Final accounting still happens in the downstream terminal selected through `nana
 
 - the router's own accounting context is synthetic and must not be treated as the project ledger
 - preview route discovery and live execution must stay aligned
-- buyback-hook preview scoring must distinguish executable floors from diagnostics
+- buyback-hook preview scoring must distinguish executable floors from diagnostics, and discounts the raw quote by its price impact before comparing routes
 - refund behavior is part of correctness, not only UX
 - a failed gateway attempt rolls back every swap and downstream call before the original input is retained
 - qualified failure streaks advance on identical error selectors; encoded arguments are ignored and a changed selector resets the streak

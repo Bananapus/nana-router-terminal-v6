@@ -22,7 +22,7 @@ This is a V5-to-V6 migration changelog, not a package release log or commit hist
 ## Summary
 
 - V5's swap terminal is replaced by a router terminal. This is a conceptual migration, not just a contract rename.
-- V5 exposed manual V3 pool/TWAP configuration. V6 discovers routes and can compare V3, V4, and Juicebox terminal paths.
+- V5 exposed manual V3 pool/TWAP configuration. V6 discovers routes and can compare V3, V4, and Juicebox terminal paths. A destination route through the buyback hook is scored by its executable minimum, raised to the swap's impact-adjusted expected output, never by the impact-free raw quote.
 - The router terminal inherits the broader `IJBTerminal` surface and supports V6 preview flows.
 - The router can cash out JB project tokens as part of a route. Unclaimed credit inputs are not a direct router input; users should materialize credits first.
 - Registry defaults are thresholded by project ID and expose history so changing the default does not silently reroute older projects.

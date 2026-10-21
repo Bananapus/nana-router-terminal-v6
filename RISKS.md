@@ -37,6 +37,9 @@ Why the practical impact is bounded rather than catastrophic:
 
 Frontends and programmatic callers that route value-sensitive swaps through V4 should always supply `pay` swap-quote rather than relying on the auto-quoted minimum-out. The in-code `SECURITY NOTE` at `JBRouterTerminal.sol:2286-2312` covers the same surface from the pool-selection angle.
 
+**Buyback route scoring is an estimate, not an execution bound.** *(Low)*
+When the destination terminal leaves minting to the canonical buyback hook, `JBPayRouteResolver` scores that route by the hook's executable minimum, raised to `rawSwapQuote / (1 + impact)` with `impact = sqrt(amountToSwapWith * rawSwapQuote) / twapLiquidity`. The hook's metadata carries neither the LP fee nor live in-range liquidity, so the estimate can rank a pool above a mint or another pool that delivers up to the fee more, and it overrates a pool that is shallower now than over the TWAP window. Execution still enforces the hook's own floor; a misranked route delivers less than the best route, not less than its floor. Value-sensitive callers should pin the route with `routeTokenOut` or pass an explicit minimum.
+
 **`pay` swap-quote output token binding.** *(Mitigated)*
 `pay` swap-quote metadata is encoded as `abi.encode(tokenOut, minAmountOut)`. The router normalizes ETH/WETH before comparing `tokenOut` to the selected route output, then reverts on mismatch. Frontends and programmatic callers must encode the two-field payload `abi.encode(tokenOut, minAmountOut)`; a single-field `abi.encode(minAmountOut)` payload does not decode and the swap protection does not apply.
 
