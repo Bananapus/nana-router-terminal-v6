@@ -3,10 +3,10 @@ pragma solidity 0.8.28;
 
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBPayHook} from "@bananapus/core-v6/src/interfaces/IJBPayHook.sol";
+import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBToken} from "@bananapus/core-v6/src/interfaces/IJBToken.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
-import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
@@ -19,18 +19,24 @@ import {RouterTerminalTest, MockConfigurableCashOutTerminal, MockERC20} from "..
 
 /// @notice A destination terminal that previews either an active buyback route, described by the words the buyback
 /// hook publishes, or a plain mint, and settles a pay by returning what that route really delivers.
+/// @dev Settlement here is a fixture: `DELIVERED` is what the described pool gives, worked out from the same pool
+/// model. The real hook's settlement is covered by `RouterTerminalBuybackHookFork`.
 contract BuybackRoutePreviewTerminal {
+    //*********************************************************************//
+    // --------------- public immutable stored properties ---------------- //
+    //*********************************************************************//
+
     /// @notice The token this terminal accepts.
     address public immutable ACCEPTED_TOKEN;
-
-    /// @notice The buyback hook named in the previewed hook specification.
-    address public immutable BUYBACK_HOOK;
 
     /// @notice The input the buyback hook swaps.
     uint256 public immutable AMOUNT_TO_SWAP_WITH;
 
-    /// @notice The TWAP liquidity the buyback hook publishes.
-    uint128 public immutable TWAP_LIQUIDITY;
+    /// @notice The buyback hook named in the previewed hook specification.
+    address public immutable BUYBACK_HOOK;
+
+    /// @notice The tokens this route really delivers, which the preview may not show.
+    uint256 public immutable DELIVERED;
 
     /// @notice The buyback hook's executable minimum swap output.
     uint256 public immutable MINIMUM_SWAP_AMOUNT_OUT;
@@ -38,38 +44,69 @@ contract BuybackRoutePreviewTerminal {
     /// @notice The buyback hook's impact-free TWAP quote, or 0 for a plain mint route.
     uint256 public immutable RAW_SWAP_QUOTE;
 
-    /// @notice The tokens this route really delivers, which the preview may not show.
-    uint256 public immutable DELIVERED;
+    /// @notice The TWAP liquidity the buyback hook publishes.
+    uint128 public immutable TWAP_LIQUIDITY;
+
+    /// @notice The weight ratio the buyback hook publishes, which sets issuance against the 1e18 ruleset weight, or 0
+    /// to publish none.
+    uint256 public immutable WEIGHT_RATIO;
+
+    //*********************************************************************//
+    // --------------------- public stored properties -------------------- //
+    //*********************************************************************//
 
     /// @notice The total input this terminal has received.
     uint256 public totalReceived;
 
-    /// @param acceptedToken_ The token this terminal accepts.
-    /// @param buybackHook_ The buyback hook named in the previewed hook specification.
-    /// @param amountToSwapWith_ The input the buyback hook swaps.
-    /// @param twapLiquidity_ The TWAP liquidity the buyback hook publishes.
-    /// @param minimumSwapAmountOut_ The buyback hook's executable minimum swap output.
-    /// @param rawSwapQuote_ The buyback hook's impact-free TWAP quote, or 0 for a plain mint route.
-    /// @param delivered_ The tokens this route really delivers.
+    //*********************************************************************//
+    // -------------------------- constructor ---------------------------- //
+    //*********************************************************************//
+
+    /// @param acceptedToken The token this terminal accepts.
+    /// @param amountToSwapWith The input the buyback hook swaps.
+    /// @param buybackHook The buyback hook named in the previewed hook specification.
+    /// @param delivered The tokens this route really delivers.
+    /// @param minimumSwapAmountOut The buyback hook's executable minimum swap output.
+    /// @param rawSwapQuote The buyback hook's impact-free TWAP quote, or 0 for a plain mint route.
+    /// @param twapLiquidity The TWAP liquidity the buyback hook publishes.
+    /// @param weightRatio The weight ratio the buyback hook publishes, or 0 to publish none.
     constructor(
-        address acceptedToken_,
-        address buybackHook_,
-        uint256 amountToSwapWith_,
-        uint128 twapLiquidity_,
-        uint256 minimumSwapAmountOut_,
-        uint256 rawSwapQuote_,
-        uint256 delivered_
+        address acceptedToken,
+        uint256 amountToSwapWith,
+        address buybackHook,
+        uint256 delivered,
+        uint256 minimumSwapAmountOut,
+        uint256 rawSwapQuote,
+        uint128 twapLiquidity,
+        uint256 weightRatio
     ) {
-        ACCEPTED_TOKEN = acceptedToken_;
-        BUYBACK_HOOK = buybackHook_;
-        AMOUNT_TO_SWAP_WITH = amountToSwapWith_;
-        TWAP_LIQUIDITY = twapLiquidity_;
-        MINIMUM_SWAP_AMOUNT_OUT = minimumSwapAmountOut_;
-        RAW_SWAP_QUOTE = rawSwapQuote_;
-        DELIVERED = delivered_;
+        ACCEPTED_TOKEN = acceptedToken;
+        AMOUNT_TO_SWAP_WITH = amountToSwapWith;
+        BUYBACK_HOOK = buybackHook;
+        DELIVERED = delivered;
+        MINIMUM_SWAP_AMOUNT_OUT = minimumSwapAmountOut;
+        RAW_SWAP_QUOTE = rawSwapQuote;
+        TWAP_LIQUIDITY = twapLiquidity;
+        WEIGHT_RATIO = weightRatio;
     }
 
+    //*********************************************************************//
+    // ------------------------- receive / fallback ---------------------- //
+    //*********************************************************************//
+
+    /// @notice Accept native refunds.
+    receive() external payable {}
+
+    //*********************************************************************//
+    // ---------------------- external transactions ---------------------- //
+    //*********************************************************************//
+
+    /// @notice Accept a balance addition without bookkeeping.
+    /// @dev Every parameter is unused.
+    function addToBalanceOf(uint256, address, uint256, bool, string calldata, bytes calldata) external payable {}
+
     /// @notice Take the payment and report what the route really delivers.
+    /// @dev Unnamed parameters are the project ID, beneficiary, minimum returned tokens, memo and metadata.
     /// @param token The token paid.
     /// @param amount The amount paid.
     /// @return delivered The tokens this route delivers.
@@ -96,11 +133,23 @@ contract BuybackRoutePreviewTerminal {
         delivered = DELIVERED;
     }
 
-    /// @notice Accept a balance addition without bookkeeping.
-    function addToBalanceOf(uint256, address, uint256, bool, string calldata, bytes calldata) external payable {}
+    //*********************************************************************//
+    // ----------------------- external views ---------------------------- //
+    //*********************************************************************//
+
+    /// @notice The single accounting context for `ACCEPTED_TOKEN`.
+    /// @dev The unnamed parameter is the project ID.
+    /// @return contexts The accepted token's context.
+    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
+        contexts = new JBAccountingContext[](1);
+        contexts[0] =
+        // forge-lint: disable-next-line(unsafe-typecast)
+        JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
+    }
 
     /// @notice Preview either the buyback route's published metadata or a plain mint of `DELIVERED`.
-    /// @return ruleset A placeholder ruleset with zero weight.
+    /// @dev Unnamed parameters are the project ID, token, amount, beneficiary and metadata.
+    /// @return ruleset A placeholder ruleset with a 1e18 weight.
     /// @return beneficiaryTokenCount The plain mint's count, or 0 when the buyback hook mints.
     /// @return reservedTokenCount Always 0.
     /// @return hookSpecifications The buyback hook's specification with its 18 published words, if any.
@@ -126,7 +175,7 @@ contract BuybackRoutePreviewTerminal {
             basedOnId: 0,
             start: 0,
             duration: 0,
-            weight: 0,
+            weight: 1e18,
             weightCutPercent: 0,
             approvalHook: IJBRulesetApprovalHook(address(0)),
             metadata: 0
@@ -147,7 +196,7 @@ contract BuybackRoutePreviewTerminal {
                 false,
                 address(0),
                 uint256(0),
-                uint256(0),
+                WEIGHT_RATIO,
                 AMOUNT_TO_SWAP_WITH,
                 int24(0),
                 TWAP_LIQUIDITY,
@@ -163,31 +212,24 @@ contract BuybackRoutePreviewTerminal {
         });
     }
 
-    /// @notice The single accounting context for `ACCEPTED_TOKEN`.
-    /// @return contexts The accepted token's context.
-    function accountingContextsOf(uint256) external view returns (JBAccountingContext[] memory contexts) {
-        contexts = new JBAccountingContext[](1);
-        contexts[0] =
-        // forge-lint: disable-next-line(unsafe-typecast)
-        JBAccountingContext({token: ACCEPTED_TOKEN, decimals: 18, currency: uint32(uint160(ACCEPTED_TOKEN))});
-    }
-
     /// @notice Report terminal and ERC-165 support so the router accepts this terminal.
     /// @param interfaceId The interface ID to check.
     /// @return supported Whether the interface is supported.
     function supportsInterface(bytes4 interfaceId) external pure returns (bool supported) {
         supported = interfaceId == type(IJBTerminal).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
-
-    /// @notice Accept native refunds.
-    receive() external payable {}
 }
 
 /// @title ThinPoolBuybackRouteMisrankTest
-/// @notice The router scores an active buyback route by the output its pool can give after price impact, not the
-/// raw TWAP quote and not only the hook's conservative minimum. A 1 ETH pay reaches the destination project as ETH
-/// or tokenB (a WETH stand-in) through a 1:1 cash-out of the payer's source-project tokens.
+/// @notice The router scores an active buyback route by the settlement its pool can give after price impact and the
+/// hook's issuance price limit, not the raw TWAP quote and not only the hook's conservative minimum. A 1 ETH pay
+/// reaches the destination project as ETH or tokenB (a WETH stand-in) through a 1:1 cash-out of the payer's
+/// source-project tokens.
 contract ThinPoolBuybackRouteMisrankTest is RouterTerminalTest {
+    //*********************************************************************//
+    // ----------------------- internal constants ------------------------ //
+    //*********************************************************************//
+
     /// @notice The input both routes receive after the 1:1 cash-out.
     uint256 internal constant _AMOUNT = 1e18;
 
@@ -197,31 +239,107 @@ contract ThinPoolBuybackRouteMisrankTest is RouterTerminalTest {
     /// @notice The project whose tokens the payer routes in.
     uint256 internal constant _SOURCE_PROJECT_ID = 2;
 
+    //*********************************************************************//
+    // ----------------------- public transactions ----------------------- //
+    //*********************************************************************//
+
+    /// @notice A pool at 1% impact: raw 1,000, real ~990, sigmoid floor 836.7. A plain mint route gives 900. Scoring
+    /// the minimum alone would pick the mint and deliver 900; the pool delivers 990.
+    function test_conservativeSigmoidFloorDoesNotLoseToWorseMintRoute() public {
+        MockERC20 tokenB = new MockERC20();
+        BuybackRoutePreviewTerminal nativeTerminal = new BuybackRoutePreviewTerminal({
+            acceptedToken: JBConstants.NATIVE_TOKEN,
+            amountToSwapWith: 0,
+            buybackHook: address(0),
+            delivered: 900e18,
+            minimumSwapAmountOut: 0,
+            rawSwapQuote: 0,
+            twapLiquidity: 0,
+            weightRatio: 0
+        });
+        BuybackRoutePreviewTerminal tokenBTerminal = new BuybackRoutePreviewTerminal({
+            acceptedToken: address(tokenB),
+            amountToSwapWith: _AMOUNT,
+            buybackHook: buybackHook,
+            delivered: 990e18,
+            minimumSwapAmountOut: 836.7e18,
+            rawSwapQuote: 1000e18,
+            twapLiquidity: 3_162_277_660_168_379_331_900,
+            weightRatio: 0
+        });
+
+        (uint256 preview, uint256 delivered) =
+            _previewAndPay({nativeTerminal: nativeTerminal, tokenBTerminal: tokenBTerminal});
+
+        assertApproxEqRel(preview, 990.099e18, 1e12, "preview scores the pool's impact-adjusted output");
+        assertEq(delivered, 990e18, "pay settles through the pool");
+        assertEq(nativeTerminal.totalReceived(), 0, "the worse mint route is not chosen");
+        assertEq(tokenBTerminal.totalReceived(), _AMOUNT, "pool route receives the payment");
+    }
+
+    /// @notice Issuance 250. Native pool raw 1,000 at impact 2.8 reaches the issuance price after 35.7% of the input:
+    /// the swap gives 178.57 and the rest mints 160.71, 339.29 in all. Deep pool raw 310 at impact 0.1% delivers
+    /// 309.69. Scoring the native pool's full-input output (263.16) would pick the deep pool and deliver 8.7% less.
+    function test_partialFillScoresLeftoverIssuance() public {
+        MockERC20 tokenB = new MockERC20();
+        BuybackRoutePreviewTerminal nativeTerminal = new BuybackRoutePreviewTerminal({
+            acceptedToken: JBConstants.NATIVE_TOKEN,
+            amountToSwapWith: _AMOUNT,
+            buybackHook: buybackHook,
+            delivered: 339.285714e18,
+            minimumSwapAmountOut: 257.89e18,
+            rawSwapQuote: 1000e18,
+            twapLiquidity: 11_293_848_786_315_640_471,
+            weightRatio: 4e15
+        });
+        BuybackRoutePreviewTerminal tokenBTerminal = new BuybackRoutePreviewTerminal({
+            acceptedToken: address(tokenB),
+            amountToSwapWith: _AMOUNT,
+            buybackHook: buybackHook,
+            delivered: 309.69e18,
+            minimumSwapAmountOut: 300e18,
+            rawSwapQuote: 310e18,
+            twapLiquidity: 17_606_816_861_659_009_145_769,
+            weightRatio: 4e15
+        });
+
+        (uint256 preview, uint256 delivered) =
+            _previewAndPay({nativeTerminal: nativeTerminal, tokenBTerminal: tokenBTerminal});
+
+        assertApproxEqRel(preview, 339.285714e18, 1e12, "preview scores the partial swap plus leftover issuance");
+        assertEq(delivered, 339.285714e18, "pay settles through the native pool");
+        assertEq(nativeTerminal.totalReceived(), _AMOUNT, "the partially filling pool receives the payment");
+        assertEq(tokenBTerminal.totalReceived(), 0, "the deep pool that delivers less is not chosen");
+    }
+
     /// @notice Native pool ~1 ETH / 1,000 tokens: raw 1,000, impact 100%, real ~500, expected-output
     /// floor 490. Deep pool ~1,000 / 600,000 tokens: raw 600, impact 0.1%, real 599.4, sigmoid floor 577.92. Raw
     /// quote scoring would pick native and deliver 500; the deep pool delivers 599.4.
     function test_thinPoolRawQuoteDoesNotOutrankDeeperPool() public {
         MockERC20 tokenB = new MockERC20();
         BuybackRoutePreviewTerminal nativeTerminal = new BuybackRoutePreviewTerminal({
-            acceptedToken_: JBConstants.NATIVE_TOKEN,
-            buybackHook_: buybackHook,
-            amountToSwapWith_: _AMOUNT,
-            twapLiquidity_: 31_622_776_601_683_793_319,
-            minimumSwapAmountOut_: 490e18,
-            rawSwapQuote_: 1000e18,
-            delivered_: 500e18
+            acceptedToken: JBConstants.NATIVE_TOKEN,
+            amountToSwapWith: _AMOUNT,
+            buybackHook: buybackHook,
+            delivered: 500e18,
+            minimumSwapAmountOut: 490e18,
+            rawSwapQuote: 1000e18,
+            twapLiquidity: 31_622_776_601_683_793_319,
+            weightRatio: 0
         });
         BuybackRoutePreviewTerminal tokenBTerminal = new BuybackRoutePreviewTerminal({
-            acceptedToken_: address(tokenB),
-            buybackHook_: buybackHook,
-            amountToSwapWith_: _AMOUNT,
-            twapLiquidity_: 24_494_897_427_831_780_981_972,
-            minimumSwapAmountOut_: 577.92e18,
-            rawSwapQuote_: 600e18,
-            delivered_: 599.4e18
+            acceptedToken: address(tokenB),
+            amountToSwapWith: _AMOUNT,
+            buybackHook: buybackHook,
+            delivered: 599.4e18,
+            minimumSwapAmountOut: 577.92e18,
+            rawSwapQuote: 600e18,
+            twapLiquidity: 24_494_897_427_831_780_981_972,
+            weightRatio: 0
         });
 
-        (uint256 preview, uint256 delivered) = _previewAndPay(nativeTerminal, tokenBTerminal);
+        (uint256 preview, uint256 delivered) =
+            _previewAndPay({nativeTerminal: nativeTerminal, tokenBTerminal: tokenBTerminal});
 
         assertApproxEqRel(preview, 599.4006e18, 1e12, "preview scores the deep pool's impact-adjusted output");
         assertEq(delivered, 599.4e18, "pay settles through the deep pool");
@@ -229,36 +347,9 @@ contract ThinPoolBuybackRouteMisrankTest is RouterTerminalTest {
         assertEq(tokenBTerminal.totalReceived(), _AMOUNT, "deep pool receives the payment");
     }
 
-    /// @notice A pool at 1% impact: raw 1,000, real ~990, sigmoid floor 836.7. A plain mint route gives 900. Scoring
-    /// the minimum alone would pick the mint and deliver 900; the pool delivers 990.
-    function test_conservativeSigmoidFloorDoesNotLoseToWorseMintRoute() public {
-        MockERC20 tokenB = new MockERC20();
-        BuybackRoutePreviewTerminal nativeTerminal = new BuybackRoutePreviewTerminal({
-            acceptedToken_: JBConstants.NATIVE_TOKEN,
-            buybackHook_: address(0),
-            amountToSwapWith_: 0,
-            twapLiquidity_: 0,
-            minimumSwapAmountOut_: 0,
-            rawSwapQuote_: 0,
-            delivered_: 900e18
-        });
-        BuybackRoutePreviewTerminal tokenBTerminal = new BuybackRoutePreviewTerminal({
-            acceptedToken_: address(tokenB),
-            buybackHook_: buybackHook,
-            amountToSwapWith_: _AMOUNT,
-            twapLiquidity_: 3_162_277_660_168_379_331_900,
-            minimumSwapAmountOut_: 836.7e18,
-            rawSwapQuote_: 1000e18,
-            delivered_: 990e18
-        });
-
-        (uint256 preview, uint256 delivered) = _previewAndPay(nativeTerminal, tokenBTerminal);
-
-        assertApproxEqRel(preview, 990.099e18, 1e12, "preview scores the pool's impact-adjusted output");
-        assertEq(delivered, 990e18, "pay settles through the pool");
-        assertEq(nativeTerminal.totalReceived(), 0, "the worse mint route is not chosen");
-        assertEq(tokenBTerminal.totalReceived(), _AMOUNT, "pool route receives the payment");
-    }
+    //*********************************************************************//
+    // ---------------------- internal transactions ---------------------- //
+    //*********************************************************************//
 
     /// @notice Wire both destination terminals behind a 1:1 cash-out, preview the default route, then pay it.
     /// @param nativeTerminal The destination terminal for the native route.

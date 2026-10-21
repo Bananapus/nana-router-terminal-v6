@@ -29,6 +29,70 @@ library JBSwapLib {
     uint256 internal constant _SLIPPAGE_DENOMINATOR = 10_000;
 
     //*********************************************************************//
+    // -------------------- Expected Output ----------------------------- //
+    //*********************************************************************//
+
+    /// @notice The output a single liquidity range gives for a swap after its price impact, before any LP fee.
+    /// @dev Mirrors the buyback hook's `JBSwapLib.getExpectedAmountOut` with no fee, since route previews do not see
+    ///      the pool's fee. Constant liquidity moves the sqrt price by the fraction `impact` (calculateImpact), so the
+    ///      output is quote / (1 + impact).
+    /// @param quote The oracle quote for the full input at the quoted price, before impact.
+    /// @param impact The estimated price impact of the full input from calculateImpact (scaled by _IMPACT_PRECISION).
+    /// @return amountOut The expected swap output.
+    function getExpectedAmountOut(uint256 quote, uint256 impact) internal pure returns (uint256 amountOut) {
+        // An impact past 1e36 (a million-fold price move) leaves no meaningful output, and bounding it keeps the
+        // denominator below overflow for any input.
+        if (impact > 1e36) return 0;
+        return mulDiv({x: quote, y: _IMPACT_PRECISION, denominator: _IMPACT_PRECISION + impact});
+    }
+
+    /// @notice How a pay settles when its swap is limited to the issuance rate: the pool fills until its spot rate
+    /// meets issuance, and the rest of the input mints at issuance.
+    /// @dev Mirrors the buyback hook's `JBSwapLib.getExpectedSettlement` with no fee. In the single-range model of
+    ///      `getExpectedAmountOut`, the spot rate after input fraction φ is quote / (1 + impact * φ)^2. The price
+    ///      limit stops the swap where that meets issuance, at φ* = (u - 1) / impact with u = sqrt(quote / issuance),
+    ///      and the swap leg then returns issuance * u * φ*.
+    /// @param quote The oracle quote for the full input at the quoted price, before impact.
+    /// @param impact The estimated price impact of the full input from calculateImpact (scaled by _IMPACT_PRECISION).
+    /// @param issuanceTokenCount The tokens issuance gives for the full input.
+    /// @return swapAmountOut The expected output of the swap leg.
+    /// @return issuedAmountOut The tokens issuance gives for the input the swap leaves.
+    function getExpectedSettlement(
+        uint256 quote,
+        uint256 impact,
+        uint256 issuanceTokenCount
+    )
+        internal
+        pure
+        returns (uint256 swapAmountOut, uint256 issuedAmountOut)
+    {
+        // With no issuance or no impact the price limit never stops the swap. A quote 1e40 times issuance or more
+        // also takes the full-input estimate, a conservative bound that keeps the square root in range.
+        if (issuanceTokenCount != 0 && impact != 0 && quote / issuanceTokenCount < 1e40) {
+            // u at 1e18 precision.
+            uint256 u = Math.sqrt(mulDiv({x: quote, y: 1e36, denominator: issuanceTokenCount}));
+
+            // A pool whose spot rate is no better than issuance is already at the price limit, so it takes nothing.
+            if (u <= _IMPACT_PRECISION) return (0, issuanceTokenCount);
+
+            // φ* at 1e18 precision; below 1, the swap stops at the price limit before using the whole input.
+            uint256 filled = mulDiv({x: u - _IMPACT_PRECISION, y: _IMPACT_PRECISION, denominator: impact});
+            if (filled < _IMPACT_PRECISION) {
+                swapAmountOut = mulDiv({
+                    x: mulDiv({x: issuanceTokenCount, y: u, denominator: _IMPACT_PRECISION}),
+                    y: filled,
+                    denominator: _IMPACT_PRECISION
+                });
+                issuedAmountOut =
+                    mulDiv({x: issuanceTokenCount, y: _IMPACT_PRECISION - filled, denominator: _IMPACT_PRECISION});
+                return (swapAmountOut, issuedAmountOut);
+            }
+        }
+
+        swapAmountOut = getExpectedAmountOut({quote: quote, impact: impact});
+    }
+
+    //*********************************************************************//
     // -------------------- Slippage Tolerance -------------------------- //
     //*********************************************************************//
 

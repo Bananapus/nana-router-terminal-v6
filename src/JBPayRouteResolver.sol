@@ -13,6 +13,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
+import {JBSwapLib} from "./libraries/JBSwapLib.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
 import {IWETH9} from "./interfaces/IWETH9.sol";
@@ -337,19 +338,16 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 directMintTokenCount = mulDiv({x: amountToMintWith, y: weight, denominator: weightRatio});
             }
 
-            // Score the executable floor, raised to the swap's expected output when the hook's TWAP-backed quote
-            // implies more, which supports callers that only provide a minimum and no live quote. When the buyback
-            // hook reports `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is
-            // trusted. One figure suffices because the split below is monotone in swap output, so the larger swap
-            // always scores at least as well on both counts.
+            // Score the executable floor, raised to the expected settlement when the hook's TWAP-backed quote implies
+            // more, which supports callers that only provide a minimum and no live quote. When the buyback hook
+            // reports `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is trusted.
             uint256 swapTokenCount = minimumSwapAmountOut;
             if (!oracleUnseeded && rawSwapQuote > minimumSwapAmountOut) {
                 // The raw quote prices the whole swap at the TWAP with no price impact, so a thin pool quotes far more
-                // than it gives. Its single-range output is `quote / (1 + impact)`, where `impact` is the relative
-                // sqrt-price move `JBSwapLib.calculateImpact` measures. At the price behind the quote that move is
-                // `sqrt(amountIn * quote) / liquidity` in either direction, so the published words suffice. A
-                // saturating product keeps an absurd quote from reverting the whole route preview. Zero liquidity
-                // carries no impact data, which `calculateImpact` also reads as zero impact.
+                // than it gives. The impact `JBSwapLib.calculateImpact` measures is the relative sqrt-price move,
+                // which at the price behind the quote is `sqrt(amountIn * quote) / liquidity` in either direction, so
+                // the published words suffice. A saturating product keeps an absurd quote from reverting the whole
+                // route preview. Zero liquidity carries no impact data, which `calculateImpact` also reads as zero.
                 uint256 impact;
                 if (twapLiquidity != 0) {
                     impact = mulDiv({
@@ -359,11 +357,27 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     });
                 }
 
-                // The hook publishes neither the LP fee nor live liquidity, so this estimate can overstate execution by
-                // up to the fee, or when the pool is shallower now than over the TWAP window. It never exceeds the raw
-                // quote, and the executable floor still bounds it from below.
-                uint256 expectedSwapTokenCount = mulDiv({x: rawSwapQuote, y: 1e18, denominator: 1e18 + impact});
-                if (expectedSwapTokenCount > swapTokenCount) swapTokenCount = expectedSwapTokenCount;
+                // The hook stops the swap at the issuance rate and mints the input it leaves, so a thin pool settles
+                // as a partial swap plus issuance, not as the full-input output.
+                uint256 swapIssuanceTokenCount;
+                if (weightRatio != 0) {
+                    swapIssuanceTokenCount = mulDiv({x: amountToSwapWith, y: weight, denominator: weightRatio});
+                }
+
+                // The hook publishes neither the LP fee nor live liquidity, and the model takes one liquidity range,
+                // so this estimate can overstate execution by up to the fee, when the pool is shallower now than over
+                // the TWAP window, or understate it when deeper ranges sit within the move. It is a ranking estimate,
+                // not a delivery bound: the hook still enforces only its own floor and mints if the swap misses it.
+                (uint256 expectedSwapTokenCount, uint256 expectedIssuedTokenCount) = JBSwapLib.getExpectedSettlement({
+                    quote: rawSwapQuote, impact: impact, issuanceTokenCount: swapIssuanceTokenCount
+                });
+                if (expectedSwapTokenCount + expectedIssuedTokenCount > swapTokenCount) {
+                    swapTokenCount = expectedSwapTokenCount;
+
+                    // The leftover mint goes through the reserved split like the direct-mint leg, even when the payer
+                    // skips the split for the swap output.
+                    directMintTokenCount += expectedIssuedTokenCount;
+                }
             }
             (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
                 swapTokenCount: swapTokenCount,

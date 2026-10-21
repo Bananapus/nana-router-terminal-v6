@@ -244,6 +244,42 @@ contract RouterTerminalBuybackHookForkTest is Test {
         assertGt(minted, directMintTokenCount, "pay did not use buyback-favorable route");
     }
 
+    /// @notice A pay too large for the pool above issuance previews the partial swap plus the leftover mint it settles.
+    function test_fork_previewAndPay_partialFillPreviewMatchesSettlement() public {
+        // At 50 tokens per ETH of issuance against the pool's ~99.5, an 8 ETH pay (impact ~0.8) reaches the issuance
+        // price about halfway through, so the hook's price limit stops the swap and the rest mints. The raw quote
+        // prices all 8 ETH at ~99.5 tokens each (~796), and the full-input single-range output is ~443.
+        JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(0);
+        rulesetConfigs[0].weight = 50e18;
+        vm.prank(multisig);
+        jbController.queueRulesetsOf({projectId: hookedProjectId, rulesetConfigurations: rulesetConfigs, memo: ""});
+
+        uint256 payAmount = 8 ether;
+        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 410 ether});
+
+        (, uint256 previewBeneficiaryTokenCount,,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, payAmount, beneficiary, metadata);
+
+        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
+        vm.prank(payer);
+        routerTerminal.pay{value: payAmount}({
+            projectId: hookedProjectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: payAmount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "partial fill",
+            metadata: metadata
+        });
+        uint256 received = IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore;
+
+        // The preview leaves out the 0.3% pool fee, so it may overstate the settlement by about that much.
+        assertGt(received, 460 ether, "the partial swap plus issuance beats both issuance and the full-input estimate");
+        assertApproxEqRel(
+            previewBeneficiaryTokenCount, received, 0.005e18, "preview matches the partial-fill settlement"
+        );
+    }
+
     function test_fork_previewAndPay_skipSplitsPreviewMatchesExecution() public {
         _queueReservedRuleset(5000);
         bytes memory splitMetadata = _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 10 ether});
