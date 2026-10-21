@@ -249,7 +249,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
         // At 50 tokens per ETH of issuance against the pool's ~99.5, an 8 ETH pay (impact ~0.8) reaches the issuance
         // price about halfway through, so the hook's price limit stops the swap and the rest mints. The raw quote
         // prices all 8 ETH at ~99.5 tokens each (~796), and the full-input single-range output is ~443.
-        (uint256 preview, uint256 received) = _previewAndSettleLargePay({reservedPercent: 0, skipSplits: false});
+        (uint256 preview, uint256 received) = _previewAndSettleLargePay({
+            weight: 50e18, reservedPercent: 0, skipSplits: false, minimumSwapAmountOut: 410 ether
+        });
 
         assertGt(received, 460 ether, "the partial swap plus issuance beats both issuance and the full-input estimate");
         assertApproxEqRel(preview, received, 0.005e18, "preview matches the partial-fill settlement");
@@ -289,6 +291,20 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         assertEq(balanceAfter - balanceBefore, minted, "beneficiary balance mismatch");
         assertGt(minted, directMintTokenCount, "pay did not use buyback-favorable route");
+    }
+
+    /// @notice A payer who skips a 90% split at 600 gross (60 beneficiary) tokens per ETH stops the swap at 60, about
+    /// a third of the way through 8 ETH; the rest mints at 600 gross through the split. The preview scores both legs.
+    function test_fork_previewAndPay_skipSplitsPartialFillScoresGrossLeftover() public {
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        (uint256 preview, uint256 received) = _previewAndSettleLargePay({
+            weight: 600e18, reservedPercent: 9000, skipSplits: true, minimumSwapAmountOut: 500 ether
+        });
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        assertGt(received, 500 ether, "the partial swap plus the leftover's beneficiary share beats issuance");
+        assertGt(reserved, 2500 ether, "the leftover mints at gross issuance through the split");
+        assertApproxEqRel(preview, received, 0.005e18, "preview matches the partial-fill settlement");
     }
 
     function test_fork_previewAndPay_skipSplitsPreviewMatchesExecution() public {
@@ -332,7 +348,9 @@ contract RouterTerminalBuybackHookForkTest is Test {
     /// @notice A payer who skips a 90% reserved split stops the swap at the beneficiary's 5 tokens per ETH, not the
     /// 50 gross, so the same 8 ETH pay fills in full and the preview scores that.
     function test_fork_previewAndPay_skipSplitsPriceLimitUsesBeneficiaryIssuance() public {
-        (uint256 preview, uint256 received) = _previewAndSettleLargePay({reservedPercent: 9000, skipSplits: true});
+        (uint256 preview, uint256 received) = _previewAndSettleLargePay({
+            weight: 50e18, reservedPercent: 9000, skipSplits: true, minimumSwapAmountOut: 410 ether
+        });
 
         assertGt(received, 430 ether, "the whole pay swaps");
         assertApproxEqRel(preview, received, 0.005e18, "preview matches the full-fill settlement");
@@ -428,26 +446,31 @@ contract RouterTerminalBuybackHookForkTest is Test {
         });
     }
 
-    /// @notice Queue a 50 tokens per ETH ruleset, then preview and pay 8 ETH with a 410-token quote.
+    /// @notice Queue a ruleset, then preview and pay 8 ETH with an explicit buyback minimum.
+    /// @param weight The ruleset's weight (tokens per ETH, 18 decimals).
     /// @param reservedPercent The ruleset's reserved percent.
     /// @param skipSplits Whether the payer skips the reserved split for the swap output.
+    /// @param minimumSwapAmountOut The payer's buyback minimum.
     /// @return preview The beneficiary token count the router previews.
     /// @return received The tokens the beneficiary receives.
     function _previewAndSettleLargePay(
+        uint112 weight,
         uint16 reservedPercent,
-        bool skipSplits
+        bool skipSplits,
+        uint256 minimumSwapAmountOut
     )
         internal
         returns (uint256 preview, uint256 received)
     {
         JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(reservedPercent);
-        rulesetConfigs[0].weight = 50e18;
+        rulesetConfigs[0].weight = weight;
         vm.prank(multisig);
         jbController.queueRulesetsOf({projectId: hookedProjectId, rulesetConfigurations: rulesetConfigs, memo: ""});
 
         uint256 payAmount = 8 ether;
-        bytes memory metadata =
-            _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 410 ether, skipSplits: skipSplits});
+        bytes memory metadata = _buybackQuoteMetadata({
+            amountToSwapWith: 0, minimumSwapAmountOut: minimumSwapAmountOut, skipSplits: skipSplits
+        });
         (, preview,,) =
             routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, payAmount, beneficiary, metadata);
 
