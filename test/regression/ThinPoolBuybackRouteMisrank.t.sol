@@ -195,7 +195,7 @@ contract BuybackRoutePreviewTerminal {
                 MINIMUM_SWAP_AMOUNT_OUT,
                 false,
                 address(0),
-                uint256(0),
+                WEIGHT_RATIO == 0 ? 0 : AMOUNT_TO_SWAP_WITH * 1e18 / WEIGHT_RATIO,
                 WEIGHT_RATIO,
                 AMOUNT_TO_SWAP_WITH,
                 int24(0),

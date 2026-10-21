@@ -305,6 +305,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
 
             uint256 amountToMintWith;
             uint256 minimumSwapAmountOut;
+            uint256 tokenCountWithoutHook;
             uint256 weightRatio;
             uint256 amountToSwapWith;
             uint256 twapLiquidity;
@@ -315,6 +316,7 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
             assembly ("memory-safe") {
                 amountToMintWith := mload(add(hookMetadata, 0x40))
                 minimumSwapAmountOut := mload(add(hookMetadata, 0x60))
+                tokenCountWithoutHook := mload(add(hookMetadata, 0xc0))
                 weightRatio := mload(add(hookMetadata, 0xe0))
                 amountToSwapWith := mload(add(hookMetadata, 0x100))
                 twapLiquidity := mload(add(hookMetadata, 0x140))
@@ -338,10 +340,22 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                 directMintTokenCount = mulDiv({x: amountToMintWith, y: weight, denominator: weightRatio});
             }
 
-            // Score the executable floor, raised to the expected settlement when the hook's TWAP-backed quote implies
-            // more, which supports callers that only provide a minimum and no live quote. When the buyback hook
-            // reports `oracleUnseeded`, the raw quote is a cold-start spot diagnostic, so only the floor is trusted.
-            uint256 swapTokenCount = minimumSwapAmountOut;
+            // Score the executable floor, and the expected settlement when the hook's TWAP-backed quote implies more,
+            // keeping whichever gives more after the split. The floor supports callers that only provide a minimum
+            // and no live quote. When the buyback hook reports `oracleUnseeded`, the raw quote is a cold-start spot
+            // diagnostic, so only the floor is trusted.
+            (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
+                swapTokenCount: minimumSwapAmountOut,
+                directMintTokenCount: directMintTokenCount,
+                skipSplits: skipSplits,
+                reservedPercent: reservedPercent
+            });
+            (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
+                currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
+                currentReservedTokenCount: effectiveReservedTokenCount,
+                candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
+                candidateReservedTokenCount: candidateReservedTokenCount
+            });
             if (!oracleUnseeded && rawSwapQuote > minimumSwapAmountOut) {
                 // The raw quote prices the whole swap at the TWAP with no price impact, so a thin pool quotes far more
                 // than it gives. The impact `JBSwapLib.calculateImpact` measures is the relative sqrt-price move,
@@ -357,40 +371,40 @@ contract JBPayRouteResolver is IJBPayRouteResolver {
                     });
                 }
 
-                // The hook stops the swap at the issuance rate and mints the input it leaves, so a thin pool settles
-                // as a partial swap plus issuance, not as the full-input output.
-                uint256 swapIssuanceTokenCount;
-                if (weightRatio != 0) {
-                    swapIssuanceTokenCount = mulDiv({x: amountToSwapWith, y: weight, denominator: weightRatio});
-                }
-
-                // The hook publishes neither the LP fee nor live liquidity, and the model takes one liquidity range,
-                // so this estimate can overstate execution by up to the fee, when the pool is shallower now than over
-                // the TWAP window, or understate it when deeper ranges sit within the move. It is a ranking estimate,
-                // not a delivery bound: the hook still enforces only its own floor and mints if the swap misses it.
-                (uint256 expectedSwapTokenCount, uint256 expectedIssuedTokenCount) = JBSwapLib.getExpectedSettlement({
-                    quote: rawSwapQuote, impact: impact, issuanceTokenCount: swapIssuanceTokenCount
+                // The hook stops the swap where the pool rate meets `tokenCountWithoutHook`, which is the
+                // beneficiary's share of issuance when the payer skips the split, and mints the input it leaves at the
+                // full issuance rate. The hook publishes neither the LP fee nor live liquidity, and the model takes one
+                // liquidity range, so this estimate can overstate execution by up to the fee, when the pool is
+                // shallower now than over the TWAP window, or understate it when deeper ranges sit within the move.
+                // It is a ranking estimate, not a delivery bound: the hook still enforces only its own floor and mints
+                // if the swap misses it.
+                (uint256 expectedSwapTokenCount, uint256 expectedLimitTokenCount) = JBSwapLib.getExpectedSettlement({
+                    quote: rawSwapQuote, impact: impact, issuanceTokenCount: tokenCountWithoutHook
                 });
-                if (expectedSwapTokenCount + expectedIssuedTokenCount > swapTokenCount) {
-                    swapTokenCount = expectedSwapTokenCount;
 
-                    // The leftover mint goes through the reserved split like the direct-mint leg, even when the payer
-                    // skips the split for the swap output.
-                    directMintTokenCount += expectedIssuedTokenCount;
+                // Scale the unfilled share of the price-limit issuance back to full issuance. The leftover mint goes
+                // through the reserved split like the direct-mint leg, even when the payer skips the split for the
+                // swap output.
+                if (expectedLimitTokenCount != 0 && weightRatio != 0) {
+                    directMintTokenCount += mulDiv({
+                        x: mulDiv({x: amountToSwapWith, y: weight, denominator: weightRatio}),
+                        y: expectedLimitTokenCount,
+                        denominator: tokenCountWithoutHook
+                    });
                 }
+                (candidateBeneficiaryTokenCount, candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
+                    swapTokenCount: expectedSwapTokenCount,
+                    directMintTokenCount: directMintTokenCount,
+                    skipSplits: skipSplits,
+                    reservedPercent: reservedPercent
+                });
+                (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
+                    currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
+                    currentReservedTokenCount: effectiveReservedTokenCount,
+                    candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
+                    candidateReservedTokenCount: candidateReservedTokenCount
+                });
             }
-            (uint256 candidateBeneficiaryTokenCount, uint256 candidateReservedTokenCount) = _hookPreviewPayTokenCounts({
-                swapTokenCount: swapTokenCount,
-                directMintTokenCount: directMintTokenCount,
-                skipSplits: skipSplits,
-                reservedPercent: reservedPercent
-            });
-            (effectiveBeneficiaryTokenCount, effectiveReservedTokenCount) = _strongerPreviewPayTokenCounts({
-                currentBeneficiaryTokenCount: effectiveBeneficiaryTokenCount,
-                currentReservedTokenCount: effectiveReservedTokenCount,
-                candidateBeneficiaryTokenCount: candidateBeneficiaryTokenCount,
-                candidateReservedTokenCount: candidateReservedTokenCount
-            });
             unchecked {
                 ++i;
             }

@@ -208,6 +208,53 @@ contract RouterTerminalBuybackHookForkTest is Test {
         vm.deal(payer, 10 ether);
     }
 
+    function test_fork_previewAndPay_dustSwapDoesNotUnderstateDirectMint() public {
+        _queueReservedRuleset(5000);
+        // Nearly the whole payment mints directly; the swap leg is dust, so any rounding in the hook's swap-leg
+        // figures would be amplified enormously if the direct leg were derived from them.
+        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 3, minimumSwapAmountOut: 2, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        // Only the dust swap's own output, a few hundred wei of project token, can differ between quote and
+        // execution. The defect this guards against understated the direct leg by a sixth of a token.
+        assertApproxEqAbs(received, previewBeneficiaryTokenCount, 1000, "direct-mint beneficiary share understated");
+        assertEq(reserved, previewReservedTokenCount, "direct-mint reserved share must match execution");
+        assertGt(reserved, 0.49 ether, "half of the direct leg is reserved");
+    }
+
+    function test_fork_previewAndPay_fullReserveReservesWholeDirectMint() public {
+        _queueReservedRuleset(10_000);
+        bytes memory metadata =
+            _buybackQuoteMetadata({amountToSwapWith: 0.1 ether, minimumSwapAmountOut: 1 ether, skipSplits: true});
+
+        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
+        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
+        uint256 received = _payHooked(metadata);
+        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
+
+        assertEq(reserved, 0.9 ether, "execution reserves the entire direct leg");
+        assertEq(previewReservedTokenCount, reserved, "preview must reserve the entire direct leg too");
+        assertGe(previewBeneficiaryTokenCount, 1 ether, "the swap floor is scored for the beneficiary");
+        assertGe(received, 1 ether, "the swap floor holds at execution");
+    }
+
+    /// @notice A pay too large for the pool above issuance previews the partial swap plus the leftover mint it settles.
+    function test_fork_previewAndPay_partialFillPreviewMatchesSettlement() public {
+        // At 50 tokens per ETH of issuance against the pool's ~99.5, an 8 ETH pay (impact ~0.8) reaches the issuance
+        // price about halfway through, so the hook's price limit stops the swap and the rest mints. The raw quote
+        // prices all 8 ETH at ~99.5 tokens each (~796), and the full-input single-range output is ~443.
+        (uint256 preview, uint256 received) = _previewAndSettleLargePay({reservedPercent: 0, skipSplits: false});
+
+        assertGt(received, 460 ether, "the partial swap plus issuance beats both issuance and the full-input estimate");
+        assertApproxEqRel(preview, received, 0.005e18, "preview matches the partial-fill settlement");
+    }
+
     function test_fork_previewAndPay_routeToProjectUsingBuybackHook() public {
         uint256 directMintTokenCount = PAY_AMOUNT;
         bytes memory metadata = _buybackQuoteMetadata(0, 10 ether);
@@ -242,42 +289,6 @@ contract RouterTerminalBuybackHookForkTest is Test {
 
         assertEq(balanceAfter - balanceBefore, minted, "beneficiary balance mismatch");
         assertGt(minted, directMintTokenCount, "pay did not use buyback-favorable route");
-    }
-
-    /// @notice A pay too large for the pool above issuance previews the partial swap plus the leftover mint it settles.
-    function test_fork_previewAndPay_partialFillPreviewMatchesSettlement() public {
-        // At 50 tokens per ETH of issuance against the pool's ~99.5, an 8 ETH pay (impact ~0.8) reaches the issuance
-        // price about halfway through, so the hook's price limit stops the swap and the rest mints. The raw quote
-        // prices all 8 ETH at ~99.5 tokens each (~796), and the full-input single-range output is ~443.
-        JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(0);
-        rulesetConfigs[0].weight = 50e18;
-        vm.prank(multisig);
-        jbController.queueRulesetsOf({projectId: hookedProjectId, rulesetConfigurations: rulesetConfigs, memo: ""});
-
-        uint256 payAmount = 8 ether;
-        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 410 ether});
-
-        (, uint256 previewBeneficiaryTokenCount,,) =
-            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, payAmount, beneficiary, metadata);
-
-        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
-        vm.prank(payer);
-        routerTerminal.pay{value: payAmount}({
-            projectId: hookedProjectId,
-            token: JBConstants.NATIVE_TOKEN,
-            amount: payAmount,
-            beneficiary: beneficiary,
-            minReturnedTokens: 0,
-            memo: "partial fill",
-            metadata: metadata
-        });
-        uint256 received = IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore;
-
-        // The preview leaves out the 0.3% pool fee, so it may overstate the settlement by about that much.
-        assertGt(received, 460 ether, "the partial swap plus issuance beats both issuance and the full-input estimate");
-        assertApproxEqRel(
-            previewBeneficiaryTokenCount, received, 0.005e18, "preview matches the partial-fill settlement"
-        );
     }
 
     function test_fork_previewAndPay_skipSplitsPreviewMatchesExecution() public {
@@ -318,40 +329,13 @@ contract RouterTerminalBuybackHookForkTest is Test {
         assertGe(skipReceived, 10 ether, "the quoted floor must hold in skip mode");
     }
 
-    function test_fork_previewAndPay_dustSwapDoesNotUnderstateDirectMint() public {
-        _queueReservedRuleset(5000);
-        // Nearly the whole payment mints directly; the swap leg is dust, so any rounding in the hook's swap-leg
-        // figures would be amplified enormously if the direct leg were derived from them.
-        bytes memory metadata = _buybackQuoteMetadata({amountToSwapWith: 3, minimumSwapAmountOut: 2, skipSplits: true});
+    /// @notice A payer who skips a 90% reserved split stops the swap at the beneficiary's 5 tokens per ETH, not the
+    /// 50 gross, so the same 8 ETH pay fills in full and the preview scores that.
+    function test_fork_previewAndPay_skipSplitsPriceLimitUsesBeneficiaryIssuance() public {
+        (uint256 preview, uint256 received) = _previewAndSettleLargePay({reservedPercent: 9000, skipSplits: true});
 
-        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
-            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
-        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
-        uint256 received = _payHooked(metadata);
-        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
-
-        // Only the dust swap's own output, a few hundred wei of project token, can differ between quote and
-        // execution. The defect this guards against understated the direct leg by a sixth of a token.
-        assertApproxEqAbs(received, previewBeneficiaryTokenCount, 1000, "direct-mint beneficiary share understated");
-        assertEq(reserved, previewReservedTokenCount, "direct-mint reserved share must match execution");
-        assertGt(reserved, 0.49 ether, "half of the direct leg is reserved");
-    }
-
-    function test_fork_previewAndPay_fullReserveReservesWholeDirectMint() public {
-        _queueReservedRuleset(10_000);
-        bytes memory metadata =
-            _buybackQuoteMetadata({amountToSwapWith: 0.1 ether, minimumSwapAmountOut: 1 ether, skipSplits: true});
-
-        (, uint256 previewBeneficiaryTokenCount, uint256 previewReservedTokenCount,) =
-            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, metadata);
-        uint256 reservedBefore = jbController.pendingReservedTokenBalanceOf(hookedProjectId);
-        uint256 received = _payHooked(metadata);
-        uint256 reserved = jbController.pendingReservedTokenBalanceOf(hookedProjectId) - reservedBefore;
-
-        assertEq(reserved, 0.9 ether, "execution reserves the entire direct leg");
-        assertEq(previewReservedTokenCount, reserved, "preview must reserve the entire direct leg too");
-        assertGe(previewBeneficiaryTokenCount, 1 ether, "the swap floor is scored for the beneficiary");
-        assertGe(received, 1 ether, "the swap floor holds at execution");
+        assertGt(received, 430 ether, "the whole pay swaps");
+        assertApproxEqRel(preview, received, 0.005e18, "preview matches the full-fill settlement");
     }
 
     /// @notice Pay the hooked project through the router and return what the beneficiary actually received.
@@ -442,6 +426,43 @@ contract RouterTerminalBuybackHookForkTest is Test {
             splitGroups: new JBSplitGroup[](0),
             fundAccessLimitGroups: new JBFundAccessLimitGroup[](0)
         });
+    }
+
+    /// @notice Queue a 50 tokens per ETH ruleset, then preview and pay 8 ETH with a 410-token quote.
+    /// @param reservedPercent The ruleset's reserved percent.
+    /// @param skipSplits Whether the payer skips the reserved split for the swap output.
+    /// @return preview The beneficiary token count the router previews.
+    /// @return received The tokens the beneficiary receives.
+    function _previewAndSettleLargePay(
+        uint16 reservedPercent,
+        bool skipSplits
+    )
+        internal
+        returns (uint256 preview, uint256 received)
+    {
+        JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(reservedPercent);
+        rulesetConfigs[0].weight = 50e18;
+        vm.prank(multisig);
+        jbController.queueRulesetsOf({projectId: hookedProjectId, rulesetConfigurations: rulesetConfigs, memo: ""});
+
+        uint256 payAmount = 8 ether;
+        bytes memory metadata =
+            _buybackQuoteMetadata({amountToSwapWith: 0, minimumSwapAmountOut: 410 ether, skipSplits: skipSplits});
+        (, preview,,) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, payAmount, beneficiary, metadata);
+
+        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
+        vm.prank(payer);
+        routerTerminal.pay{value: payAmount}({
+            projectId: hookedProjectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: payAmount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "large pay",
+            metadata: metadata
+        });
+        received = IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore;
     }
 
     /// @notice Replace the project's current duration-less ruleset so a reserved split applies immediately.
