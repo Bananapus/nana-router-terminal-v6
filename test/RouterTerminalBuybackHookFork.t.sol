@@ -16,6 +16,7 @@ import {JBSplits} from "@bananapus/core-v6/src/JBSplits.sol";
 import {JBTerminalStore} from "@bananapus/core-v6/src/JBTerminalStore.sol";
 import {JBTokens} from "@bananapus/core-v6/src/JBTokens.sol";
 import {JBERC20} from "@bananapus/core-v6/src/JBERC20.sol";
+import {IJBPriceFeed} from "@bananapus/core-v6/src/interfaces/IJBPriceFeed.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -127,6 +128,21 @@ contract BuybackForkLiquidityHelper is IUnlockCallback {
     }
 
     receive() external payable {}
+}
+
+/// @notice A fixed price feed.
+contract FixedPriceFeed is IJBPriceFeed {
+    uint256 internal immutable _PRICE;
+    uint256 internal immutable _DECIMALS;
+
+    constructor(uint256 price, uint256 decimals) {
+        _PRICE = price;
+        _DECIMALS = decimals;
+    }
+
+    function currentUnitPrice(uint256 decimals) external view override returns (uint256) {
+        return decimals >= _DECIMALS ? _PRICE * 10 ** (decimals - _DECIMALS) : _PRICE / 10 ** (_DECIMALS - decimals);
+    }
 }
 
 contract RouterTerminalBuybackHookForkTest is Test {
@@ -534,5 +550,140 @@ contract RouterTerminalBuybackHookForkTest is Test {
             abi.encodeWithSelector(IGeomeanOracle.observe.selector),
             abi.encode(tickCumulatives, secondsPerLiquidityCumulativeX128s)
         );
+    }
+
+    //*********************************************************************//
+    // ------------------ buyback hook 1.5 route scoring ----------------- //
+    //*********************************************************************//
+
+    /// @notice Replace the 1.4 hook under test with buyback hook 1.5 at the same address. The fixture is the 1.5 hook's
+    /// creation bytecode (nana-buyback-hook-v6#181), so this repo's resolver runs against it without compiling its
+    /// source. It is deployed with the same constructor arguments and its runtime code etched over the 1.4 hook, so the
+    /// router's immutable `BUYBACK_HOOK` and the hook's storage (same layout in both versions) carry over.
+    function _useBuybackHook15() internal {
+        address hook15 = deployCode(
+            "test/fixtures/JBBuybackHook-1.5.0.json",
+            abi.encode(jbDirectory, jbPermissions, jbPrices, jbProjects, jbTokens, address(this), address(0))
+        );
+        vm.etch(address(buybackHook), hook15.code);
+    }
+
+    /// @notice A no-quote ETH pay's router preview and the tokens it settles.
+    function _previewAndSettleNoQuote(uint256 amount) internal returns (uint256 preview, uint256 received) {
+        (, preview,,) = routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, amount, beneficiary, "");
+        uint256 snapshot = vm.snapshotState();
+        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
+        vm.prank(payer);
+        routerTerminal.pay{value: amount}({
+            projectId: hookedProjectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        });
+        received = IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore;
+        assertTrue(vm.revertToState(snapshot));
+    }
+
+    /// @notice A no-quote pay the sigmoid floor routes settles the same under both hooks. The 1.4 preview scores the
+    /// fee- and impact-free raw quote; the 1.5 preview scores the hook's expected settlement, which it delivers.
+    function test_fork_buyback15_previewMatchesSigmoidRouteSettlement() public {
+        (uint256 preview14, uint256 received14) = _previewAndSettleNoQuote(PAY_AMOUNT);
+        _useBuybackHook15();
+        (uint256 preview15, uint256 received15) = _previewAndSettleNoQuote(PAY_AMOUNT);
+
+        emit log_named_decimal_uint("1.4 preview", preview14, 18);
+        emit log_named_decimal_uint("1.5 preview", preview15, 18);
+        emit log_named_decimal_uint("settled", received15, 18);
+        assertEq(received15, received14, "the sigmoid route is unchanged");
+        assertGt(preview14, received14 * 105 / 100, "1.4 overstates the route");
+        assertApproxEqRel(preview15, received15, 0.001e18, "1.5 previews what the pay settles");
+    }
+
+    /// @notice An 8 ETH no-quote pay at 50 tokens per ETH of issuance is larger than the pool can take above issuance.
+    /// Hook 1.4 mints it; 1.5 swaps to the issuance-rate price limit, mints the rest, and previews that settlement.
+    function test_fork_buyback15_previewMatchesPartialFillSettlement() public {
+        JBRulesetConfig[] memory rulesetConfigs = _hookedRulesetConfigs(0);
+        rulesetConfigs[0].weight = 50e18;
+        vm.prank(multisig);
+        jbController.queueRulesetsOf({projectId: hookedProjectId, rulesetConfigurations: rulesetConfigs, memo: ""});
+
+        (, uint256 received14) = _previewAndSettleNoQuote(8 ether);
+        _useBuybackHook15();
+        (uint256 preview15, uint256 received15) = _previewAndSettleNoQuote(8 ether);
+
+        emit log_named_decimal_uint("1.4 settled", received14, 18);
+        emit log_named_decimal_uint("1.5 preview", preview15, 18);
+        emit log_named_decimal_uint("1.5 settled", received15, 18);
+        assertEq(received14, 400 ether, "1.4 mints");
+        assertGt(received15, 460 ether, "1.5 swaps to the price limit and mints the rest");
+        assertApproxEqRel(preview15, received15, 0.001e18, "1.5 previews what the pay settles");
+    }
+
+    /// @notice The project also accepts USDC, priced so a USDC-routed ETH pay mints about 95 tokens per ETH: below the
+    /// 1.4 hook's raw ETH-pool quote (about 99.5) but above what the ETH pool settles (about 90.2). The 1.4 hook makes
+    /// the router rank the thin ETH pool first; the 1.5 hook's published settlement makes it pick USDC, which pays
+    /// more.
+    function test_fork_buyback15_ranksRoutesBySettlement() public {
+        IERC20 usdc = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+        uint32 usdcCurrency = uint32(uint160(address(usdc)));
+        JBAccountingContext[] memory contexts = new JBAccountingContext[](1);
+        contexts[0] = JBAccountingContext({token: address(usdc), decimals: 6, currency: usdcCurrency});
+        vm.prank(multisig);
+        jbMultiTerminal.addAccountingContextsFor(hookedProjectId, contexts);
+        uint256 usdcPerEth =
+            routerTerminal.previewSwapAmountOutOf(JBConstants.NATIVE_TOKEN, address(usdc), PAY_AMOUNT, "");
+        IJBPriceFeed feed = new FixedPriceFeed(usdcPerEth / 95, 6);
+        vm.prank(multisig);
+        jbPrices.addPriceFeedFor({
+            projectId: 0,
+            pricingCurrency: usdcCurrency,
+            unitCurrency: uint32(uint160(JBConstants.NATIVE_TOKEN)),
+            feed: feed
+        });
+
+        (, uint256 preview14,, JBPayHookSpecification[] memory specs14) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, "");
+        _useBuybackHook15();
+        (, uint256 preview15,, JBPayHookSpecification[] memory specs15) =
+            routerTerminal.previewPayFor(hookedProjectId, JBConstants.NATIVE_TOKEN, PAY_AMOUNT, beneficiary, "");
+
+        uint256 viaEth = _payVia(JBConstants.NATIVE_TOKEN);
+        uint256 viaUsdc = _payVia(address(usdc));
+        emit log_named_decimal_uint("1.4 best preview", preview14, 18);
+        emit log_named_decimal_uint("1.5 best preview", preview15, 18);
+        emit log_named_decimal_uint("settled via the ETH pool", viaEth, 18);
+        emit log_named_decimal_uint("settled via USDC", viaUsdc, 18);
+
+        assertEq(specs14.length, 1, "1.4 ranks the ETH pool route first");
+        assertEq(address(specs14[0].hook), address(buybackHook), "1.4 ranks the ETH pool route first");
+        assertEq(specs15.length, 0, "1.5 ranks the USDC route first");
+        assertGt(viaUsdc, viaEth, "the USDC route pays more");
+        assertGt(preview14, viaUsdc, "1.4 scored the ETH pool above what USDC pays");
+        // The router previews the USDC leg's swap conservatively, so the USDC route settles a little above its 95-token
+        // preview.
+        assertApproxEqRel(preview15, 95e18, 0.001e18, "1.5 previews the USDC route");
+    }
+
+    /// @notice Pay 1 ETH routed to `tokenOut` and return the beneficiary's tokens, leaving state unchanged.
+    function _payVia(address tokenOut) internal returns (uint256 received) {
+        uint256 snapshot = vm.snapshotState();
+        uint256 balanceBefore = IERC20(hookedProjectToken).balanceOf(beneficiary);
+        vm.prank(payer);
+        routerTerminal.pay{value: PAY_AMOUNT}({
+            projectId: hookedProjectId,
+            token: JBConstants.NATIVE_TOKEN,
+            amount: PAY_AMOUNT,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: JBMetadataResolver.addToMetadata(
+                "", JBMetadataResolver.getId("routeTokenOut", address(routerTerminal)), abi.encode(tokenOut)
+            )
+        });
+        received = IERC20(hookedProjectToken).balanceOf(beneficiary) - balanceBefore;
+        assertTrue(vm.revertToState(snapshot));
     }
 }
