@@ -32,6 +32,10 @@ contract ReentrancyMockERC20 {
         balanceOf[to] += amt;
     }
 
+    function burn(address from, uint256 amt) external {
+        balanceOf[from] -= amt;
+    }
+
     function approve(address spender, uint256 amt) external returns (bool) {
         allowance[msg.sender][spender] = amt;
         return true;
@@ -66,15 +70,22 @@ contract MaliciousReentrantTerminal {
         router = _router;
     }
 
+    /// @notice The project token this terminal burns from the holder, as a real cash-out does.
+    ReentrancyMockERC20 public sourceToken;
+
     function setShouldReenter(bool val) external {
         shouldReenter = val;
     }
 
+    function setSourceToken(ReentrancyMockERC20 sourceToken_) external {
+        sourceToken = sourceToken_;
+    }
+
     /// @notice Mimics IJBCashOutTerminal.cashOutTokensOf. Re-enters router.pay() if armed.
     function cashOutTokensOf(
-        address, /* holder */
+        address holder,
         uint256, /* projectId */
-        uint256, /* cashOutCount */
+        uint256 cashOutCount,
         address, /* tokenToReclaim */
         uint256, /* minTokensReclaimed */
         address payable beneficiary,
@@ -101,7 +112,8 @@ contract MaliciousReentrantTerminal {
                 reentryReverted = true;
             }
         }
-        // Deliver the reclaimed ETH to the router the same way a real cashout terminal would.
+        // Burn the holder's tokens and deliver the reclaimed ETH the same way a real cashout terminal would.
+        sourceToken.burn(holder, cashOutCount);
         beneficiary.transfer(1e18);
         return 1e18;
     }
@@ -155,15 +167,22 @@ contract MaliciousAddToBalanceTerminal {
         router = _router;
     }
 
+    /// @notice The project token this terminal burns from the holder, as a real cash-out does.
+    ReentrancyMockERC20 public sourceToken;
+
     function setShouldReenter(bool val) external {
         shouldReenter = val;
     }
 
+    function setSourceToken(ReentrancyMockERC20 sourceToken_) external {
+        sourceToken = sourceToken_;
+    }
+
     /// @notice Mimics IJBCashOutTerminal.cashOutTokensOf. Re-enters router.addToBalanceOf() if armed.
     function cashOutTokensOf(
-        address, /* holder */
+        address holder,
         uint256, /* projectId */
-        uint256, /* cashOutCount */
+        uint256 cashOutCount,
         address, /* tokenToReclaim */
         uint256, /* minTokensReclaimed */
         address payable beneficiary,
@@ -189,7 +208,8 @@ contract MaliciousAddToBalanceTerminal {
                 reentryReverted = true;
             }
         }
-        // Deliver the reclaimed ETH to the router the same way a real cashout terminal would.
+        // Burn the holder's tokens and deliver the reclaimed ETH the same way a real cashout terminal would.
+        sourceToken.burn(holder, cashOutCount);
         beneficiary.transfer(1e18);
         return 1e18;
     }
@@ -301,6 +321,7 @@ contract RouterTerminalReentrancyTest is Test {
         MaliciousReentrantTerminal malicious = new MaliciousReentrantTerminal(routerTerminal);
 
         ReentrancyMockERC20 jbTokenMock = new ReentrancyMockERC20();
+        malicious.setSourceToken(jbTokenMock);
         address jbToken = address(jbTokenMock);
         address payer = makeAddr("payer");
         uint256 destProjectId = 1;
@@ -374,6 +395,7 @@ contract RouterTerminalReentrancyTest is Test {
         MaliciousAddToBalanceTerminal malicious = new MaliciousAddToBalanceTerminal(routerTerminal);
 
         ReentrancyMockERC20 jbTokenMock = new ReentrancyMockERC20();
+        malicious.setSourceToken(jbTokenMock);
         address jbToken = address(jbTokenMock);
         address payer = makeAddr("payer");
         uint256 destProjectId = 1;
@@ -434,6 +456,7 @@ contract RouterTerminalReentrancyTest is Test {
         MaliciousReentrantTerminal malicious = new MaliciousReentrantTerminal(routerTerminal);
 
         ReentrancyMockERC20 jbTokenMock = new ReentrancyMockERC20();
+        malicious.setSourceToken(jbTokenMock);
         address jbToken = address(jbTokenMock);
         address payer = makeAddr("payer");
         uint256 destProjectId = 1;

@@ -200,6 +200,10 @@ contract JBRouterTerminal is
     /// @notice Pre-computed metadata ID for "pay" (the pay-phase swap quote).
     bytes4 internal immutable _PAY_ID;
 
+    /// @notice The metadata table word for one `cashOut` entry addressed to `BUYBACK_HOOK`: its ID, then the entry's
+    /// data offset of 2 words (after the reserved word and this table word).
+    bytes32 internal immutable _HOOK_CASH_OUT_TABLE;
+
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
@@ -279,6 +283,8 @@ contract JBRouterTerminal is
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
         _CASH_OUT_ID = JBMetadataResolver.getId("cashOut");
         _PAY_ID = JBMetadataResolver.getId("pay");
+        _HOOK_CASH_OUT_TABLE =
+            bytes32(JBMetadataResolver.getId({purpose: "cashOut", target: buybackHook})) | bytes32(uint256(2) << 216);
     }
 
     //*********************************************************************//
@@ -1285,6 +1291,30 @@ contract JBRouterTerminal is
                 metadata: hopMetadata
             });
 
+            // A buyback sale stops at its price limit and returns the unsold source tokens. The terminal burned
+            // `cashOutCount` before the hook ran, so the source balance is `sourceBalanceBefore - cashOutCount +
+            // unsold`; baselining on this hop's source balance never sweeps pre-existing balances.
+            uint256 sourceResidue =
+                _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+            if (sourceResidue != 0) {
+                // Reclaim the unsold tokens directly so the route delivers them instead of handing them back. The
+                // buyback hook's `cashOut` directive `(0, true)` skips the pool: selling them again would stop at a
+                // lower limit and return most of them a second time. The terminal minimum of 1 refuses a reclaim that
+                // pays nothing, and a reclaim that fails for any reason leaves the residue to be refunded below.
+                try cashOutTerminal.cashOutTokensOf({
+                    holder: address(this),
+                    projectId: sourceProjectId,
+                    cashOutCount: sourceResidue,
+                    tokenToReclaim: tokenToReclaim,
+                    minTokensReclaimed: 1,
+                    beneficiary: payable(address(this)),
+                    metadata: abi.encode(bytes32(0), _HOOK_CASH_OUT_TABLE, uint256(0), true)
+                }) {
+                    sourceResidue =
+                        _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+                } catch {}
+            }
+
             // Measure the reclaimed-token balance delta so fee-on-transfer behavior cannot fake delivery.
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
 
@@ -1298,12 +1328,8 @@ contract JBRouterTerminal is
             // Enforce the caller's first-hop reclaim floor against the actual balance delta received.
             _requireMinimum({amountOut: amount, minAmountOut: minTokensReclaimed});
 
-            // Refund any unsold source project tokens the buyback hook returned on a partial fill. The terminal burned
-            // `cashOutCount` source tokens before the hook ran, so the post-cash-out source balance is
-            // `sourceBalanceBefore - cashOutCount + unsold`; recovering `unsold` refunds exactly this hop's residue to
-            // the route's refund recipient instead of stranding it, without sweeping any pre-existing balance.
-            uint256 sourceResidue =
-                _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+            // Refund any source tokens still unsold after the second pass to the route's refund recipient instead of
+            // stranding them.
             if (sourceResidue != 0) {
                 _transferFrom({from: address(this), to: refundTo, token: token, amount: sourceResidue});
             }

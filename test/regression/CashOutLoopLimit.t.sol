@@ -27,6 +27,10 @@ contract MockToken {
         balanceOf[to] += amount;
     }
 
+    function burn(address from, uint256 amount) external {
+        balanceOf[from] -= amount;
+    }
+
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
         return true;
@@ -52,6 +56,9 @@ contract RealCashOutTerminal {
     MockToken public immutable RECLAIM_TOKEN;
     uint256 public immutable RECLAIM_AMOUNT;
 
+    /// @notice The project token this terminal burns from the holder, as a real cash-out does. Unset burns nothing.
+    MockToken public sourceToken;
+
     constructor(MockToken reclaimToken_, uint256 reclaimAmount_) {
         RECLAIM_TOKEN = reclaimToken_;
         RECLAIM_AMOUNT = reclaimAmount_;
@@ -69,10 +76,14 @@ contract RealCashOutTerminal {
         });
     }
 
+    function setSourceToken(MockToken sourceToken_) external {
+        sourceToken = sourceToken_;
+    }
+
     function cashOutTokensOf(
-        address,
+        address holder,
         uint256,
-        uint256,
+        uint256 cashOutCount,
         address,
         uint256,
         address payable beneficiary,
@@ -81,6 +92,7 @@ contract RealCashOutTerminal {
         external
         returns (uint256)
     {
+        if (address(sourceToken) != address(0)) sourceToken.burn(holder, cashOutCount);
         require(RECLAIM_TOKEN.transfer(beneficiary, RECLAIM_AMOUNT), "reclaim transfer failed");
         return RECLAIM_AMOUNT;
     }
@@ -236,6 +248,7 @@ contract CashOutLoopLimitTest is Test {
         // Replace project A's mocked terminal with a real contract that transfers tokenB to
         // the router so the balance-delta accounting sees the cashout proceeds.
         RealCashOutTerminal realTerminalA = new RealCashOutTerminal(tokenB, 1e18);
+        realTerminalA.setSourceToken(tokenA);
         tokenB.mint(address(realTerminalA), 1e18);
 
         {
