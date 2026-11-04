@@ -557,9 +557,10 @@ contract RouterTerminalBuybackHookForkTest is Test {
     //*********************************************************************//
 
     /// @notice Replace the 1.4 hook under test with buyback hook 2.0 at the same address. The fixture is the 2.0 hook's
-    /// creation bytecode (nana-buyback-hook-v6#184 at a62a406), so this repo's resolver runs against it without compiling its
-    /// source. It is deployed with the same constructor arguments and its runtime code etched over the 1.4 hook, so the
-    /// router's immutable `BUYBACK_HOOK` and the hook's storage (same layout in both versions) carry over.
+    /// creation bytecode (nana-buyback-hook-v6#184 at a62a406), so this repo's resolver runs against it without
+    /// compiling its source. It is deployed with the same constructor arguments and its runtime code etched over the
+    /// 1.4 hook, so the router's immutable `BUYBACK_HOOK` and the hook's storage (same layout in both versions) carry
+    /// over.
     function _useBuybackHook2() internal {
         address hook2 = deployCode(
             "test/fixtures/JBBuybackHook-2.0.0.json",
