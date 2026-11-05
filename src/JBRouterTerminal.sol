@@ -200,6 +200,10 @@ contract JBRouterTerminal is
     /// @notice Pre-computed metadata ID for "pay" (the pay-phase swap quote).
     bytes4 internal immutable _PAY_ID;
 
+    /// @notice The metadata table word for one `cashOut` entry addressed to `BUYBACK_HOOK`: its ID, then the entry's
+    /// data offset of 2 words (after the reserved word and this table word).
+    bytes32 internal immutable _HOOK_CASH_OUT_TABLE;
+
     //*********************************************************************//
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
@@ -279,6 +283,8 @@ contract JBRouterTerminal is
         _PERMIT2_ID = JBMetadataResolver.getId("permit2");
         _CASH_OUT_ID = JBMetadataResolver.getId("cashOut");
         _PAY_ID = JBMetadataResolver.getId("pay");
+        _HOOK_CASH_OUT_TABLE =
+            bytes32(JBMetadataResolver.getId({purpose: "cashOut", target: buybackHook})) | bytes32(uint256(2) << 216);
     }
 
     //*********************************************************************//
@@ -348,7 +354,7 @@ contract JBRouterTerminal is
 
         // Snapshot the destination terminal's ERC20 balance and forwarding status for receipt enforcement.
         // Combines both checks into one call to avoid duplicate _isForwardingTerminal probes.
-        (uint256 terminalReceiptBaseline, bool isForwarding) =
+        (uint256 terminalReceiptBaseline, bool skipReceiptCheck) =
             _terminalReceiptBaselineOf({terminal: destTerminal, token: token, projectId: projectId});
 
         // Forward the fully routed funds into the destination terminal's add-to-balance flow.
@@ -369,7 +375,7 @@ contract JBRouterTerminal is
             token: token,
             expectedAmount: amount,
             receiptBaseline: terminalReceiptBaseline,
-            isForwarding: isForwarding
+            skipReceiptCheck: skipReceiptCheck
         });
 
         // Restore the caller's quote mode for any nested routing scope that continues after this call.
@@ -569,9 +575,7 @@ contract JBRouterTerminal is
         }
 
         // Enforce the caller's V4 minimum against the realized delta before settling/taking pool balances.
-        if (amountOut < minAmountOut) {
-            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
-        }
+        _requireMinimum({amountOut: amountOut, minAmountOut: minAmountOut});
 
         // Settle input (pay what we owe to the PoolManager).
         Currency inputCurrency = zeroForOne ? key.currency0 : key.currency1;
@@ -667,12 +671,7 @@ contract JBRouterTerminal is
         override
         returns (PoolInfo memory)
     {
-        PoolInfo memory pool =
-            _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
-        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
-        }
-        return pool;
+        return _discoverExistingPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
     }
 
     /// @notice The best Uniswap V3 pool for a token pair, useful for off-chain queries.
@@ -1017,7 +1016,7 @@ contract JBRouterTerminal is
     /// @param token The token the terminal is expected to receive.
     /// @param projectId The project to check forwarding status for.
     /// @return receiptBaseline The terminal's balance in `token` before the final forwarded call.
-    /// @return isForwarding Whether the terminal forwards calls onward.
+    /// @return skipReceiptCheck Whether receipt enforcement is skipped (native token or forwarding terminal).
     function _terminalReceiptBaselineOf(
         IJBTerminal terminal,
         address token,
@@ -1025,16 +1024,13 @@ contract JBRouterTerminal is
     )
         internal
         view
-        returns (uint256 receiptBaseline, bool isForwarding)
+        returns (uint256 receiptBaseline, bool skipReceiptCheck)
     {
         // Skip native-token receipt enforcement because value transfers can be consumed during terminal execution.
-        if (token == JBConstants.NATIVE_TOKEN) return (0, false);
-
-        // Check forwarding status once and return it alongside the baseline.
-        isForwarding = _isForwardingTerminal({terminal: terminal, projectId: projectId});
+        if (token == JBConstants.NATIVE_TOKEN) return (0, true);
 
         // Skip receipt enforcement for forwarding terminals because they enforce the terminal-facing hop themselves.
-        if (isForwarding) return (0, true);
+        if (_isForwardingTerminal({terminal: terminal, projectId: projectId})) return (0, true);
 
         // Snapshot the terminal's ERC20 balance so final-hop receipt can be verified after the terminal pulls.
         return (IERC20(token).balanceOf(address(terminal)), false);
@@ -1045,22 +1041,20 @@ contract JBRouterTerminal is
     /// @param token The token the terminal was expected to pull.
     /// @param expectedAmount The nominal amount forwarded into the terminal call.
     /// @param receiptBaseline The terminal's pre-call balance in `token`.
-    /// @param isForwarding Whether the terminal forwards calls onward (pre-computed by caller).
+    /// @param skipReceiptCheck Whether receipt enforcement is skipped (pre-computed by `_terminalReceiptBaselineOf`).
     function _enforceStandardTerminalReceipt(
         IJBTerminal terminal,
         address token,
         uint256 expectedAmount,
         uint256 receiptBaseline,
-        bool isForwarding
+        bool skipReceiptCheck
     )
         internal
         view
     {
-        // Native-token final hops are excluded because their value transfer is not observable via ERC20 balances.
-        if (token == JBConstants.NATIVE_TOKEN) return;
-
-        // Forwarding terminals are responsible for enforcing the final terminal-facing ERC20 receipt themselves.
-        if (isForwarding) return;
+        // Native-token final hops are not observable via ERC20 balances, and forwarding terminals enforce the final
+        // terminal-facing ERC20 receipt themselves.
+        if (skipReceiptCheck) return;
 
         // Revert when the terminal received less ERC20 than promised, which indicates a lossy token path.
         uint256 actualAmount = IERC20(token).balanceOf(address(terminal)) - receiptBaseline;
@@ -1076,14 +1070,19 @@ contract JBRouterTerminal is
     /// @param projectId The project to resolve forwarding target for.
     /// @return isForwarding A flag indicating whether receipt enforcement should be delegated to `terminal`.
     function _isForwardingTerminal(IJBTerminal terminal, uint256 projectId) internal view returns (bool isForwarding) {
+        // Treat terminals that do not implement the capability or return zero as final receivers.
+        return address(_forwardingTargetOf({terminal: terminal, projectId: projectId})) != address(0);
+    }
+
+    /// @notice The terminal a forwarding terminal routes a project's calls onward to.
+    /// @param terminal The terminal to probe.
+    /// @param projectId The project to resolve the forwarding target for.
+    /// @return target The forwarding target, or address(0) if `terminal` does not expose one.
+    function _forwardingTargetOf(IJBTerminal terminal, uint256 projectId) internal view returns (IJBTerminal target) {
         // Probe via staticcall so non-forwarding terminals degrade cleanly.
         (bool success, bytes memory data) =
             address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-
-        // Treat terminals that do not implement the capability or return zero as final receivers.
-        if (!success || data.length < 32) return false;
-
-        return address(abi.decode(data, (IJBTerminal))) != address(0);
+        if (success && data.length >= 32) target = abi.decode(data, (IJBTerminal));
     }
 
     /// @notice Return a project's primary terminal only if the router can safely forward into it.
@@ -1111,9 +1110,7 @@ contract JBRouterTerminal is
         }
 
         // Check if the terminal is a forwarding layer that routes back into this router.
-        (bool ok, bytes memory data) =
-            address(terminal).staticcall(abi.encodeCall(IJBForwardingTerminal.terminalOf, (projectId)));
-        if (ok && data.length >= 32 && address(abi.decode(data, (IJBTerminal))) == address(this)) {
+        if (address(_forwardingTargetOf({terminal: terminal, projectId: projectId})) == address(this)) {
             return IJBTerminal(address(0));
         }
     }
@@ -1294,6 +1291,30 @@ contract JBRouterTerminal is
                 metadata: hopMetadata
             });
 
+            // A buyback sale stops at its price limit and returns the unsold source tokens. The terminal burned
+            // `cashOutCount` before the hook ran, so the source balance is `sourceBalanceBefore - cashOutCount +
+            // unsold`; baselining on this hop's source balance never sweeps pre-existing balances.
+            uint256 sourceResidue =
+                _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+            if (sourceResidue != 0) {
+                // Reclaim the unsold tokens directly so the route delivers them instead of handing them back. The
+                // buyback hook's `cashOut` directive `(0, true)` skips the pool: selling them again would stop at a
+                // lower limit and return most of them a second time. The terminal minimum of 1 refuses a reclaim that
+                // pays nothing, and a reclaim that fails for any reason leaves the residue to be refunded below.
+                try cashOutTerminal.cashOutTokensOf({
+                    holder: address(this),
+                    projectId: sourceProjectId,
+                    cashOutCount: sourceResidue,
+                    tokenToReclaim: tokenToReclaim,
+                    minTokensReclaimed: 1,
+                    beneficiary: payable(address(this)),
+                    metadata: abi.encode(bytes32(0), _HOOK_CASH_OUT_TABLE, uint256(0), true)
+                }) {
+                    sourceResidue =
+                        _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+                } catch {}
+            }
+
             // Measure the reclaimed-token balance delta so fee-on-transfer behavior cannot fake delivery.
             amount = _balanceOf({token: tokenToReclaim, account: address(this)}) - balanceBefore;
 
@@ -1305,16 +1326,10 @@ contract JBRouterTerminal is
             }
 
             // Enforce the caller's first-hop reclaim floor against the actual balance delta received.
-            if (amount < minTokensReclaimed) {
-                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
-            }
+            _requireMinimum({amountOut: amount, minAmountOut: minTokensReclaimed});
 
-            // Refund any unsold source project tokens the buyback hook returned on a partial fill. The terminal burned
-            // `cashOutCount` source tokens before the hook ran, so the post-cash-out source balance is
-            // `sourceBalanceBefore - cashOutCount + unsold`; recovering `unsold` refunds exactly this hop's residue to
-            // the route's refund recipient instead of stranding it, without sweeping any pre-existing balance.
-            uint256 sourceResidue =
-                _balanceOf({token: token, account: address(this)}) + cashOutCount - sourceBalanceBefore;
+            // Refund any source tokens still unsold after the second pass to the route's refund recipient instead of
+            // stranding them.
             if (sourceResidue != 0) {
                 _transferFrom({from: address(this), to: refundTo, token: token, amount: sourceResidue});
             }
@@ -1488,9 +1503,7 @@ contract JBRouterTerminal is
 
         // Enforce slippage protection via realized output vs minimum acceptable output.
         // This is strictly more correct than sqrtPriceLimitX96 (which conflates marginal and average price).
-        if (amountOut < minAmountOut) {
-            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
-        }
+        _requireMinimum({amountOut: amountOut, minAmountOut: minAmountOut});
     }
 
     /// @notice Execute a swap through a V4 pool via PoolManager.unlock().
@@ -1511,7 +1524,7 @@ contract JBRouterTerminal is
         returns (uint256 amountOut)
     {
         // Convert wrapped-native-token addresses to V4's native representation (address(0)) for currency comparison.
-        address v4In = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
+        address v4In = _v4TokenOf(normalizedTokenIn);
 
         // Determine the V4 swap direction by comparing the input token to currency0 in the pool key.
         bool zeroForOne = Currency.unwrap(key.currency0) == v4In;
@@ -2024,6 +2037,24 @@ contract JBRouterTerminal is
         });
     }
 
+    /// @notice Search Uniswap V3 and V4 for the best pool between two tokens, reverting when none exists.
+    /// @param normalizedTokenIn The input token (wrapped if native).
+    /// @param normalizedTokenOut The output token (wrapped if native).
+    /// @return pool The pool with the highest liquidity.
+    function _discoverExistingPool(
+        address normalizedTokenIn,
+        address normalizedTokenOut
+    )
+        internal
+        view
+        returns (PoolInfo memory pool)
+    {
+        pool = _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
+        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
+            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
+        }
+    }
+
     /// @notice Find the highest-liquidity Uniswap V3 pool for a token pair across the common fee tiers.
     /// @param normalizedTokenIn The input token (wrapped if native).
     /// @param normalizedTokenOut The output token (wrapped if native).
@@ -2056,18 +2087,13 @@ contract JBRouterTerminal is
         for (uint256 i; i < 4;) {
             address poolAddr = _getPool({tokenA: normalizedTokenIn, tokenB: normalizedTokenOut, fee: _feeTier(i)});
 
-            if (poolAddr == address(0)) {
-                unchecked {
-                    ++i;
+            if (poolAddr != address(0)) {
+                uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
+
+                if (poolLiquidity > liquidity) {
+                    liquidity = poolLiquidity;
+                    pool = IUniswapV3Pool(poolAddr);
                 }
-                continue;
-            }
-
-            uint128 poolLiquidity = IUniswapV3Pool(poolAddr).liquidity();
-
-            if (poolLiquidity > liquidity) {
-                liquidity = poolLiquidity;
-                pool = IUniswapV3Pool(poolAddr);
             }
 
             unchecked {
@@ -2100,8 +2126,8 @@ contract JBRouterTerminal is
         if (address(poolManager) == address(0)) return updatedBestPool;
 
         // Convert wrapped native token -> address(0) for V4 native representation.
-        address v4In = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
-        address v4Out = normalizedTokenOut == address(wrappedNativeToken) ? address(0) : normalizedTokenOut;
+        address v4In = _v4TokenOf(normalizedTokenIn);
+        address v4Out = _v4TokenOf(normalizedTokenOut);
 
         // Sort currencies (currency0 < currency1).
         (address sorted0, address sorted1) = v4In < v4Out ? (v4In, v4Out) : (v4Out, v4In);
@@ -2286,10 +2312,7 @@ contract JBRouterTerminal is
     {
         // Treat native ETH as a non-recursive base asset. For ERC-20s, detect whether the token is itself a JB
         // project token so recursive and base fallbacks stay disjoint.
-        bool isJbProjectToken;
-        if (contextToken != JBConstants.NATIVE_TOKEN) {
-            isJbProjectToken = _projectIdOf(contextToken) != 0;
-        }
+        bool isJbProjectToken = _sourceProjectIdOf(contextToken) != 0;
 
         // Record the first directly accepted token only when its destination terminal is actually usable.
         if (address(destTerminal) != address(0) && address(candidates.directFallbackTerminal) == address(0)) {
@@ -2534,8 +2557,8 @@ contract JBRouterTerminal is
 
         // V4 uses address(0) for native tokens; map the wrapped native token so OracleLibrary token sorting matches the
         // pool.
-        normalizedTokenIn = normalizedTokenIn == address(wrappedNativeToken) ? address(0) : normalizedTokenIn;
-        normalizedTokenOut = normalizedTokenOut == address(wrappedNativeToken) ? address(0) : normalizedTokenOut;
+        normalizedTokenIn = _v4TokenOf(normalizedTokenIn);
+        normalizedTokenOut = _v4TokenOf(normalizedTokenOut);
 
         if (!usedTwap) {
             // Without TWAP, instantaneous liquidity and spot price are both JIT-manipulable.
@@ -2605,6 +2628,22 @@ contract JBRouterTerminal is
         return token == JBConstants.NATIVE_TOKEN ? address(wrappedNativeToken) : token;
     }
 
+    /// @notice Revert when an output falls below the caller's minimum acceptable amount.
+    /// @param amountOut The realized or previewed output.
+    /// @param minAmountOut The minimum acceptable output.
+    function _requireMinimum(uint256 amountOut, uint256 minAmountOut) internal pure {
+        if (amountOut < minAmountOut) {
+            revert JBRouterTerminal_SlippageExceeded({amountOut: amountOut, minAmountOut: minAmountOut});
+        }
+    }
+
+    /// @notice Map the wrapped native token to V4's native representation (address(0)).
+    /// @param normalizedToken The normalized token to map.
+    /// @return v4Token The token as a V4 currency address.
+    function _v4TokenOf(address normalizedToken) internal view returns (address) {
+        return normalizedToken == address(wrappedNativeToken) ? address(0) : normalizedToken;
+    }
+
     /// @notice Discover a pool and compute the minimum acceptable output for a swap. Uses a user-provided quote if
     /// available, otherwise falls back to TWAP (V3) or automatic V4 quoting with dynamic slippage.
     /// @dev For V4 pools without TWAP-capable hooks, `minAmountOut` is derived from the same-block spot tick, which is
@@ -2639,10 +2678,7 @@ contract JBRouterTerminal is
         returns (uint256 minAmountOut, PoolInfo memory pool)
     {
         // Discover the best pool across V3 and V4 fee tiers.
-        pool = _discoverPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
-        if (!pool.isV4 && address(pool.v3Pool) == address(0)) {
-            revert JBRouterTerminal_NoPoolFound({tokenIn: normalizedTokenIn, tokenOut: normalizedTokenOut});
-        }
+        pool = _discoverExistingPool({normalizedTokenIn: normalizedTokenIn, normalizedTokenOut: normalizedTokenOut});
 
         // `pay` is encoded as `(tokenOut, minAmountOut)`. Binding the quote to its output token prevents
         // metadata quoted for one route from being replayed against another route with a weaker floor.
@@ -2729,9 +2765,7 @@ contract JBRouterTerminal is
             });
 
             // Enforce the caller's minimum reclaim amount only on the first hop.
-            if (amount < minTokensReclaimed) {
-                revert JBRouterTerminal_SlippageExceeded({amountOut: amount, minAmountOut: minTokensReclaimed});
-            }
+            _requireMinimum({amountOut: amount, minAmountOut: minTokensReclaimed});
 
             // Clear the reclaim minimum after the first hop because later hops may operate in different token units.
             minTokensReclaimed = 0;

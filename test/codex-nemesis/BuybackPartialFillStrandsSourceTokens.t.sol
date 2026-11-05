@@ -13,6 +13,7 @@ import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashO
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -29,6 +30,23 @@ contract PartialFillLikeCashOutTerminal {
     MockERC20 public immutable RECLAIM_TOKEN;
     uint256 public immutable UNSOLD_SOURCE_TOKEN_COUNT;
     uint256 public immutable RECLAIMED_TOKEN_COUNT;
+
+    /// @notice What a later cash-out of the returned tokens reclaims, per token, in 1e18 units.
+    uint256 public retryReclaimRate;
+
+    /// @notice Whether a later cash-out returns every token again, as a sale that cannot start does.
+    bool public retryReturnsAll;
+
+    /// @notice Whether a later cash-out reverts, as a reclaim the terminal cannot settle locally does.
+    bool public retryReverts;
+
+    /// @notice The terminal minimum the last cash-out carried.
+    uint256 public lastMinTokensReclaimed;
+
+    uint256 public calls;
+
+    /// @notice The metadata the last cash-out carried.
+    bytes public lastMetadata;
 
     constructor(
         MockERC20 sourceToken_,
@@ -47,20 +65,39 @@ contract PartialFillLikeCashOutTerminal {
         uint256,
         uint256 cashOutCount,
         address tokenToReclaim,
-        uint256,
+        uint256 minTokensReclaimed,
         address payable beneficiary,
-        bytes calldata
+        bytes calldata metadata
     )
         external
         returns (uint256)
     {
+        lastMetadata = metadata;
+        lastMinTokensReclaimed = minTokensReclaimed;
         require(tokenToReclaim == address(RECLAIM_TOKEN), "PartialFillLikeCashOutTerminal: wrong reclaim token");
 
         SOURCE_TOKEN.burn(holder, cashOutCount);
-        SOURCE_TOKEN.mint(holder, UNSOLD_SOURCE_TOKEN_COUNT);
-        RECLAIM_TOKEN.mint(beneficiary, RECLAIMED_TOKEN_COUNT);
+        if (calls++ == 0) {
+            SOURCE_TOKEN.mint(holder, UNSOLD_SOURCE_TOKEN_COUNT);
+            RECLAIM_TOKEN.mint(beneficiary, RECLAIMED_TOKEN_COUNT);
+        } else if (retryReverts) {
+            revert("PartialFillLikeCashOutTerminal: cannot settle");
+        } else if (retryReturnsAll) {
+            SOURCE_TOKEN.mint(holder, cashOutCount);
+        } else {
+            // A direct reclaim: the terminal enforces its own minimum, as JBMultiTerminal does.
+            uint256 reclaimed = cashOutCount * retryReclaimRate / 1e18;
+            require(reclaimed >= minTokensReclaimed, "PartialFillLikeCashOutTerminal: under minimum");
+            RECLAIM_TOKEN.mint(beneficiary, reclaimed);
+        }
 
         return 0;
+    }
+
+    function setRetry(uint256 reclaimRate, bool returnsAll, bool reverts) external {
+        retryReclaimRate = reclaimRate;
+        retryReturnsAll = returnsAll;
+        retryReverts = reverts;
     }
 
     function previewCashOutFrom(
@@ -184,6 +221,8 @@ contract BuybackPartialFillStrandsSourceTokensTest is Test {
     PartialFillLikeCashOutTerminal internal sourceTerminal;
     PullingDestinationTerminal internal destTerminal;
 
+    address internal constant BUYBACK_HOOK = address(0xB0B);
+
     address internal payer = makeAddr("payer");
     address internal beneficiary = makeAddr("beneficiary");
 
@@ -202,7 +241,7 @@ contract BuybackPartialFillStrandsSourceTokensTest is Test {
             directory: directory,
             tokens: tokens,
             permit2: IPermit2(makeAddr("permit2")),
-            buybackHook: address(0),
+            buybackHook: BUYBACK_HOOK,
             trustedForwarder: address(0),
             deployer: address(this)
         });
@@ -261,20 +300,76 @@ contract BuybackPartialFillStrandsSourceTokensTest is Test {
         );
     }
 
-    // Regression for the partial-buyback-fill residue fix: the source cash-out hop now refunds the unsold source
-    // project tokens to the original payer (the route's refund recipient) instead of stranding them on the router.
-    function test_partialFillDuringSourceCashOutRefundsUnsoldProjectTokensToPayer() public {
+    // A partial buyback fill returns unsold source tokens. The router cashes them out once more in the same hop, so
+    // the route delivers them instead of handing project tokens back to the payer.
+    function test_partialFillResidueIsCashedOutInTheSameHop() public {
+        sourceTerminal.setRetry({reclaimRate: 0.75e18, returnsAll: false, reverts: false});
+
         vm.prank(payer);
         router.pay(DEST_PROJECT_ID, address(sourceToken), CASH_OUT_COUNT, beneficiary, 0, "", "");
 
-        assertEq(destTerminal.totalReceived(), RECLAIMED_TOKEN_COUNT, "partial proceeds are forwarded downstream");
+        assertEq(sourceTerminal.calls(), 2, "the returned tokens are cashed out once more");
+        assertEq(
+            sourceTerminal.lastMetadata(),
+            JBMetadataResolver.addToMetadata({
+                originalMetadata: "",
+                idToAdd: JBMetadataResolver.getId({purpose: "cashOut", target: BUYBACK_HOOK}),
+                dataToAdd: abi.encode(uint256(0), true)
+            }),
+            "the second pass asks the buyback hook for a direct reclaim"
+        );
+        assertEq(sourceTerminal.lastMinTokensReclaimed(), 1, "the second pass refuses a reclaim that pays nothing");
+        assertEq(
+            destTerminal.totalReceived(), RECLAIMED_TOKEN_COUNT + 30e18, "sale proceeds plus the residue's reclaim"
+        );
         assertEq(reclaimToken.balanceOf(address(router)), 0, "router does not retain the reclaimed route token");
-        // The fix: the router no longer strands the unsold source project tokens.
+        assertEq(sourceToken.balanceOf(address(router)), 0, "router does not strand source project tokens");
+        assertEq(sourceToken.balanceOf(payer), 0, "nothing is handed back to the payer");
+    }
+
+    // A residue the second cash-out also returns (a sale that cannot start) is refunded to the payer, as before.
+    function test_residueThatCannotSellAgainIsRefunded() public {
+        sourceTerminal.setRetry({reclaimRate: 0, returnsAll: true, reverts: false});
+
+        vm.prank(payer);
+        router.pay(DEST_PROJECT_ID, address(sourceToken), CASH_OUT_COUNT, beneficiary, 0, "", "");
+
+        assertEq(sourceTerminal.calls(), 2, "one retry, no more");
+        assertEq(destTerminal.totalReceived(), RECLAIMED_TOKEN_COUNT, "only the first sale's proceeds are forwarded");
+        assertEq(reclaimToken.balanceOf(address(router)), 0, "router does not retain the reclaimed route token");
         assertEq(sourceToken.balanceOf(address(router)), 0, "router does not strand the unsold source project tokens");
-        // They are refunded to the original payer (refundTo resolves to the EOA payer here).
         assertEq(
             sourceToken.balanceOf(payer), UNSOLD_SOURCE_TOKEN_COUNT, "payer receives the unsold project tokens back"
         );
         assertEq(sourceToken.balanceOf(beneficiary), 0, "beneficiary does not receive the unsold project tokens");
+    }
+
+    // A residue whose direct reclaim pays nothing (no surplus or a 100% tax) is refunded instead of burned for zero.
+    function test_residueThatReclaimsNothingIsRefunded() public {
+        sourceTerminal.setRetry({reclaimRate: 0, returnsAll: false, reverts: false});
+
+        vm.prank(payer);
+        router.pay(DEST_PROJECT_ID, address(sourceToken), CASH_OUT_COUNT, beneficiary, 0, "", "");
+
+        _assertRefunded();
+    }
+
+    // A residue whose direct reclaim reverts (a terminal that cannot settle it locally) is refunded, and the route
+    // still delivers the first sale's proceeds.
+    function test_residueWhoseReclaimRevertsIsRefunded() public {
+        sourceTerminal.setRetry({reclaimRate: 0.75e18, returnsAll: false, reverts: true});
+
+        vm.prank(payer);
+        router.pay(DEST_PROJECT_ID, address(sourceToken), CASH_OUT_COUNT, beneficiary, 0, "", "");
+
+        _assertRefunded();
+    }
+
+    function _assertRefunded() internal view {
+        assertEq(destTerminal.totalReceived(), RECLAIMED_TOKEN_COUNT, "only the first sale's proceeds are forwarded");
+        assertEq(sourceToken.balanceOf(address(router)), 0, "router does not strand the unsold source project tokens");
+        assertEq(
+            sourceToken.balanceOf(payer), UNSOLD_SOURCE_TOKEN_COUNT, "payer receives the unsold project tokens back"
+        );
     }
 }
