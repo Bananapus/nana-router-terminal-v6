@@ -56,9 +56,9 @@ contract RouterTerminalDeploymentLibTest is Test {
             RouterTerminalDeployment memory deployment =
                 harness.getDeployment({path: "deployments/", networkName: harness.networkNameOf(chainIds[i])});
 
-            assertEq(address(deployment.gateway), 0x4a56AEf5b6A5b9742AbB02cA67C5a85ba183D901);
+            assertEq(address(deployment.gateway), 0xe2c259b2fCfd2d57ebcda9B3d2D10BdB1b2cD977);
             assertEq(address(deployment.registry), 0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
-            assertEq(address(deployment.terminal), 0x62e2fe718Ca3008a6a322DEEc9903286463F1AdD);
+            assertEq(address(deployment.terminal), 0xa0B7B55E87c781f47bdA8d40F8381CB746Eb0e37);
         }
     }
 
