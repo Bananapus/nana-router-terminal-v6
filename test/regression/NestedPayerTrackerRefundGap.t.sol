@@ -211,70 +211,66 @@ contract NestedForwarder is IJBPayerTracker {
     }
 }
 
-    contract NestedPayerTrackerRefundGapTest is Test {
-        uint256 internal constant PROJECT_ID = 1;
+contract NestedPayerTrackerRefundGapTest is Test {
+    uint256 internal constant PROJECT_ID = 1;
 
-        address internal owner = makeAddr("owner");
-        address internal user = makeAddr("user");
+    address internal owner = makeAddr("owner");
+    address internal user = makeAddr("user");
 
-        JBRouterTerminalRegistry internal registry;
-        NestedRefundingTerminal internal terminal;
-        NestedForwarder internal forwarder;
-        NestedRefundToken internal token;
+    JBRouterTerminalRegistry internal registry;
+    NestedRefundingTerminal internal terminal;
+    NestedForwarder internal forwarder;
+    NestedRefundToken internal token;
 
-        function setUp() public {
-            IJBPermissions permissions = IJBPermissions(makeAddr("permissions"));
-            IJBProjects projects = IJBProjects(makeAddr("projects"));
-            IPermit2 permit2 = IPermit2(makeAddr("permit2"));
+    function setUp() public {
+        IJBPermissions permissions = IJBPermissions(makeAddr("permissions"));
+        IJBProjects projects = IJBProjects(makeAddr("projects"));
+        IPermit2 permit2 = IPermit2(makeAddr("permit2"));
 
-            vm.etch(address(permissions), hex"00");
-            vm.etch(address(projects), hex"00");
-            vm.etch(address(permit2), hex"00");
-            vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
+        vm.etch(address(permissions), hex"00");
+        vm.etch(address(projects), hex"00");
+        vm.etch(address(permit2), hex"00");
+        vm.mockCall(address(projects), abi.encodeCall(IJBProjects.count, ()), abi.encode(uint256(0)));
 
-            registry = new JBRouterTerminalRegistry({
-                permissions: permissions,
-                projects: projects,
-                permit2: permit2,
-                owner: owner,
-                trustedForwarder: address(0)
-            });
+        registry = new JBRouterTerminalRegistry({
+            permissions: permissions, projects: projects, permit2: permit2, owner: owner, trustedForwarder: address(0)
+        });
 
-            terminal = new NestedRefundingTerminal();
-            forwarder = new NestedForwarder();
-            token = new NestedRefundToken();
+        terminal = new NestedRefundingTerminal();
+        forwarder = new NestedForwarder();
+        token = new NestedRefundToken();
 
-            vm.prank(owner);
-            registry.setDefaultTerminal(IJBTerminal(address(terminal)));
-        }
-
-        function test_nestedForwarderRefundPropagatesToUpstreamPayer() public {
-            uint256 amount = 100 ether;
-            token.mint(user, amount);
-
-            vm.startPrank(user);
-            token.approve(address(forwarder), amount);
-            forwarder.forwardPay({
-                registry: registry, projectId: PROJECT_ID, token: token, amount: amount, beneficiary: user
-            });
-            vm.stopPrank();
-
-            // The registry reads the forwarder's IJBPayerTracker.originalPayer() and stores
-            // the upstream user, so the downstream terminal refunds the true originator.
-            assertEq(terminal.lastRefundTo(), user, "registry propagates upstream payer for refund");
-            assertEq(token.balanceOf(user), amount / 2, "true upstream payer receives leftover refund");
-            assertEq(token.balanceOf(address(forwarder)), 0, "no leftover stranded on intermediary");
-        }
-
-        function test_nestedForwarderNativeRefundPropagatesToUpstreamPayer() public {
-            uint256 amount = 1 ether;
-            vm.deal(user, amount);
-
-            vm.prank(user);
-            forwarder.forwardNativePay{value: amount}({registry: registry, projectId: PROJECT_ID, beneficiary: user});
-
-            assertEq(terminal.lastRefundTo(), user, "registry propagates upstream payer for native refund");
-            assertEq(user.balance, amount / 2, "true upstream payer receives native leftover");
-            assertEq(address(forwarder).balance, 0, "no native leftover stranded on intermediary");
-        }
+        vm.prank(owner);
+        registry.setDefaultTerminal(IJBTerminal(address(terminal)));
     }
+
+    function test_nestedForwarderRefundPropagatesToUpstreamPayer() public {
+        uint256 amount = 100 ether;
+        token.mint(user, amount);
+
+        vm.startPrank(user);
+        token.approve(address(forwarder), amount);
+        forwarder.forwardPay({
+            registry: registry, projectId: PROJECT_ID, token: token, amount: amount, beneficiary: user
+        });
+        vm.stopPrank();
+
+        // The registry reads the forwarder's IJBPayerTracker.originalPayer() and stores
+        // the upstream user, so the downstream terminal refunds the true originator.
+        assertEq(terminal.lastRefundTo(), user, "registry propagates upstream payer for refund");
+        assertEq(token.balanceOf(user), amount / 2, "true upstream payer receives leftover refund");
+        assertEq(token.balanceOf(address(forwarder)), 0, "no leftover stranded on intermediary");
+    }
+
+    function test_nestedForwarderNativeRefundPropagatesToUpstreamPayer() public {
+        uint256 amount = 1 ether;
+        vm.deal(user, amount);
+
+        vm.prank(user);
+        forwarder.forwardNativePay{value: amount}({registry: registry, projectId: PROJECT_ID, beneficiary: user});
+
+        assertEq(terminal.lastRefundTo(), user, "registry propagates upstream payer for native refund");
+        assertEq(user.balance, amount / 2, "true upstream payer receives native leftover");
+        assertEq(address(forwarder).balance, 0, "no native leftover stranded on intermediary");
+    }
+}

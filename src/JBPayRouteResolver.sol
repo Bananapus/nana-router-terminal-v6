@@ -14,7 +14,6 @@ import {mulDiv} from "@prb/math/src/Common.sol";
 import {JBForwardingCheck} from "./libraries/JBForwardingCheck.sol";
 import {IJBPayRoutePreviewer} from "./interfaces/IJBPayRoutePreviewer.sol";
 import {IJBPayRouteResolver} from "./interfaces/IJBPayRouteResolver.sol";
-import {IWETH9} from "./interfaces/IWETH9.sol";
 
 /// @notice Evaluates every token a destination project accepts and returns the route that yields the most project
 /// tokens for the beneficiary, deployed as a helper to keep `JBRouterTerminal` within runtime size limits.
