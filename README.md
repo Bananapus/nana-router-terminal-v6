@@ -17,7 +17,7 @@
 
 ## Overview
 
-The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. On chains and projects migrated to the gateway, the payment path is `JBRouterTerminalRegistry -> JBRouterTerminalGateway -> JBRouterTerminal -> destination terminal`. The gateway can retain an eligible failed route's original input token without modifying the registry.
+The router terminal is a convenience and integration surface, not the source of truth for project accounting. Its job is to get value into the correct downstream terminal. The payment path is `JBRouterTerminalRegistry -> JBRouterTerminal -> destination terminal`. A failed route reverts to the caller; protocol callers that must not revert (fees, splits) hold the failed payment on their own side and retry it, so no custody layer sits in between.
 
 It can route through:
 
@@ -37,7 +37,6 @@ This repo is best understood as an execution router attached to Juicebox, not as
 | Contract | Role |
 | --- | --- |
 | `JBRouterTerminal` | Main routing terminal that accepts many token types and forwards value to the destination terminal. |
-| `JBRouterTerminalGateway` | Fail-closed registry target that atomically calls the router, retains source-project-opted failed calls, and manages autonomous retry or refund. |
 | `JBRouterTerminalRegistry` | Registry and proxy surface that lets a project choose and optionally lock its preferred router terminal. |
 | `JBPayRouteResolver` | Helper that evaluates pay-route candidates and selects the strongest route preview the router can resolve. |
 
@@ -53,18 +52,16 @@ The router answers those questions, then hands off to the canonical terminal. It
 
 The shortest useful reading order is:
 
-1. `JBRouterTerminalGateway`
-2. `JBRouterTerminal`
-3. `JBRouterTerminalRegistry`
-4. the downstream terminal selected through `JBDirectory`
+1. `JBRouterTerminal`
+2. `JBRouterTerminalRegistry`
+3. the downstream terminal selected through `JBDirectory`
 
 ## Read these files first
 
-1. `src/JBRouterTerminalGateway.sol`
-2. `src/JBRouterTerminal.sol`
-3. `src/JBRouterTerminalRegistry.sol`
-4. `src/libraries/JBSwapLib.sol`
-5. the downstream terminal implementation in `nana-core-v6`
+1. `src/JBRouterTerminal.sol`
+2. `src/JBRouterTerminalRegistry.sol`
+3. `src/libraries/JBSwapLib.sol`
+4. the downstream terminal implementation in `nana-core-v6`
 
 ## Integration traps
 

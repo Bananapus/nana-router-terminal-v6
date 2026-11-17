@@ -19,7 +19,6 @@ import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
 import {JBRouterTerminal} from "../src/JBRouterTerminal.sol";
-import {JBRouterTerminalGateway} from "../src/JBRouterTerminalGateway.sol";
 import {JBRouterTerminalRegistry} from "../src/JBRouterTerminalRegistry.sol";
 import {IWETH9} from "../src/interfaces/IWETH9.sol";
 import {RouterTerminalMigrationLib} from "./helpers/RouterTerminalMigrationLib.sol";
@@ -32,9 +31,6 @@ contract DeployScript is Script, Sphinx {
 
     /// @notice The CREATE2 salt used for the router terminal deployment.
     bytes32 constant ROUTER_TERMINAL = "JBRouterTerminalV6";
-
-    /// @notice The CREATE2 salt used for the router-terminal gateway deployment.
-    bytes32 constant ROUTER_TERMINAL_GATEWAY = "JBRouterTerminalGatewayV6";
 
     /// @notice The CREATE2 salt used for the router-terminal registry deployment.
     bytes32 constant ROUTER_TERMINAL_REGISTRY = "JBRouterTerminalRegistryV6";
@@ -52,7 +48,7 @@ contract DeployScript is Script, Sphinx {
     /// @notice The Uniswap V3 factory address for the active deployment network.
     address factory;
 
-    /// @notice Existing project IDs which must resolve through the gateway after deployment.
+    /// @notice Existing project IDs which must resolve through the router after deployment.
     uint256[] migrationProjectIds;
 
     /// @notice The Permit2 singleton address for the active deployment network.
@@ -212,15 +208,9 @@ contract DeployScript is Script, Sphinx {
             newUniv4Hook: address(univ4Router.hook)
         });
 
-        // Deploy the fail-closed gateway which atomically calls the router while retaining original input tokens after
-        // failed fee and protocol-payer routes.
-        JBRouterTerminalGateway gateway = new JBRouterTerminalGateway{salt: ROUTER_TERMINAL_GATEWAY}({
-            directory: core.directory, permit2: IPermit2(permit2), router: terminal, trustedForwarder: trustedForwarder
-        });
-
-        // Point the registry at the gateway. Existing registries use the same operation when selecting this
-        // implementation; no registry bytecode or storage-layout change is required.
-        registry.setDefaultTerminal(gateway);
+        // Point the registry at the router. A failed route reverts to the caller: every protocol caller holds its own
+        // failed payment next to the recipient it owes, so no custody layer sits in between.
+        registry.setDefaultTerminal(terminal);
 
         // Explicitly move configured existing cohorts because changing the default applies only to future projects.
         uint256[] memory projectIds = migrationProjectIds;
@@ -230,15 +220,15 @@ contract DeployScript is Script, Sphinx {
         }
         RouterTerminalMigrationLib.migrateProjects({
             registry: registry,
-            terminal: IJBTerminal(address(gateway)),
+            terminal: IJBTerminal(address(terminal)),
             projectCount: core.projects.count(),
             projectIds: projectIds
         });
 
-        // Abort unless the fee project actually moved, so a successful deployment cannot leave fee forgiveness live.
+        // Abort unless the fee project actually moved.
         RouterTerminalMigrationLib.requireMigratedProject({
             registry: registry,
-            terminal: IJBTerminal(address(gateway)),
+            terminal: IJBTerminal(address(terminal)),
             projectId: JBConstants.FEE_BENEFICIARY_PROJECT_ID
         });
     }
