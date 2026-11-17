@@ -5,14 +5,11 @@ import {stdJson} from "forge-std/Script.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 import {IJBRouterTerminal} from "../../src/interfaces/IJBRouterTerminal.sol";
-import {IJBRouterTerminalGateway} from "../../src/interfaces/IJBRouterTerminalGateway.sol";
 import {IJBRouterTerminalRegistry} from "../../src/interfaces/IJBRouterTerminalRegistry.sol";
 
-/// @custom:member gateway The fail-closed router gateway selected by the registry.
 /// @custom:member registry The deployed router-terminal registry for the selected network.
-/// @custom:member terminal The deployed route-executing terminal wrapped by `gateway`.
+/// @custom:member terminal The deployed route-executing terminal the registry forwards to.
 struct RouterTerminalDeployment {
-    IJBRouterTerminalGateway gateway;
     IJBRouterTerminalRegistry registry;
     IJBRouterTerminal terminal;
 }
@@ -43,16 +40,6 @@ library RouterTerminalDeploymentLib {
         view
         returns (RouterTerminalDeployment memory deployment)
     {
-        // Read the router gateway address from its Sphinx deployment artifact.
-        deployment.gateway = IJBRouterTerminalGateway(
-            _getDeploymentAddressOrZero({
-                path: path,
-                projectName: "nana-router-terminal-v6",
-                networkName: networkName,
-                contractName: "JBRouterTerminalGateway"
-            })
-        );
-
         // Read the registry address from its Sphinx deployment artifact.
         deployment.registry = IJBRouterTerminalRegistry(
             _getDeploymentAddress({
@@ -101,37 +88,6 @@ library RouterTerminalDeploymentLib {
         vm.readFile(deploymentPath);
 
         // Decode and return the deployed contract address from the Sphinx artifact payload.
-        deploymentAddress = stdJson.readAddress({json: deploymentJson, key: ".address"});
-    }
-
-    /// @notice Get a deployment address, returning zero when the artifact does not exist.
-    /// @param path The path to the deployment file.
-    /// @param projectName The Sphinx project name containing the deployment artifact.
-    /// @param networkName The Sphinx network name containing the deployment artifact.
-    /// @param contractName The name of the contract to get the address of.
-    /// @return deploymentAddress The deployed contract address, or zero when no artifact exists.
-    function _getDeploymentAddressOrZero(
-        string memory path,
-        string memory projectName,
-        string memory networkName,
-        string memory contractName
-    )
-        internal
-        view
-        returns (address deploymentAddress)
-    {
-        string memory deploymentPath = _resolveDeploymentPath({
-            path: path, projectName: projectName, networkName: networkName, contractName: contractName
-        });
-
-        // An absent optional artifact means the contract has not been deployed for this network.
-        // forge-lint: disable-next-line(unsafe-cheatcode)
-        if (!vm.exists(deploymentPath)) return address(0);
-
-        // Read and decode the artifact only after establishing that it exists.
-        string memory deploymentJson =
-        // forge-lint: disable-next-line(unsafe-cheatcode)
-        vm.readFile(deploymentPath);
         deploymentAddress = stdJson.readAddress({json: deploymentJson, key: ".address"});
     }
 
